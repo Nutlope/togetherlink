@@ -98,10 +98,17 @@ Together models, both suppressed by the emitted config:
   The config sets a `whitelist` (added in opencode
   [PR #3416][oc-3416]) restricting the Together provider to **only** the
   current flagships togetherlink ships.
-- **OpenCode Zen** — the auto-loaded `opencode/*` gateway provider (a curated
-  paid model list). The config sets `disabled_providers: ["opencode"]` to hide
-  it (the provider id is `opencode`, not `zen` — see opencode
-  [issue #6979][oc-6979]).
+- **Other providers** (Anthropic, OpenAI, Gemini, Bedrock, Zen) — the config sets
+  `enabled_providers: ["togetherai"]` so OpenCode ignores every other provider
+  entirely, and `disabled_providers: ["opencode"]` to additionally block the Zen
+  gateway (provider id `opencode`, not `zen` — see opencode
+  [issue #6979][oc-6979]). `disabled_providers` takes priority over
+  `enabled_providers`.
+
+> Note: the built-in **"Connect provider"** option (`ctrl+a` in the picker) has
+> no config field to hide it, so it stays visible. But with only `togetherai`
+> enabled there's nothing else active to connect to — connecting another
+> provider would also be a no-op against this config's intent.
 
 So `/models` shows only the 6 curated flagships. Each model's display name
 carries a short tip (since OpenCode model entries have no separate description

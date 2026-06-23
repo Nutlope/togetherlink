@@ -20,8 +20,17 @@ type OpencodeConfig = {
    * namespace, not `zen/*`, per opencode issue #6979). togetherlink routes
    * everything to Together, so Zen's auto-loaded models are pure clutter in
    * the picker; this keeps /models to only the Together flagships we curate.
+   * (disabled_providers takes priority over enabled_providers, per the docs.)
    */
   disabled_providers?: string[];
+  /**
+   * The ONLY providers OpenCode loads; every other provider (Anthropic, OpenAI,
+   * Gemini, Bedrock, Zen…) is ignored entirely. This is the strongest lockdown:
+   * it can't hide the built-in "Connect provider" (ctrl+a) picker button — there
+   * is no config field for that — but it means only `togetherai` is active, so
+   * /models stays to our curated set and there's nothing else to switch to.
+   */
+  enabled_providers?: string[];
 };
 
 type OpencodeProviderConfig = {
@@ -95,10 +104,13 @@ export function buildOpencodeConfigJson({
     // text-only primary can still describe pasted images. To add more
     // sub-agents later, add entries under `agent`.
     model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
-    // Disable OpenCode's auto-loaded Zen gateway (provider id "opencode", the
-    // `opencode/*` namespace) so /models shows only our curated Together
-    // flagships — not Zen's tested-model list. opencode issue #6979 confirms
-    // the id is "opencode", not "zen".
+    // Only load our Together provider; ignore every other provider (Anthropic,
+    // OpenAI, Gemini, Bedrock, Zen…) so /models stays to the curated set.
+    enabled_providers: [OPENCODE_PROVIDER_ID],
+    // Belt-and-suspenders: also explicitly disable the Zen gateway (provider id
+    // "opencode", the `opencode/*` namespace) — issue #6979 confirms the id is
+    // "opencode", not "zen". disabled_providers takes priority over
+    // enabled_providers, so this stays effective even if the precedence changes.
     disabled_providers: ["opencode"],
     agent: {
       build: {
