@@ -2,14 +2,8 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
-import { CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./defaults.js";
-import { GLM_5_2 } from "@togetherlink/models";
-
-// Context window + output cap advertised to Claude Code via /v1/models
-// discovery. Sourced from the single GLM_5_2 model definition so the numbers
-// can't drift from the rest of the codebase.
-const MODEL_CONTEXT_WINDOW = GLM_5_2.limit.context;
-const MODEL_OUTPUT_LIMIT = GLM_5_2.limit.output;
+import { CLAUDE_LOCAL_PROXY_HOST, CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
+import type { ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 
@@ -82,6 +76,11 @@ type OpenAIChatResponse = {
   };
 };
 
+type ResolvedClaudeModel = {
+  alias: string;
+  definition: ModelDefinition;
+};
+
 /**
  * Together upstream error, normalized. Carries the real HTTP status and a
  * best-effort message/code pulled from Together's `error` object, plus the
@@ -129,7 +128,12 @@ type ExaSearchResponse = {
 
 export type ClaudeProxyOptions = {
   apiKey: string;
+  /** Claude-facing model alias, e.g. together-glm-5-2. */
   modelId: string;
+  /** Together API model id, e.g. zai-org/GLM-5.2. */
+  targetModelId: string;
+  modelName: string;
+  modelDefinition: ModelDefinition;
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
@@ -147,7 +151,7 @@ export async function startClaudeProxy(options: ClaudeProxyOptions): Promise<Cla
   }
   // Create a shared tracker if the caller didn't supply one, so the handle can
   // always report a session total at shutdown.
-  const costTracker = options.costTracker ?? new CostTracker();
+  const costTracker = options.costTracker ?? new CostTracker(options.modelDefinition);
   const serverOptions: ClaudeProxyOptions = { ...options, costTracker };
 
   const server = http.createServer((req, res) => {
@@ -210,25 +214,19 @@ async function handleProxyRequest(
     // reads `max_input_tokens` as the context window and `max_tokens` as the
     // output cap per model object (since Mar 2026 — there is no `context_window`
     // field). Without these, Claude Code falls back to a ~200K default and
-    // auto-compacts earlier than GLM-5.2's true 256K (262144) window, and the
+    // auto-compacts earlier than the selected model's true window, and the
     // context indicator shows the wrong "% used". Advertise the real limits so
     // compaction triggers at the right point.
-    //
-    // A single entry only: GLM-5.2 on Together reports context_length 262144 —
-    // there is no 1M tier, so we must not advertise a `[1m]` variant. Doing so
-    // would make Claude Code try to send >262K-token requests the model rejects.
     writeJson(res, 200, {
-      data: [
-        {
-          id: options.modelId,
-          type: "model",
-          object: "model",
-          display_name: "Together GLM 5.2",
-          max_input_tokens: MODEL_CONTEXT_WINDOW,
-          max_tokens: MODEL_OUTPUT_LIMIT,
-          created_at: "2026-06-16T00:00:00Z",
-        },
-      ],
+      data: CLAUDE_SUPPORTED_MODELS.map((model) => ({
+        id: model.alias,
+        type: "model",
+        object: "model",
+        display_name: `Together ${model.definition.name}`,
+        max_input_tokens: model.definition.limit.context,
+        max_tokens: model.definition.limit.output,
+        created_at: "2026-06-16T00:00:00Z",
+      })),
     });
     return;
   }
@@ -350,7 +348,7 @@ async function callTogetherChatCompletions(
 
   for (let turn = 0; turn < 5; turn += 1) {
     const payload = {
-      model: targetModel,
+      model: targetModel.definition.id,
       messages:
         turn === 0 && nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages,
       max_tokens: body.max_tokens,
@@ -381,7 +379,8 @@ async function callTogetherChatCompletions(
     const promptTokens = usage?.prompt_tokens ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
     const cachedTokens = usage?.cached_tokens ?? 0;
-    const incrementalCost = options.costTracker?.addUsage(promptTokens, cachedTokens, completionTokens) ?? 0;
+    const incrementalCost =
+      options.costTracker?.addUsage(promptTokens, cachedTokens, completionTokens, targetModel.definition) ?? 0;
     debugLog(options, "together response", {
       id: json.id,
       choices: json.choices?.length ?? 0,
@@ -449,9 +448,11 @@ async function callTogetherChatCompletions(
   };
 }
 
-function resolveTargetModel(_requestedModel: string | undefined, _options: ClaudeProxyOptions): string {
-  const targetModel = CLAUDE_DEFAULT_TOGETHER_MODEL;
-  return targetModel;
+function resolveTargetModel(requestedModel: string | undefined, options: ClaudeProxyOptions): ResolvedClaudeModel {
+  const supported = CLAUDE_SUPPORTED_MODELS.find(
+    (model) => model.alias === requestedModel || model.definition.id === requestedModel,
+  );
+  return supported ?? { alias: options.modelId, definition: options.modelDefinition };
 }
 
 /**
@@ -909,7 +910,7 @@ async function streamAnthropicFromTogether(
   }));
 
   const payload = {
-    model: targetModel,
+    model: targetModel.definition.id,
     messages,
     max_tokens: body.max_tokens,
     temperature: body.temperature,
@@ -1046,7 +1047,7 @@ async function streamAnthropicFromTogether(
 
   blockManager.close();
   if (inputTokens > 0 || outputTokens > 0) {
-    options.costTracker?.addUsage(inputTokens, cachedTokens, outputTokens);
+    options.costTracker?.addUsage(inputTokens, cachedTokens, outputTokens, targetModel.definition);
   }
   debugLog(options, "together stream done", {
     stopReason,

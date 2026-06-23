@@ -15,6 +15,8 @@ Usage:
   togetherlink configure                Detect installed tools and set your Together API key
   togetherlink claude [run] [-- ...]    Launch Claude Code through a local Together proxy (ephemeral)
   tclaude [-- ...]                      Alias for: togetherlink claude
+  togetherlink claude --main together-kimi-k2-7-code
+                                      Launch Claude Code with Kimi K2.7 Code
   togetherlink claude status            Show Claude Code local proxy defaults
   togetherlink opencode [run] [-- ...]  Launch OpenCode with Together GLM 5.2 (ephemeral)
   topencode [-- ...]                    Alias for: togetherlink opencode

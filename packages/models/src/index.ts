@@ -168,6 +168,23 @@ export const GLM_5_2_ANTHROPIC_CAPABILITIES =
   "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking";
 
 /**
+ * Kimi K2.7 Code — Moonshot's coding-focused model. Used as OpenCode's
+ * `@vision` subagent primary and as an optional Claude Code backend.
+ */
+export const KIMI_K2_7_CODE: ModelDefinition = {
+  id: "moonshotai/Kimi-K2.7-Code",
+  name: "Kimi K2.7 Code",
+  anthropicAlias: "together-kimi-k2-7-code",
+  cost: { input: 0.95, output: 4.0, cache_read: 0.19 },
+  limit: { context: 131_072, output: 32_768 },
+  attachment: true,
+  reasoning: true,
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text", "image"], output: ["text"] },
+};
+
+/**
  * Curated vision models for image description, ordered primary-first. The
  * Claude proxy iterates this list with automatic failover; OpenCode wires only
  * the primary (VISION_MODELS[0]) into its `@vision` subagent since subagents
@@ -176,18 +193,7 @@ export const GLM_5_2_ANTHROPIC_CAPABILITIES =
  * reasoning) — handled by callers, not encoded here.
  */
 export const VISION_MODELS: readonly ModelDefinition[] = [
-  {
-    id: "moonshotai/Kimi-K2.7-Code",
-    name: "Kimi K2.7 Code",
-    anthropicAlias: null,
-    cost: { input: 0.95, output: 4.0, cache_read: 0.19 },
-    limit: { context: 131_072, output: 32_768 },
-    attachment: true,
-    reasoning: true,
-    temperature: true,
-    tool_call: true,
-    modalities: { input: ["text", "image"], output: ["text"] },
-  },
+  KIMI_K2_7_CODE,
   {
     id: "Qwen/Qwen3.5-9B",
     name: "Qwen3.5 9B",

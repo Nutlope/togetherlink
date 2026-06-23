@@ -1,4 +1,9 @@
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_TOGETHER_MODEL } from "../claude/defaults.js";
+import {
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_DEFAULT_TOGETHER_MODEL,
+  CLAUDE_SUPPORTED_MODELS,
+  resolveClaudeModel,
+} from "../claude/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext } from "../harness-types.js";
 import { resolveTogetherApiKey } from "../together-core.js";
@@ -24,9 +29,10 @@ export default defineHarness({
       throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
     }
 
+    const selectedModel = resolveClaudeModel(ctx.main);
     const launchOptions = {
       apiKey,
-      modelId: ctx.main ?? CLAUDE_DEFAULT_MODEL,
+      modelId: selectedModel.alias,
       ...(ctx.passthrough ? { args: ctx.passthrough } : {}),
     };
     const result = await runClaudeTogether(launchOptions);
@@ -44,6 +50,7 @@ export default defineHarness({
         provider: "local-together-proxy",
         currentModel: CLAUDE_DEFAULT_MODEL,
         targetModel: CLAUDE_DEFAULT_TOGETHER_MODEL,
+        supportedModels: CLAUDE_SUPPORTED_MODELS.map((model) => model.alias).join(", "),
       },
     };
   },

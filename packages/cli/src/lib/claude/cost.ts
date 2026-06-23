@@ -1,21 +1,22 @@
-import { GLM_5_2, VISION_MODELS, costPerToken } from "@togetherlink/models";
+import { GLM_5_2, VISION_MODELS, costPerToken, type ModelDefinition } from "@togetherlink/models";
 
 /**
- * Proxy-side cost tracking for GLM-5.2 on Together.
+ * Proxy-side cost tracking for the selected Together model.
  *
  * Claude Code computes the `/usage` dollar figure locally from an Anthropic
- * pricing table it can't apply to a non-Anthropic model like `together-glm-5-2`,
+ * pricing table it can't apply to non-Anthropic Together models,
  * so its estimate is wrong for us. Since the proxy is the one talking to
  * Together and holds the real token counts, it tracks cost itself using the
- * official GLM-5.2 rates (sourced from @togetherlink/models, the shared
- * manifest — https://docs.together.ai/docs/glm-5.2-quickstart).
+ * selected model's rates from @togetherlink/models.
  */
 
-export const GLM_5_2_PRICING = {
-  inputPerToken: costPerToken(GLM_5_2.cost.input),
-  cachedInputPerToken: costPerToken(GLM_5_2.cost.cache_read),
-  outputPerToken: costPerToken(GLM_5_2.cost.output),
-} as const;
+function pricingFor(model: ModelDefinition): { inputPerToken: number; cachedInputPerToken: number; outputPerToken: number } {
+  return {
+    inputPerToken: costPerToken(model.cost.input),
+    cachedInputPerToken: costPerToken(model.cost.cache_read),
+    outputPerToken: costPerToken(model.cost.output),
+  };
+}
 
 // Per-token pricing for the vision models used by the image intercept, keyed by
 // the API model string. Built from the shared VISION_MODELS manifest so the
@@ -40,6 +41,7 @@ export type TokenUsage = {
 };
 
 export class CostTracker {
+  private readonly defaultMainModel: ModelDefinition;
   private promptTokens = 0;
   private cachedTokens = 0;
   private completionTokens = 0;
@@ -56,6 +58,10 @@ export class CostTracker {
   private requestStartPrompt = 0;
   private requestStartCached = 0;
   private requestStartCompletion = 0;
+
+  constructor(mainModel: ModelDefinition = GLM_5_2) {
+    this.defaultMainModel = mainModel;
+  }
 
   /**
    * Begin a new /v1/messages request. A single request can span several
@@ -75,13 +81,19 @@ export class CostTracker {
    * the shared prefix cache (Together's `cached_tokens` field) and is billed
    * at the discounted cached rate. Returns the incremental cost of this call.
    */
-  addUsage(promptTokens: number, cachedTokens: number, completionTokens: number): number {
+  addUsage(
+    promptTokens: number,
+    cachedTokens: number,
+    completionTokens: number,
+    model: ModelDefinition = this.defaultMainModel,
+  ): number {
+    const pricing = pricingFor(model);
     const cached = Math.max(0, Math.min(cachedTokens, promptTokens));
     const nonCachedInput = Math.max(0, promptTokens - cached);
     const cost =
-      nonCachedInput * GLM_5_2_PRICING.inputPerToken +
-      cached * GLM_5_2_PRICING.cachedInputPerToken +
-      completionTokens * GLM_5_2_PRICING.outputPerToken;
+      nonCachedInput * pricing.inputPerToken +
+      cached * pricing.cachedInputPerToken +
+      completionTokens * pricing.outputPerToken;
 
     this.promptTokens += promptTokens;
     this.cachedTokens += cached;
