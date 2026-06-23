@@ -391,6 +391,7 @@ async function callTogetherChatCompletions(
       max_tokens: maxTokens,
       temperature: body.temperature,
       tools,
+      tool_choice: toOpenAIToolChoice(body.tool_choice),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       chat_template_kwargs: { clear_thinking: false },
       stream: false,
@@ -755,6 +756,23 @@ function toOpenAIToolParameters(tool: AnthropicTool): unknown {
   return { type: "object", properties: {} };
 }
 
+function toOpenAIToolChoice(toolChoice: unknown): unknown {
+  if (!toolChoice || typeof toolChoice !== "object") {
+    return undefined;
+  }
+  const choice = toolChoice as { type?: unknown; name?: unknown };
+  if (choice.type === "auto") {
+    return "auto";
+  }
+  if (choice.type === "any") {
+    return "required";
+  }
+  if (choice.type === "tool" && typeof choice.name === "string" && choice.name) {
+    return { type: "function", function: { name: choice.name } };
+  }
+  return undefined;
+}
+
 function nativeServerTools(tools: AnthropicTool[] | undefined): NativeServerTool[] {
   return (tools ?? []).flatMap((tool) => {
     if (!isWebSearchTool(tool)) {
@@ -1014,6 +1032,7 @@ async function streamAnthropicFromTogether(
     max_tokens: maxTokens,
     temperature: body.temperature,
     tools,
+    tool_choice: toOpenAIToolChoice(body.tool_choice),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
     stream: true,
@@ -1759,6 +1778,9 @@ function parseJsonOrEmpty(value: string | undefined): unknown {
 }
 
 function mapStopReason(reason: string | null | undefined): string {
+  if (reason === "tool_calls") {
+    return "tool_use";
+  }
   if (reason === "length") {
     return "max_tokens";
   }
