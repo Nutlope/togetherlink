@@ -211,3 +211,33 @@ packages/cli/src/lib/claude/
 ```
 
 Keep future refactors mechanical and separate from behavior changes.
+
+## Future Additions
+
+### Custom `/togetherlink-feedback` command
+
+Why:
+
+- Claude Code's built-in `/feedback` slash command posts a transcript + bug report straight to a first-party Anthropic endpoint (`api.anthropic.com`, landing in their `claude_cli_feedback` table). It does **not** route through `ANTHROPIC_BASE_URL` / our proxy, so we cannot intercept, capture, or honor it.
+- The binary confirms this: it tags third-party providers ("3P provider") as a reason `/feedback` is unavailable, and `unavailable_reason` lists "3P provider, org policy, env var."
+- We already disable `/feedback` via `DISABLE_FEEDBACK_COMMAND=1` in `buildClaudeEnv` (`core.ts`). So users currently have no in-session feedback channel at all.
+
+Proposed:
+
+- Ship a custom slash command — e.g. `.claude/commands/togetherlink-feedback.md` (or a user-level command) — so users can type `/togetherlink-feedback <text>` inside a togetherlink session.
+- Unlike the built-in `/feedback`, a custom command is fully ours: its body is plain prompt text, so the feedback travels as a normal `/v1/messages` request through our proxy, where it IS interceptable.
+- Capture options to decide between:
+  - **Local file** (simplest): append the feedback to a `~/.togetherlink/feedback.log` the user can review/share manually. No network, no service.
+  - **Together-hosted endpoint** (later): POST to an endpoint we control. Requires a backend + auth; defer until there's a real reason.
+- Start with the local-file sink — it's the same scope as the existing `readGlobalConfig`/`writeGlobalConfig` plumbing already used for the Exa key.
+
+Design notes:
+
+- A custom command can't replace the built-in `/feedback` token — that name is owned by the binary and (now) disabled. Pick a distinct name to avoid shadowing confusion.
+- Surface the command's existence so users know where feedback goes now that `/feedback` is off: a line in the startup banner / status line (see the banner-in-alt-screen issue) is the natural place.
+- Keep it optional behind an env flag (default on), matching the pattern of the other `DISABLE_*` toggles.
+
+Open questions:
+
+- Should the feedback include the session transcript, or only the user's free-text message? The built-in one sends transcripts (privacy-sensitive); a minimal start is free-text only.
+- Do we want it grouped per-project or globally? Mirror the memory system's private-vs-team split if we ever add team scope.

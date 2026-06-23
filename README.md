@@ -105,8 +105,9 @@ Together models, both suppressed by the emitted config:
 
 So `/models` shows only the 6 curated flagships. Each model's display name
 carries a short tip (since OpenCode model entries have no separate description
-field), and the provider label is shortened to `Together` so the per-line suffix
-OpenCode appends doesn't push names past the picker's truncation width:
+field), and the provider label stays the full `Together AI`; the model names are
+kept short so the per-line provider suffix OpenCode appends doesn't push them
+past the picker's truncation width:
 
 | Model id | Vision | Use case |
 |---|---|---|

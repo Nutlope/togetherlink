@@ -64,6 +64,20 @@ export function buildClaudeEnv({
   if (env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY === undefined) {
     env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY = "1";
   }
+
+  // Disable the `/feedback` slash command. `/feedback` posts a transcript +
+  // report straight to a first-party Anthropic endpoint (api.anthropic.com,
+  // landing in their `claude_cli_feedback` table) — it does NOT route through
+  // ANTHROPIC_BASE_URL / our proxy, so we can neither capture nor honor it. The
+  // binary even tags third-party providers as a reason feedback is unavailable.
+  // Disable it so users aren't offered a feedback channel that silently reports
+  // to Anthropic instead of to togetherlink. The dedicated kill switch (not
+  // DISABLE_FEEDBACK_COMMAND's sibling DISABLE_TELEMETRY) leaves bug reports /
+  // diagnostics untouched. Default off; respect an explicit "0"/"" opt-in.
+  // See TODO.md "Custom `/togetherlink-feedback` command" for the replacement.
+  if (env.DISABLE_FEEDBACK_COMMAND === undefined) {
+    env.DISABLE_FEEDBACK_COMMAND = "1";
+  }
   return env;
 }
 
