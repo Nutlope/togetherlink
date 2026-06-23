@@ -1,0 +1,25 @@
+{
+  "name": "@togetherlink/cli",
+  "version": "0.1.0",
+  "description": "CLI for routing Claude Code, OpenCode, and Codex through Together AI",
+  "type": "module",
+  "bin": {
+    "togetherlink": "./dist/bin/togetherlink.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/bin/togetherlink.js', 0o755)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "pnpm build",
+    "test": "pnpm typecheck"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.8.2"
+  },
+  "license": "Apache-2.0"
+}
