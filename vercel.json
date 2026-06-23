@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bash scripts/build-bundle.sh",
+  "outputDirectory": "site",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/install.sh",
+      "headers": [
+        { "key": "content-type", "value": "text/x-shellscript; charset=utf-8" }
+      ]
+    },
+    {
+      "source": "/latest.json",
+      "headers": [
+        { "key": "content-type", "value": "application/json; charset=utf-8" },
+        { "key": "cache-control", "value": "public, max-age=60, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/togetherlink.js",
+      "headers": [
+        { "key": "content-type", "value": "application/javascript; charset=utf-8" },
+        { "key": "cache-control", "value": "public, max-age=60, must-revalidate" }
+      ]
+    }
+  ]
+}

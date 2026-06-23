@@ -5,18 +5,26 @@ import { isHarnessImplemented } from "../harness-registry.js";
 import { detectInstalledHarnesses } from "../detect.js";
 import { readGlobalConfig, setGlobalApiKey, resolveStoredApiKey, resolveStoredExaApiKey, setGlobalExaApiKey } from "../global-config.js";
 import { EXA_API_KEY_ENV_REF } from "../together-core.js";
+import { UPDATE_ORIGIN } from "../autoupdate.js";
+import { VERSION } from "../version.js";
 
 export function printHelp() {
-  console.log(`togetherlink — use Together AI models in Claude Code, OpenCode, and Codex
+  console.log(`togetherlink v${VERSION} — use Together AI models in OpenCode & Claude Code
 
 Usage:
   togetherlink configure                Detect installed tools and set your Together API key
   togetherlink claude [run] [-- ...]    Launch Claude Code through a local Together proxy (ephemeral)
+  tclaude [-- ...]                      Alias for: togetherlink claude
   togetherlink claude status            Show Claude Code local proxy defaults
   togetherlink opencode [run] [-- ...]  Launch OpenCode with Together GLM 5.2 (ephemeral)
+  topencode [-- ...]                    Alias for: togetherlink opencode
   togetherlink opencode status          Show OpenCode ephemeral defaults
   togetherlink codex ...                Coming soon (needs a local translation proxy)
+  togetherlink --version                Show the CLI version
   togetherlink help                     Show this message
+
+The CLI self-updates in the background from ${UPDATE_ORIGIN}. Set
+TOGETHERLINK_NO_AUTOPDATE=1 or pass --no-update to disable.
 `);
 }
 

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
+    "build:bundle": "bash scripts/build-bundle.sh",
     "dev": "pnpm -F @togetherlink/cli dev",
     "watch": "pnpm dev",
     "typecheck": "pnpm -r typecheck"
