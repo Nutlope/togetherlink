@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_LOCAL_PROXY_HOST, CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
-import type { ModelDefinition } from "@togetherlink/models";
+import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 
@@ -30,6 +30,9 @@ type AnthropicMessagesRequest = {
   messages?: AnthropicMessage[];
   tools?: AnthropicTool[];
   tool_choice?: unknown;
+  thinking?: { type?: string; budget_tokens?: number; effort?: unknown };
+  effort?: unknown;
+  reasoning_effort?: unknown;
 };
 
 type AnthropicTool = {
@@ -256,10 +259,10 @@ async function handleProxyRequest(
   // tools (web_search), stream Together's response directly to Claude Code as
   // Anthropic SSE — reasoning, text, and tool_use deltas land as they're
   // generated, so the user sees first tokens (and the live thinking trace) while
-  // GLM is still working, instead of one burst at the very end. Thinking stays
-  // ON (reasoning_effort "high"): GLM-5.2's strength on agentic/coding work comes
-  // from that reasoning — we just make it visible and streaming rather than
-  // buffered-then-flushed. When native web_search tools ARE present, a single
+  // GLM is still working, instead of one burst at the very end. For GLM-5.2,
+  // thinking stays on and Claude's requested effort is mapped to Together's
+  // supported high/max levels; for Kimi, we omit the undocumented effort
+  // parameter. When native web_search tools ARE present, a single
   // /v1/messages request can span several upstream turns (model calls web_search
   // → we run Exa → feed result back); those intermediate turns must stay buffered
   // (their output never reaches the client), so we fall back to the fully buffered
@@ -347,6 +350,7 @@ async function callTogetherChatCompletions(
   }));
 
   for (let turn = 0; turn < 5; turn += 1) {
+    const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
     const payload = {
       model: targetModel.definition.id,
       messages:
@@ -354,7 +358,7 @@ async function callTogetherChatCompletions(
       max_tokens: body.max_tokens,
       temperature: body.temperature,
       tools,
-      reasoning_effort: "high",
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       chat_template_kwargs: { clear_thinking: false },
       stream: false,
     };
@@ -363,6 +367,7 @@ async function callTogetherChatCompletions(
       messageCount: payload.messages.length,
       toolCount: payload.tools?.length ?? 0,
       maxTokens: payload.max_tokens,
+      reasoningEffort,
       nativeToolCount: nativeTools.length,
       turn,
     });
@@ -453,6 +458,46 @@ function resolveTargetModel(requestedModel: string | undefined, options: ClaudeP
     (model) => model.alias === requestedModel || model.definition.id === requestedModel,
   );
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
+}
+
+type TogetherReasoningEffort = "high" | "max";
+
+function togetherReasoningEffort(
+  body: AnthropicMessagesRequest,
+  targetModel: ModelDefinition,
+): TogetherReasoningEffort | undefined {
+  if (targetModel.id !== GLM_5_2.id) {
+    return undefined;
+  }
+
+  const explicitEffort = normalizeTogetherReasoningEffort(
+    body.reasoning_effort ?? body.effort ?? body.thinking?.effort,
+  );
+  if (explicitEffort) {
+    return explicitEffort;
+  }
+
+  const budgetTokens = body.thinking?.budget_tokens;
+  if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens)) {
+    return budgetTokens >= 32_000 ? "max" : "high";
+  }
+
+  return "high";
+}
+
+function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const effort = value.toLowerCase();
+  if (effort === "max" || effort === "xhigh") {
+    return "max";
+  }
+  if (effort === "low" || effort === "medium" || effort === "high") {
+    return "high";
+  }
+  return undefined;
 }
 
 /**
@@ -908,6 +953,7 @@ async function streamAnthropicFromTogether(
       parameters: toOpenAIToolParameters(tool),
     },
   }));
+  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
 
   const payload = {
     model: targetModel.definition.id,
@@ -915,7 +961,7 @@ async function streamAnthropicFromTogether(
     max_tokens: body.max_tokens,
     temperature: body.temperature,
     tools,
-    reasoning_effort: "high",
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
     stream: true,
     // Guarantee Together sends a usage chunk at the end so cost tracking has
@@ -928,6 +974,7 @@ async function streamAnthropicFromTogether(
     messageCount: payload.messages.length,
     toolCount: payload.tools?.length ?? 0,
     maxTokens: payload.max_tokens,
+    reasoningEffort,
   });
 
   let response: Response;
