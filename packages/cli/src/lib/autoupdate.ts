@@ -16,7 +16,7 @@ import os from "node:os";
 import { VERSION } from "./version.js";
 
 /** Single origin for the landing page, manifest, and downloadable bundle. */
-export const UPDATE_ORIGIN = "https://togetherlink.dev";
+export const UPDATE_ORIGIN = "https://togetherlink.vercel.app";
 /** Override for testing/local mirrors; normally unset. */
 function resolveManifestUrl(): string {
   return process.env.TOGETHERLINK_MANIFEST_URL ?? `${UPDATE_ORIGIN}/latest.json`;
@@ -174,12 +174,6 @@ async function downloadTo(url: string, dest: string): Promise<void> {
  * the running script is the installed bundle.
  */
 export async function maybeSelfUpdate(): Promise<void> {
-  if (process.env.TOGETHERLINK_NO_AUTOPDATE === "1") {
-    return;
-  }
-  if (process.argv.includes("--no-update")) {
-    return;
-  }
   if (!isInstalledBundle()) {
     return; // dev/source run — don't touch it
   }

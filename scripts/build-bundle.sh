@@ -6,7 +6,7 @@
 # when executed with `bun run`. The version from the root package.json is
 # baked in via --define so the binary's self-update check knows its version.
 #
-# Output: site/togetherlink.js  (served from togetherlink.dev and downloaded
+# Output: site/togetherlink.js  (served from togetherlink.vercel.app and downloaded
 # by the install script + the auto-updater).
 
 set -euo pipefail
@@ -42,7 +42,7 @@ const fs = require('node:fs');
 const version = '${VERSION}';
 const manifest = {
   version,
-  url: 'https://togetherlink.dev/togetherlink.js',
+  url: 'https://togetherlink.vercel.app/togetherlink.js',
   publishedAt: new Date().toISOString(),
 };
 fs.writeFileSync('$SITE_DIR/latest.json', JSON.stringify(manifest, null, 2) + '\n');

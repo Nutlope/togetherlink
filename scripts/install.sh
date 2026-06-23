@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # togetherlink installer.
 #
-#   curl -fsSL https://togetherlink.dev/install.sh | sh
+#   curl -fsSL https://togetherlink.vercel.app/install.sh | sh
 #
 # Installs the togetherlink CLI as a Bun-target JS bundle at
 # ~/.togetherlink/bin/togetherlink.js, with a `togetherlink` wrapper script on
@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-ORIGIN="${TOGETHERLINK_ORIGIN:-https://togetherlink.dev}"
+ORIGIN="${TOGETHERLINK_ORIGIN:-https://togetherlink.vercel.app}"
 INSTALL_DIR="${TOGETHERLINK_HOME:-$HOME/.togetherlink}"
 BIN_DIR="$INSTALL_DIR/bin"
 
