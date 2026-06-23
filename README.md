@@ -7,7 +7,7 @@ Use Together AI models from local coding-agent CLIs.
 One-liner — installs the `togetherlink`, `tclaude`, and `topencode` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
-curl -fsSL https://togetherlink.dev/install.sh | sh
+curl -fsSL https://togetherlink.vercel.app/install.sh | sh
 ```
 
 Then run your tool through Together models:
