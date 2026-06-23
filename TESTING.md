@@ -93,11 +93,48 @@ pnpm -F @togetherlink/cli exec togetherlink claude -- \
 
 Expected result:
 
-- The top-level tool debug log shows `WebSearch` with a non-empty `query`.
 - Claude Code may make an internal request with a native Anthropic `web_search_20250305` tool.
-- The internal lowercase `web_search` tool call should also have a non-empty `query`.
+- The proxy should execute the lowercase `web_search` tool internally, using Firecrawl search.
+- `TOGETHERLINK_DEBUG=1` should show `firecrawl search request` with a non-empty `query`.
 - Claude Code should not report `Did 0 searches`.
 - The JSON result has `"is_error": false`.
+
+Firecrawl is keyless-first:
+
+- Without `FIRECRAWL_API_KEY`, the proxy calls `https://api.firecrawl.dev/v2/search` with no auth header.
+- With `FIRECRAWL_API_KEY`, the proxy sends `Authorization: Bearer $FIRECRAWL_API_KEY`.
+- Some environments can receive a keyless Firecrawl `403` because of IP reputation. That is still a valid smoke result if the debug log proves the proxy called Firecrawl and the final answer reports search unavailable instead of inventing results.
+
+Direct native web-search proxy test:
+
+```bash
+node --input-type=module <<'EOF'
+import { readGlobalConfig, resolveStoredApiKey } from './packages/cli/dist/lib/global-config.js';
+import { startClaudeProxy } from './packages/cli/dist/lib/claude/proxy.js';
+import { CLAUDE_DEFAULT_MODEL } from './packages/cli/dist/lib/claude/defaults.js';
+
+const config = await readGlobalConfig(process.env.HOME);
+const apiKey = resolveStoredApiKey(config.apiKey) || process.env.TOGETHER_API_KEY;
+if (!apiKey) throw new Error('No Together API key configured.');
+const proxy = await startClaudeProxy({ apiKey, modelId: CLAUDE_DEFAULT_MODEL, debug: true });
+try {
+  const response = await fetch(`${proxy.url}/v1/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: CLAUDE_DEFAULT_MODEL,
+      max_tokens: 400,
+      system: 'You must use the web_search tool for current facts before answering.',
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
+      messages: [{ role: 'user', content: 'Use web_search to find whether Firecrawl keyless launched in June 2026, then answer with sources.' }]
+    })
+  });
+  console.log(await response.text());
+} finally {
+  await proxy.close();
+}
+EOF
+```
 
 ## What These Tests Cover
 
@@ -125,7 +162,8 @@ The web-search test catches:
 
 - Native Anthropic server-tool conversion bugs.
 - Missing schema for `web_search_20250305`, which can make GLM emit `{}` instead of a search query.
-- Streaming tool-input regressions for `WebSearch` and `WebFetch`.
+- Firecrawl invocation and clear provider errors when keyless search is unavailable.
+- `max_uses` regressions that would otherwise burn provider calls.
 
 ## Direct Together API Probe
 

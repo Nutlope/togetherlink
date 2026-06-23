@@ -35,6 +35,12 @@ type AnthropicTool = {
   [key: string]: unknown;
 };
 
+type NativeServerTool = {
+  kind: "web_search";
+  name: string;
+  definition: AnthropicTool;
+};
+
 type OpenAIMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | null;
@@ -60,6 +66,24 @@ type OpenAIChatResponse = {
     prompt_tokens?: number;
     completion_tokens?: number;
   };
+};
+
+type FirecrawlSearchResult = {
+  title?: string;
+  description?: string;
+  url?: string;
+  markdown?: string;
+  summary?: string;
+};
+
+type FirecrawlSearchResponse = {
+  success?: boolean;
+  data?: {
+    web?: FirecrawlSearchResult[];
+    news?: FirecrawlSearchResult[];
+  };
+  warning?: string | null;
+  error?: string;
 };
 
 export type ClaudeProxyOptions = {
@@ -165,54 +189,117 @@ async function callTogetherChatCompletions(
   options: ClaudeProxyOptions,
 ): Promise<OpenAIChatResponse> {
   const targetModel = resolveTargetModel(body.model, options);
-  const payload = {
-    model: targetModel,
-    messages: toOpenAIMessages(body),
-    max_tokens: body.max_tokens,
-    temperature: body.temperature,
-    tools: body.tools?.map((tool) => ({
-      type: "function",
-      function: {
-        name: tool.name,
-        description: tool.description ?? "",
-        parameters: toOpenAIToolParameters(tool),
-      },
-    })),
-    reasoning_effort: "high",
-    chat_template_kwargs: { clear_thinking: false },
-    stream: false,
-  };
-  debugLog(options, "together request", {
-    model: payload.model,
-    messageCount: payload.messages.length,
-    toolCount: payload.tools?.length ?? 0,
-    maxTokens: payload.max_tokens,
-  });
-  const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${options.apiKey}`,
-      "Content-Type": "application/json",
+  const nativeTools = nativeServerTools(body.tools);
+  const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
+  const nativeToolUses = new Map<string, number>();
+  const messages = toOpenAIMessages(body);
+  const tools = body.tools?.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description ?? "",
+      parameters: toOpenAIToolParameters(tool),
     },
-    body: JSON.stringify(payload),
-  });
+  }));
 
-  if (!response.ok) {
-    const text = await response.text();
-    debugLog(options, "together error", { status: response.status, body: text.slice(0, 1000) });
-    throw new Error(`Together API returned ${response.status}: ${text.slice(0, 500)}`);
+  for (let turn = 0; turn < 5; turn += 1) {
+    const payload = {
+      model: targetModel,
+      messages:
+        turn === 0 && nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages,
+      max_tokens: body.max_tokens,
+      temperature: body.temperature,
+      tools,
+      reasoning_effort: "high",
+      chat_template_kwargs: { clear_thinking: false },
+      stream: false,
+    };
+    debugLog(options, "together request", {
+      model: payload.model,
+      messageCount: payload.messages.length,
+      toolCount: payload.tools?.length ?? 0,
+      maxTokens: payload.max_tokens,
+      nativeToolCount: nativeTools.length,
+      turn,
+    });
+    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      debugLog(options, "together error", { status: response.status, body: text.slice(0, 1000) });
+      throw new Error(`Together API returned ${response.status}: ${text.slice(0, 500)}`);
+    }
+    const json = (await response.json()) as OpenAIChatResponse;
+    debugLog(options, "together response", {
+      id: json.id,
+      choices: json.choices?.length ?? 0,
+      finishReason: json.choices?.[0]?.finish_reason,
+      toolCalls: json.choices?.[0]?.message?.tool_calls?.map((toolCall) => ({
+        name: toolCall.function?.name,
+        argumentsPreview: toolCall.function?.arguments?.slice(0, 300),
+      })),
+    });
+
+    const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
+    const nativeToolCalls = toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function?.name ?? ""));
+    if (nativeToolCalls.length === 0) {
+      return json;
+    }
+
+    const reasoning = json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
+    messages.push({
+      role: "assistant",
+      content: json.choices?.[0]?.message?.content ?? null,
+      ...(reasoning ? { reasoning } : {}),
+      tool_calls: toolCalls.map((toolCall) => ({
+        id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: toolCall.function?.name ?? "tool",
+          arguments: toolCall.function?.arguments ?? "{}",
+        },
+      })),
+    });
+
+    for (const toolCall of nativeToolCalls) {
+      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+      const name = toolCall.function?.name ?? "web_search";
+      const nativeTool = nativeTools.find((tool) => tool.name === name);
+      const input = parseJsonOrEmpty(toolCall.function?.arguments);
+      const priorUses = nativeToolUses.get(name) ?? 0;
+      const maxUses = nativeTool ? nativeToolMaxUses(nativeTool.definition) : 0;
+      let result: string;
+      if (priorUses >= maxUses) {
+        result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
+      } else if (nativeTool?.kind === "web_search") {
+        nativeToolUses.set(name, priorUses + 1);
+        result = await runFirecrawlSearch(input, nativeTool.definition, options);
+      } else {
+        result = "Unsupported native server tool.";
+      }
+      messages.push({ role: "tool", tool_call_id: id, content: result });
+    }
   }
-  const json = (await response.json()) as OpenAIChatResponse;
-  debugLog(options, "together response", {
-    id: json.id,
-    choices: json.choices?.length ?? 0,
-    finishReason: json.choices?.[0]?.finish_reason,
-    toolCalls: json.choices?.[0]?.message?.tool_calls?.map((toolCall) => ({
-      name: toolCall.function?.name,
-      argumentsPreview: toolCall.function?.arguments?.slice(0, 300),
-    })),
-  });
-  return json;
+
+  return {
+    id: `msg_${randomUUID().replaceAll("-", "")}`,
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          content:
+            "I could not complete the native web search because the model kept requesting additional search tool calls.",
+        },
+      },
+    ],
+  };
 }
 
 function resolveTargetModel(_requestedModel: string | undefined, _options: ClaudeProxyOptions): string {
@@ -224,7 +311,7 @@ function toOpenAIToolParameters(tool: AnthropicTool): unknown {
   if (tool.input_schema) {
     return tool.input_schema;
   }
-  if (tool.type === "web_search_20250305" || tool.name === "web_search") {
+  if (isWebSearchTool(tool)) {
     return {
       type: "object",
       properties: {
@@ -238,6 +325,121 @@ function toOpenAIToolParameters(tool: AnthropicTool): unknown {
     };
   }
   return { type: "object", properties: {} };
+}
+
+function nativeServerTools(tools: AnthropicTool[] | undefined): NativeServerTool[] {
+  return (tools ?? []).flatMap((tool) => {
+    if (!isWebSearchTool(tool)) {
+      return [];
+    }
+    return [{ kind: "web_search", name: tool.name ?? "web_search", definition: tool }];
+  });
+}
+
+function isWebSearchTool(tool: AnthropicTool): boolean {
+  return tool.type?.startsWith("web_search_") === true || tool.name === "web_search";
+}
+
+function nativeToolMaxUses(tool: AnthropicTool): number {
+  return typeof tool.max_uses === "number" && Number.isFinite(tool.max_uses)
+    ? Math.max(0, Math.floor(tool.max_uses))
+    : 5;
+}
+
+function withNativeToolSystemPrompt(messages: OpenAIMessage[], nativeTools: NativeServerTool[]): OpenAIMessage[] {
+  const prompt = [
+    "Native server tools are available through function calls.",
+    ...nativeTools.map((tool) => `- ${tool.name}: call this for live web search. Always provide a concise non-empty query.`),
+    "After tool results are returned, answer from the provided sources and include source URLs when relevant.",
+  ].join("\n");
+  return [{ role: "system", content: prompt }, ...messages];
+}
+
+async function runFirecrawlSearch(input: unknown, tool: AnthropicTool, options: ClaudeProxyOptions): Promise<string> {
+  const query = webSearchQuery(input);
+  if (!query) {
+    return "Web search error: missing query.";
+  }
+
+  const body: Record<string, unknown> = {
+    query,
+    limit: 5,
+    sources: [{ type: "web" }],
+  };
+  const allowedDomains = stringArray(tool.allowed_domains);
+  const blockedDomains = stringArray(tool.blocked_domains);
+  if (allowedDomains.length > 0) {
+    body.includeDomains = allowedDomains;
+  } else if (blockedDomains.length > 0) {
+    body.excludeDomains = blockedDomains;
+  }
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const firecrawlApiKey = process.env.FIRECRAWL_API_KEY?.trim();
+  if (firecrawlApiKey) {
+    headers.Authorization = `Bearer ${firecrawlApiKey}`;
+  }
+
+  debugLog(options, "firecrawl search request", { query, hasApiKey: Boolean(firecrawlApiKey), body });
+  const response = await fetch("https://api.firecrawl.dev/v2/search", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    debugLog(options, "firecrawl search error", { status: response.status, body: text.slice(0, 1000) });
+    return `Web search error from Firecrawl (${response.status}): ${text.slice(0, 1200)}`;
+  }
+
+  let json: FirecrawlSearchResponse;
+  try {
+    json = JSON.parse(text) as FirecrawlSearchResponse;
+  } catch {
+    return `Web search error: Firecrawl returned non-JSON content: ${text.slice(0, 1200)}`;
+  }
+  if (json.success === false) {
+    return `Web search error from Firecrawl: ${json.error ?? "unknown error"}`;
+  }
+
+  const results = [...(json.data?.web ?? []), ...(json.data?.news ?? [])].slice(0, 5);
+  if (results.length === 0) {
+    return `Web search completed for "${query}" but returned no results.${json.warning ? ` Warning: ${json.warning}` : ""}`;
+  }
+
+  const lines = [`Web search results for "${query}" via Firecrawl:`];
+  results.forEach((result, index) => {
+    lines.push(
+      [
+        `${index + 1}. ${result.title ?? "Untitled"}`,
+        `URL: ${result.url ?? ""}`,
+        `Snippet: ${trimSearchText(result.description ?? result.summary ?? result.markdown ?? "")}`,
+      ].join("\n"),
+    );
+  });
+  if (json.warning) {
+    lines.push(`Warning: ${json.warning}`);
+  }
+  return lines.join("\n\n");
+}
+
+function webSearchQuery(input: unknown): string {
+  if (typeof input === "string") {
+    return input.trim();
+  }
+  if (typeof input !== "object" || input === null) {
+    return "";
+  }
+  const value = (input as { query?: unknown; q?: unknown }).query ?? (input as { query?: unknown; q?: unknown }).q;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+}
+
+function trimSearchText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 600);
 }
 
 function toOpenAIMessages(body: AnthropicMessagesRequest): OpenAIMessage[] {

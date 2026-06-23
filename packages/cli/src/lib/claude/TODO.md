@@ -17,19 +17,26 @@ Native/server tools need dedicated local/provider-backed implementations.
 
 ### `web_search_*`
 
+Status:
+
+- Initial local emulation is implemented in `proxy.ts`.
+- The proxy exposes native Anthropic `web_search_*` tools to GLM as function tools, executes GLM's search requests with Firecrawl `/v2/search`, feeds results back to GLM internally, and returns only the final assistant message to Claude Code.
+- Firecrawl runs keyless when `FIRECRAWL_API_KEY` is unset and uses `Authorization: Bearer $FIRECRAWL_API_KEY` when set.
+- `max_uses` is enforced in the proxy so provider failures do not cause unbounded repeated searches.
+
 Why:
 
 - Claude Code already triggers this path through its `WebSearch` tool.
 - Without local support, searches can degrade into weak/fake model-only behavior.
 - We saw native requests shaped like `web_search_20250305`.
 
-Needed:
+Still needed:
 
-- Detect tools where `type` starts with `web_search_`.
-- Execute search through a configurable provider.
-- Return compact, cited search results to GLM.
-- Support `query`, `allowed_domains`, `blocked_domains`, `max_uses`, and result limits where possible.
-- Add a smoke test that proves the proxy actually executed a provider search, not just shaped a query.
+- Add a proper provider abstraction instead of Firecrawl-only logic in `proxy.ts`.
+- Add tests around successful Firecrawl responses using mocked fetch.
+- Convert Firecrawl results into Anthropic-style citation blocks if Claude Code expects richer citation metadata later.
+- Support `user_location`, category/source selection, and richer result limits.
+- Decide whether to use Firecrawl MCP for scrape/interact flows or keep using REST endpoints directly.
 
 Provider candidates:
 
@@ -90,6 +97,20 @@ Open questions:
 - Does the installed app honor `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, and `ANTHROPIC_CUSTOM_MODEL_OPTION`?
 - Does it use the same `/v1/messages` protocol as Claude Code CLI?
 - Does it support custom model discovery through `/v1/models`?
+
+Findings from local app inspection:
+
+- `/Applications/Claude.app` contains a `deploymentMode` config key with `"3p"` and `"1p"` values.
+- The app bundle includes custom third-party provider language such as "Selects the inference backend. Setting this key activates third-party mode."
+- The app has a `ccd-environment-config.json` file under `~/Library/Application Support/Claude/`, but its `envVars` value is stored as an opaque encoded/encrypted blob.
+- The desktop app appears to construct Claude Code session env itself, including `ANTHROPIC_BASE_URL`, so launching the app process with shell env may not be enough.
+- A quick process launch opened the app but did not produce proxy `/v1/models` or `/v1/messages` traffic, so desktop-through-proxy is not verified.
+
+Likely paths to investigate:
+
+- Third-party mode config (`deploymentMode: "3p"`) rather than raw shell env.
+- A separate app support directory/profile for third-party inference, if present in newer versions or created by setup flows.
+- Whether desktop agent mode force-overrides `ANTHROPIC_BASE_URL` for spawned Claude Code sessions.
 
 macOS launch options to test:
 
