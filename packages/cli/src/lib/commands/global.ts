@@ -22,6 +22,8 @@ Usage:
   topencode [-- ...]                    Alias for: togetherlink opencode
   togetherlink opencode status          Show OpenCode ephemeral defaults
   togetherlink codex ...                Coming soon (needs a local translation proxy)
+  togetherlink daemon status            Show the shared proxy daemon status
+  togetherlink daemon stop              Stop the shared proxy daemon
   togetherlink --version                Show the CLI version
   togetherlink help                     Show this message
 
