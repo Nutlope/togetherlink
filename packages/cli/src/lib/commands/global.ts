@@ -23,8 +23,7 @@ Usage:
   togetherlink --version                Show the CLI version
   togetherlink help                     Show this message
 
-The CLI self-updates in the background from ${UPDATE_ORIGIN}. Set
-TOGETHERLINK_NO_AUTOPDATE=1 or pass --no-update to disable.
+The CLI always keeps itself up to date from ${UPDATE_ORIGIN}.
 `);
 }
 
