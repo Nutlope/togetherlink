@@ -20,8 +20,8 @@ Native/server tools need dedicated local/provider-backed implementations.
 Status:
 
 - Initial local emulation is implemented in `proxy.ts`.
-- The proxy exposes native Anthropic `web_search_*` tools to GLM as function tools, executes GLM's search requests with Firecrawl `/v2/search`, feeds results back to GLM internally, and returns only the final assistant message to Claude Code.
-- Firecrawl runs keyless when `FIRECRAWL_API_KEY` is unset and uses `Authorization: Bearer $FIRECRAWL_API_KEY` when set.
+- The proxy exposes native Anthropic `web_search_*` tools to GLM as function tools, executes GLM's search requests with Exa `/search`, feeds results back to GLM internally, and returns only the final assistant message to Claude Code.
+- Exa requires `EXA_API_KEY`; without it the proxy returns a clear error instead of inventing results. The key is sent as `x-api-key: $EXA_API_KEY`.
 - `max_uses` is enforced in the proxy so provider failures do not cause unbounded repeated searches.
 
 Why:
@@ -32,19 +32,18 @@ Why:
 
 Still needed:
 
-- Add a proper provider abstraction instead of Firecrawl-only logic in `proxy.ts`.
-- Add tests around successful Firecrawl responses using mocked fetch.
-- Convert Firecrawl results into Anthropic-style citation blocks if Claude Code expects richer citation metadata later.
+- Add a proper provider abstraction instead of Exa-only logic in `proxy.ts`.
+- Add tests around successful Exa responses using mocked fetch.
+- Convert Exa results into Anthropic-style citation blocks if Claude Code expects richer citation metadata later.
 - Support `user_location`, category/source selection, and richer result limits.
-- Decide whether to use Firecrawl MCP for scrape/interact flows or keep using REST endpoints directly.
+- Decide whether to use Exa's `contents`/`subpages` for scrape/interact flows or keep using REST endpoints directly.
 
-Provider candidates:
+Provider candidates (if Exa ever needs replacing):
 
 - Brave Search API
 - Tavily
 - SerpAPI
 - Bing Web Search
-- Exa
 
 ### `web_fetch_*`
 

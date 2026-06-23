@@ -68,22 +68,18 @@ type OpenAIChatResponse = {
   };
 };
 
-type FirecrawlSearchResult = {
+type ExaSearchResult = {
   title?: string;
-  description?: string;
   url?: string;
-  markdown?: string;
-  summary?: string;
+  text?: string;
+  author?: string;
+  publishedDate?: string;
+  score?: number;
 };
 
-type FirecrawlSearchResponse = {
-  success?: boolean;
-  data?: {
-    web?: FirecrawlSearchResult[];
-    news?: FirecrawlSearchResult[];
-  };
-  warning?: string | null;
-  error?: string;
+type ExaSearchResponse = {
+  results?: ExaSearchResult[];
+  autopromptString?: string;
 };
 
 export type ClaudeProxyOptions = {
@@ -280,7 +276,7 @@ async function callTogetherChatCompletions(
         result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
       } else if (nativeTool?.kind === "web_search") {
         nativeToolUses.set(name, priorUses + 1);
-        result = await runFirecrawlSearch(input, nativeTool.definition, options);
+        result = await runExaSearch(input, nativeTool.definition, options);
       } else {
         result = "Unsupported native server tool.";
       }
@@ -355,70 +351,73 @@ function withNativeToolSystemPrompt(messages: OpenAIMessage[], nativeTools: Nati
   return [{ role: "system", content: prompt }, ...messages];
 }
 
-async function runFirecrawlSearch(input: unknown, tool: AnthropicTool, options: ClaudeProxyOptions): Promise<string> {
+async function runExaSearch(input: unknown, tool: AnthropicTool, options: ClaudeProxyOptions): Promise<string> {
   const query = webSearchQuery(input);
   if (!query) {
     return "Web search error: missing query.";
   }
 
-  const body: Record<string, unknown> = {
-    query,
-    limit: 5,
-    sources: [{ type: "web" }],
-  };
   const allowedDomains = stringArray(tool.allowed_domains);
   const blockedDomains = stringArray(tool.blocked_domains);
-  if (allowedDomains.length > 0) {
-    body.includeDomains = allowedDomains;
-  } else if (blockedDomains.length > 0) {
-    body.excludeDomains = blockedDomains;
+  const includeDomains = allowedDomains.length > 0 ? allowedDomains : undefined;
+  const excludeDomains = blockedDomains.length > 0 ? blockedDomains : undefined;
+
+  const body: Record<string, unknown> = {
+    query,
+    numResults: 5,
+    type: "auto",
+    contents: { text: true },
+  };
+  if (includeDomains) {
+    body.includeDomains = includeDomains;
+  }
+  if (excludeDomains) {
+    body.excludeDomains = excludeDomains;
   }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const firecrawlApiKey = process.env.FIRECRAWL_API_KEY?.trim();
-  if (firecrawlApiKey) {
-    headers.Authorization = `Bearer ${firecrawlApiKey}`;
+  const exaApiKey = process.env.EXA_API_KEY?.trim();
+  if (!exaApiKey) {
+    return "Web search error: EXA_API_KEY is not set. Set it in the repo .env (EXA_API_KEY=...) and retry.";
   }
+  headers["x-api-key"] = exaApiKey;
 
-  debugLog(options, "firecrawl search request", { query, hasApiKey: Boolean(firecrawlApiKey), body });
-  const response = await fetch("https://api.firecrawl.dev/v2/search", {
+  debugLog(options, "exa search request", { query, hasApiKey: Boolean(exaApiKey), body });
+  const response = await fetch("https://api.exa.ai/search", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
   });
   const text = await response.text();
   if (!response.ok) {
-    debugLog(options, "firecrawl search error", { status: response.status, body: text.slice(0, 1000) });
-    return `Web search error from Firecrawl (${response.status}): ${text.slice(0, 1200)}`;
+    debugLog(options, "exa search error", { status: response.status, body: text.slice(0, 1000) });
+    return `Web search error from Exa (${response.status}): ${text.slice(0, 1200)}`;
   }
 
-  let json: FirecrawlSearchResponse;
+  let json: ExaSearchResponse;
   try {
-    json = JSON.parse(text) as FirecrawlSearchResponse;
+    json = JSON.parse(text) as ExaSearchResponse;
   } catch {
-    return `Web search error: Firecrawl returned non-JSON content: ${text.slice(0, 1200)}`;
-  }
-  if (json.success === false) {
-    return `Web search error from Firecrawl: ${json.error ?? "unknown error"}`;
+    return `Web search error: Exa returned non-JSON content: ${text.slice(0, 1200)}`;
   }
 
-  const results = [...(json.data?.web ?? []), ...(json.data?.news ?? [])].slice(0, 5);
+  const results = (json.results ?? []).slice(0, 5);
   if (results.length === 0) {
-    return `Web search completed for "${query}" but returned no results.${json.warning ? ` Warning: ${json.warning}` : ""}`;
+    return `Web search completed for "${query}" but returned no results.${json.autopromptString ? ` Autoprompt: ${json.autopromptString}` : ""}`;
   }
 
-  const lines = [`Web search results for "${query}" via Firecrawl:`];
+  const lines = [`Web search results for "${query}" via Exa:`];
   results.forEach((result, index) => {
     lines.push(
       [
         `${index + 1}. ${result.title ?? "Untitled"}`,
         `URL: ${result.url ?? ""}`,
-        `Snippet: ${trimSearchText(result.description ?? result.summary ?? result.markdown ?? "")}`,
+        `Snippet: ${trimSearchText(result.text ?? "")}`,
       ].join("\n"),
     );
   });
-  if (json.warning) {
-    lines.push(`Warning: ${json.warning}`);
+  if (json.autopromptString) {
+    lines.push(`Autoprompt: ${json.autopromptString}`);
   }
   return lines.join("\n\n");
 }

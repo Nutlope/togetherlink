@@ -94,16 +94,16 @@ pnpm -F @togetherlink/cli exec togetherlink claude -- \
 Expected result:
 
 - Claude Code may make an internal request with a native Anthropic `web_search_20250305` tool.
-- The proxy should execute the lowercase `web_search` tool internally, using Firecrawl search.
-- `TOGETHERLINK_DEBUG=1` should show `firecrawl search request` with a non-empty `query`.
+- The proxy should execute the lowercase `web_search` tool internally, using Exa search.
+- `TOGETHERLINK_DEBUG=1` should show `exa search request` with a non-empty `query`.
 - Claude Code should not report `Did 0 searches`.
 - The JSON result has `"is_error": false`.
 
-Firecrawl is keyless-first:
+Exa requires an API key:
 
-- Without `FIRECRAWL_API_KEY`, the proxy calls `https://api.firecrawl.dev/v2/search` with no auth header.
-- With `FIRECRAWL_API_KEY`, the proxy sends `Authorization: Bearer $FIRECRAWL_API_KEY`.
-- Some environments can receive a keyless Firecrawl `403` because of IP reputation. That is still a valid smoke result if the debug log proves the proxy called Firecrawl and the final answer reports search unavailable instead of inventing results.
+- Without `EXA_API_KEY`, the proxy returns a clear `Web search error: EXA_API_KEY is not set...` message instead of inventing results.
+- With `EXA_API_KEY`, the proxy calls `https://api.exa.ai/search` sending `x-api-key: $EXA_API_KEY`.
+- A provider error (e.g. invalid/over-quota key) is still a valid smoke result if the debug log proves the proxy called Exa and the final answer reports search unavailable instead of inventing results.
 
 Direct native web-search proxy test:
 
@@ -126,7 +126,7 @@ try {
       max_tokens: 400,
       system: 'You must use the web_search tool for current facts before answering.',
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
-      messages: [{ role: 'user', content: 'Use web_search to find whether Firecrawl keyless launched in June 2026, then answer with sources.' }]
+      messages: [{ role: 'user', content: 'Use web_search to find the latest news headline, then answer with sources.' }]
     })
   });
   console.log(await response.text());
@@ -162,7 +162,7 @@ The web-search test catches:
 
 - Native Anthropic server-tool conversion bugs.
 - Missing schema for `web_search_20250305`, which can make GLM emit `{}` instead of a search query.
-- Firecrawl invocation and clear provider errors when keyless search is unavailable.
+- Exa invocation and clear provider errors when search is unavailable.
 - `max_uses` regressions that would otherwise burn provider calls.
 
 ## Direct Together API Probe
