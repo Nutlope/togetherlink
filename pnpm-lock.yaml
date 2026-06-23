@@ -20,6 +20,11 @@ importers:
       '@clack/prompts':
         specifier: ^0.8.2
         version: 0.8.2
+      '@togetherlink/models':
+        specifier: workspace:*
+        version: link:../models
+
+  packages/models: {}
 
 packages:
 

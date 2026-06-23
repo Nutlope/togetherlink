@@ -1,3 +1,5 @@
+import { GLM_5_2, VISION_MODELS, costPerToken } from "@togetherlink/models";
+
 /**
  * Proxy-side cost tracking for GLM-5.2 on Together.
  *
@@ -5,36 +7,30 @@
  * pricing table it can't apply to a non-Anthropic model like `together-glm-5-2`,
  * so its estimate is wrong for us. Since the proxy is the one talking to
  * Together and holds the real token counts, it tracks cost itself using the
- * official GLM-5.2 rates from https://docs.together.ai/docs/glm-5.2-quickstart .
- *
- * Rates are per 1M tokens:
- *   input:  $1.40   cached input: $0.26   output: $4.40
+ * official GLM-5.2 rates (sourced from @togetherlink/models, the shared
+ * manifest — https://docs.together.ai/docs/glm-5.2-quickstart).
  */
 
-const TOKENS_PER_MILLION = 1_000_000;
-
 export const GLM_5_2_PRICING = {
-  inputPerToken: 1.4 / TOKENS_PER_MILLION,
-  cachedInputPerToken: 0.26 / TOKENS_PER_MILLION,
-  outputPerToken: 4.4 / TOKENS_PER_MILLION,
+  inputPerToken: costPerToken(GLM_5_2.cost.input),
+  cachedInputPerToken: costPerToken(GLM_5_2.cost.cache_read),
+  outputPerToken: costPerToken(GLM_5_2.cost.output),
 } as const;
 
 // Per-token pricing for the vision models used by the image intercept, keyed by
-// the API model string. Rates from the Together serverless catalog, per 1M.
-const VISION_PRICING: Record<string, { inputPerToken: number; cachedPerToken: number; outputPerToken: number }> = {
-  // Kimi K2.7 Code: $0.95 in / $0.19 cached / $4.00 out
-  "moonshotai/Kimi-K2.7-Code": {
-    inputPerToken: 0.95 / TOKENS_PER_MILLION,
-    cachedPerToken: 0.19 / TOKENS_PER_MILLION,
-    outputPerToken: 4.0 / TOKENS_PER_MILLION,
-  },
-  // Qwen3.5 9B: $0.17 in / (no cached rate) / $0.25 out
-  "Qwen/Qwen3.5-9B": {
-    inputPerToken: 0.17 / TOKENS_PER_MILLION,
-    cachedPerToken: 0,
-    outputPerToken: 0.25 / TOKENS_PER_MILLION,
-  },
-};
+// the API model string. Built from the shared VISION_MODELS manifest so the
+// rates can't drift from the rest of the codebase.
+const VISION_PRICING: Record<string, { inputPerToken: number; cachedPerToken: number; outputPerToken: number }> =
+  Object.fromEntries(
+    VISION_MODELS.map((model) => [
+      model.id,
+      {
+        inputPerToken: costPerToken(model.cost.input),
+        cachedPerToken: costPerToken(model.cost.cache_read),
+        outputPerToken: costPerToken(model.cost.output),
+      },
+    ]),
+  );
 
 export type TokenUsage = {
   promptTokens: number;

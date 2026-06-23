@@ -1,8 +1,11 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
+import { TOGETHER_BASE_URL as SHARED_TOGETHER_BASE_URL } from "@togetherlink/models";
 import type { HarnessContext } from "./harness-types.js";
 
-export const TOGETHER_BASE_URL = "https://api.together.ai/v1";
+// Re-exported from the shared @togetherlink/models manifest so the base URL
+// stays in one place; kept here to preserve this module's existing import surface.
+export const TOGETHER_BASE_URL = SHARED_TOGETHER_BASE_URL;
 export const TOGETHER_API_KEY_ENV_REF = "{env:TOGETHER_API_KEY}";
 export const EXA_API_KEY_ENV_REF = "{env:EXA_API_KEY}";
 

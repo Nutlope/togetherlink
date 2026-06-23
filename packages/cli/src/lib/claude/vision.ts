@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { TOGETHER_BASE_URL } from "../together-core.js";
+import { TOGETHER_BASE_URL, VISION_MODELS, VISION_PROMPT } from "@togetherlink/models";
 
 /**
  * Image interception for the Claude proxy. GLM-5.2 is text-only, so when Claude
@@ -9,23 +9,14 @@ import { TOGETHER_BASE_URL } from "../together-core.js";
  * so GLM-5.2 reasons over the description rather than hallucinating about an
  * image it never saw.
  *
- * See scripts/bench-vision-results.md for the model selection rationale. The
- * vision models are fixed here — not user-configurable — so the experience is
- * the best we picked, automatically, with automatic failover if the primary
- * errors. Reasoning is disabled because image description is a perception task,
- * not a reasoning one (with reasoning on, hybrid models emit empty `content`).
+ * The vision model list and prompt come from @togetherlink/models (the shared
+ * manifest) so they stay in sync with the OpenCode `@vision` subagent. See
+ * scripts/bench-vision-results.md for the model selection rationale. The models
+ * are fixed here — not user-configurable — with automatic failover if the
+ * primary errors. Reasoning is disabled because image description is a
+ * perception task, not a reasoning one (with reasoning on, hybrid models emit
+ * empty `content`).
  */
-
-// Curated, ordered list. Primary first; if it errors, the next is tried.
-// Kimi K2.7 Code: best speed/quality/price balance (benchmark winner).
-// Qwen3.5 9B: best verbatim OCR, used as a fallback if Kimi is unavailable.
-const VISION_MODELS = ["moonshotai/Kimi-K2.7-Code", "Qwen/Qwen3.5-9B"] as const;
-
-const VISION_PROMPT =
-  "Describe this image for a coding assistant that cannot see it. " +
-  "Be concise but specific: layout, UI elements, colors, any text (quote it " +
-  "verbatim), diagrams, charts, or notable details. If it is a screenshot, " +
-  "describe the visible UI. Keep it under 150 words.";
 
 export type ImageBlock = {
   type: "image";
@@ -142,7 +133,7 @@ export async function describeImage(
   }
 
   for (const model of VISION_MODELS) {
-    const outcome = await callVisionModel(model, imageUrl, options);
+    const outcome = await callVisionModel(model.id, imageUrl, options);
     if (outcome.ok) {
       return { description: outcome.description, model: outcome.model, usage: outcome.usage };
     }

@@ -149,3 +149,5 @@ vite.config.ts.timestamp-*
 images-test/*
 
 /scripts/bench-vision-out/*
+
+MVP-PLAN.md
