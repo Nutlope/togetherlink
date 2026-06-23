@@ -2,8 +2,8 @@ import { TOGETHER_API_KEY_ENV_REF } from "../together-core.js";
 import {
   OPENCODE_PROVIDER_ID,
   OPENCODE_DEFAULT_MODEL,
-  OPENCODE_GLM52_MODEL_ENTRY,
-  OPENCODE_VISION_MODEL_ENTRIES,
+  OPENCODE_MODEL_ENTRIES,
+  OPENCODE_MODEL_WHITELIST,
   OPENCODE_VISION_MODEL_SELECTOR,
   OPENCODE_BUILD_PROMPT,
   OPENCODE_VISION_AGENT_PROMPT,
@@ -54,29 +54,21 @@ export function buildOpencodeConfigJson({
   buildPrompt?: string;
   visionPrompt?: string;
 } = {}): OpencodeConfig {
-  const models: Record<string, unknown> = {};
-  const whitelist: string[] = [];
-  if (modelId === OPENCODE_DEFAULT_MODEL) {
-    models[modelId] = OPENCODE_GLM52_MODEL_ENTRY;
-    whitelist.push(modelId);
-  }
-  // Always register the vision models so the @vision subagent (and /models)
-  // can use them, regardless of the primary model.
-  for (const [id, entry] of Object.entries(OPENCODE_VISION_MODEL_ENTRIES)) {
-    models[id] = entry;
-    whitelist.push(id);
-  }
+  // Register every curated flagship (the full set /models shows) with their
+  // real metadata + tip-bearing display names. The `@vision` subagent's model
+  // (Kimi-K2.7-Code) is part of this set, so it's covered too.
+  const models = { ...OPENCODE_MODEL_ENTRIES };
 
   const provider: OpencodeProviderConfig = {
     npm: "@ai-sdk/togetherai",
     name: "Together AI",
     options: { apiKey: apiKeyEnvRef },
     models,
-    // Restrict /models to exactly the models we declare above. Without this,
-    // OpenCode also shows Together's full catalog (hundreds of models) because
-    // the `models` block merges onto the provider's models.dev catalog rather
-    // than replacing it (opencode PR #3416 added whitelist/blacklist filtering).
-    whitelist,
+    // Restrict /models to exactly the curated set. Without this, OpenCode also
+    // shows Together's full catalog (hundreds of models) because the `models`
+    // block merges onto the provider's models.dev catalog rather than replacing
+    // it (opencode PR #3416 added whitelist/blacklist filtering).
+    whitelist: OPENCODE_MODEL_WHITELIST,
   };
 
   return {
@@ -84,22 +76,24 @@ export function buildOpencodeConfigJson({
     provider: {
       [OPENCODE_PROVIDER_ID]: provider,
     },
-    // Slash form: provider/model. GLM-5.2 is the primary (and only general-use)
-    // model — sub-agents without an explicit model inherit it automatically.
-    // The `vision` subagent explicitly pins a vision-capable Together model.
-    // To add more sub-agents later, add entries under `agent`.
+    // Slash form: provider/model. The selected model is the primary; sub-agents
+    // without an explicit model inherit it automatically. The `vision` subagent
+    // explicitly pins a vision-capable Together model (Kimi-K2.7-Code) so a
+    // text-only primary can still describe pasted images. To add more
+    // sub-agents later, add entries under `agent`.
     model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
     agent: {
       build: {
         prompt: buildPrompt,
       },
-      // GLM-5.2 can't see images; this subagent describes them. The primary
-      // `build` agent is instructed to invoke it automatically via the Task tool
-      // when it detects an image was attached (users can also @mention it).
+      // Describes images the primary model can't see. The unified build prompt
+      // tells a text-only primary to invoke this automatically via the Task tool
+      // when it detects an image was attached; vision primaries see images
+      // directly and don't need it. Users can also @mention it.
       vision: {
         mode: "subagent",
         description:
-          "Describes images the user attaches or pastes. Invoke this subagent automatically (via the Task tool) whenever an image was attached and the primary model can't see it, so you can reason over the description. Users may also invoke it with @vision.",
+          "Describes images the user attaches or pastes. Invoke this subagent automatically (via the Task tool) whenever an image was attached and you can't see it, so you can reason over the description. Users may also invoke it with @vision.",
         model: OPENCODE_VISION_MODEL_SELECTOR,
         prompt: visionPrompt,
       },

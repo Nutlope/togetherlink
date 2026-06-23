@@ -86,6 +86,80 @@ export const GLM_5_2: ModelDefinition = {
 };
 
 /**
+ * Kimi K2.6 — Moonshot's newest reasoning + vision flagship. Vision-capable,
+ * so it can serve as a vision primary (images reach it directly, no subagent).
+ * Pricing/context from Together changelog (June 2026); output limit per
+ * models.dev. Pinned to the OpenCode `@vision` subagent is the older K2.7-Code
+ * (below) — kept there for stability; K2.6 is selectable as a primary.
+ */
+export const KIMI_K2_6: ModelDefinition = {
+  id: "moonshotai/Kimi-K2.6",
+  name: "Kimi K2.6 (vision + reasoning)",
+  anthropicAlias: null,
+  cost: { input: 1.2, output: 4.5, cache_read: 0.2 },
+  limit: { context: 262_144, output: 262_144 },
+  attachment: true,
+  reasoning: true,
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text", "image"], output: ["text"] },
+};
+
+/**
+ * MiniMax M3 — newest MiniMax, vision-capable, 512K context, the cheapest
+ * vision primary. Pricing from Together changelog (June 2026); output limit
+ * (128K) per models.dev.
+ */
+export const MINIMAX_M3: ModelDefinition = {
+  id: "MiniMaxAI/MiniMax-M3",
+  name: "MiniMax M3 (vision, 512K ctx, cheapest)",
+  anthropicAlias: null,
+  cost: { input: 0.3, output: 1.2, cache_read: 0.06 },
+  limit: { context: 524_288, output: 128_000 },
+  attachment: true,
+  reasoning: true,
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text", "image"], output: ["text"] },
+};
+
+/**
+ * Qwen3.7-Max — strongest current Qwen (top tier per Together changelog,
+ * June 2026). Vision-capable, 1M context. Output limit (65536) per models.dev.
+ * No Together cached-input tier published (cache_read left 0).
+ */
+export const QWEN_3_7_MAX: ModelDefinition = {
+  id: "Qwen/Qwen3.7-Max",
+  name: "Qwen 3.7 Max (vision, 1M ctx, strongest Qwen)",
+  anthropicAlias: null,
+  cost: { input: 2.5, output: 7.5, cache_read: 0 },
+  limit: { context: 1_000_000, output: 65_536 },
+  attachment: true,
+  reasoning: true,
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text", "image"], output: ["text"] },
+};
+
+/**
+ * DeepSeek V4 Pro — newest DeepSeek, long-context (512K) reasoning. Text-only
+ * on Together (not in the vision models table). Pricing is the post-June-9-2026
+ * reduction ($1.74/$3.48); output limit (384K) per models.dev.
+ */
+export const DEEPSEEK_V4_PRO: ModelDefinition = {
+  id: "deepseek-ai/DeepSeek-V4-Pro",
+  name: "DeepSeek V4 Pro (512K ctx, long-context reasoning)",
+  anthropicAlias: null,
+  cost: { input: 1.74, output: 3.48, cache_read: 0.2 },
+  limit: { context: 512_000, output: 384_000 },
+  attachment: false,
+  reasoning: true,
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text"], output: ["text"] },
+};
+
+/**
  * Capabilities string Claude Code reads from ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES.
  * Mirrors what GLM-5.2 supports on Together: adjustable reasoning effort
  * (incl. xhigh/max), thinking, adaptive thinking, and interleaved thinking.
@@ -141,6 +215,43 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
   tool_call: true,
   modalities: { input: ["text", "image"], output: ["text"] },
 };
+
+/**
+ * Curated current-flagship Together models surfaced in OpenCode's `/models`.
+ * Together's full serverless catalog is hidden via the provider `whitelist`
+ * (opencode PR #3416); only these ids appear. Each `name` carries a short tip
+ * because OpenCode has no per-model `description` field — the display name is
+ * the only place a user-facing hint can live. Order = the picker order.
+ *
+ * Sources: Together changelog (ids/pricing/context, June 2026) +
+ * models.dev (output limits). See per-model doc comments for specifics.
+ */
+export const SELECTABLE_MODELS: readonly ModelDefinition[] = [
+  GLM_5_2,
+  KIMI_K2_6,
+  VISION_PRIMARY, // moonshotai/Kimi-K2.7-Code — also the @vision subagent model
+  MINIMAX_M3,
+  QWEN_3_7_MAX,
+  DEEPSEEK_V4_PRO,
+];
+
+/**
+ * Whether a model accepts image input (vision-capable). Used to pick the right
+ * OpenCode build-agent system prompt: vision primaries receive images directly,
+ * text-only primaries must route to the `@vision` subagent.
+ */
+export function isVisionModel(model: ModelDefinition): boolean {
+  return model.attachment && model.modalities.input.includes("image");
+}
+
+/**
+ * Find a model definition by its Together id across the curated + vision lists.
+ * Returns undefined if not found.
+ */
+export function findModelById(id: string): ModelDefinition | undefined {
+  const all = [...SELECTABLE_MODELS, ...VISION_MODELS];
+  return all.find((model) => model.id === id);
+}
 
 /**
  * Prompt for the image-description sub-call. Shared by the Claude proxy (which
