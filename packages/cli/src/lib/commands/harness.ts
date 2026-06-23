@@ -3,8 +3,8 @@ import { ALL_HARNESSES, HARNESS_LABEL, type HarnessId } from "../harness.js";
 import { loadHarness, isHarnessImplemented } from "../harness-registry.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
 
-const VALID_VERBS = new Set(["on", "off", "status"]);
-type HarnessVerb = "on" | "off" | "status";
+const VALID_VERBS = new Set(["run", "on", "off", "status"]);
+type HarnessVerb = "run" | "on" | "off" | "status";
 
 export async function dispatchHarnessCommand(
   harnessName: string,
@@ -19,14 +19,19 @@ export async function dispatchHarnessCommand(
       `${HARNESS_LABEL[harnessName]} support isn't built yet (coming in a later phase — it needs a local translation proxy).`,
     );
   }
-  const resolvedVerb = verb ?? "on"; // bare harness name defaults to `on`
+  const harnessModule = await loadHarness(harnessName);
+  const resolvedVerb = verb ?? (harnessModule.run ? "run" : "on");
   if (!isHarnessVerb(resolvedVerb)) {
-    throw new Error(`Unknown command "${harnessName} ${verb}". Expected: on, off, status.`);
+    throw new Error(`Unknown command "${harnessName} ${verb}". Expected: run, on, off, status.`);
+  }
+  const handler = harnessModule[resolvedVerb];
+  if (!handler) {
+    const supported = (["run", "on", "off", "status"] as const).filter((candidate) => Boolean(harnessModule[candidate]));
+    throw new Error(`"${harnessName} ${resolvedVerb}" is not supported. Expected: ${supported.join(", ")}.`);
   }
 
-  const harnessModule = await loadHarness(harnessName);
   const ctx = { home: os.homedir(), ...flags };
-  const result = await harnessModule[resolvedVerb](ctx);
+  const result = await handler(ctx);
   renderResult(result, flags);
 }
 

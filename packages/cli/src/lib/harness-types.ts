@@ -1,12 +1,11 @@
 import type { HarnessId } from "./harness.js";
 
-const REQUIRED_METHODS = ["on", "off", "status"] as const;
-
 export type HarnessContext = {
   home: string;
   apiKey?: string;
   apiKeyFromFlag?: boolean;
   main?: string;
+  passthrough?: string[];
   json?: boolean;
   search?: string;
   slot?: string;
@@ -20,9 +19,11 @@ export type HarnessResult = {
 export type Harness = {
   id: HarnessId;
   label: string;
+  mode?: "persistent" | "ephemeral";
   resolveKey?: (ctx: HarnessContext) => Promise<string>;
-  on: (ctx: HarnessContext) => Promise<HarnessResult>;
-  off: (ctx: HarnessContext) => Promise<HarnessResult>;
+  run?: (ctx: HarnessContext) => Promise<HarnessResult>;
+  on?: (ctx: HarnessContext) => Promise<HarnessResult>;
+  off?: (ctx: HarnessContext) => Promise<HarnessResult>;
   status: (ctx: HarnessContext) => Promise<HarnessResult>;
 };
 
@@ -32,10 +33,11 @@ export type Harness = {
  * time.
  */
 export function defineHarness(impl: Harness): Harness {
-  for (const method of REQUIRED_METHODS) {
-    if (typeof impl[method] !== "function") {
-      throw new Error(`Harness "${impl.id}" is missing required method "${method}"`);
-    }
+  if (typeof impl.status !== "function") {
+    throw new Error(`Harness "${impl.id}" is missing required method "status"`);
+  }
+  if (!impl.run && !impl.on) {
+    throw new Error(`Harness "${impl.id}" must define either "run" or "on"`);
   }
   return impl;
 }

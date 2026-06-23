@@ -1,7 +1,7 @@
 import os from "node:os";
 import * as clack from "@clack/prompts";
 import { ALL_HARNESSES, HARNESS_LABEL, type HarnessId } from "../harness.js";
-import { isHarnessImplemented, loadHarness } from "../harness-registry.js";
+import { isHarnessConfigurable, isHarnessImplemented, loadHarness } from "../harness-registry.js";
 import { detectInstalledHarnesses } from "../detect.js";
 import { readGlobalConfig, setGlobalApiKey, resolveStoredApiKey } from "../global-config.js";
 
@@ -10,8 +10,9 @@ export function printHelp() {
 
 Usage:
   togetherlink configure              Detect installed tools, set your Together API key, configure them
+  togetherlink claude [run] [-- ...]  Launch Claude Code through a local Together proxy (ephemeral)
+  togetherlink claude status          Show Claude Code local proxy defaults
   togetherlink opencode on|off|status Register/unregister Together as an OpenCode provider (persistent)
-  togetherlink claude ...             Coming soon (needs a local translation proxy)
   togetherlink codex ...              Coming soon (needs a local translation proxy)
   togetherlink help                   Show this message
 `);
@@ -23,11 +24,21 @@ export async function runConfigure() {
 
   const detected = detectInstalledHarnesses();
   const implemented = ALL_HARNESSES.filter((h) => isHarnessImplemented(h));
+  const configurable: HarnessId[] = [];
+  for (const harness of implemented) {
+    if (await isHarnessConfigurable(harness)) {
+      configurable.push(harness);
+    }
+  }
   const notImplemented = ALL_HARNESSES.filter((h) => !isHarnessImplemented(h));
 
   const lines = ALL_HARNESSES.map((h) => {
     const found = detected[h].installed ? "found" : "not found";
-    const support = isHarnessImplemented(h) ? "" : " (support coming later)";
+    const support = isHarnessImplemented(h)
+      ? configurable.includes(h)
+        ? ""
+        : " (ephemeral launcher)"
+      : " (support coming later)";
     return `  ${HARNESS_LABEL[h]}: ${found}${support}`;
   });
   clack.log.info(`Detected tools:\n${lines.join("\n")}`);
@@ -48,7 +59,7 @@ export async function runConfigure() {
   await setGlobalApiKey(home, apiKey);
 
   const toConfigure: HarnessId[] = [];
-  for (const harness of implemented) {
+  for (const harness of configurable) {
     if (detected[harness].installed) {
       toConfigure.push(harness);
       continue;
@@ -71,6 +82,9 @@ export async function runConfigure() {
     spinner.start(`Configuring ${HARNESS_LABEL[harness]}`);
     try {
       const harnessModule = await loadHarness(harness);
+      if (!harnessModule.on) {
+        throw new Error(`${HARNESS_LABEL[harness]} is not a persistent configurable harness.`);
+      }
       const result = await harnessModule.on({ home, apiKey });
       spinner.stop(result?.message ?? `${HARNESS_LABEL[harness]} configured.`);
     } catch (err) {

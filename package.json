@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
+    "dev": "pnpm -F @togetherlink/cli dev",
+    "watch": "pnpm dev",
     "typecheck": "pnpm -r typecheck"
   },
   "engines": {

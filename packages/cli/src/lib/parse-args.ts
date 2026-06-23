@@ -31,6 +31,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (token === undefined) {
       continue;
     }
+    if (token === "--") {
+      flags.passthrough = argv.slice(i + 1);
+      break;
+    }
     if (BOOLEAN_FLAGS.has(token)) {
       flags[BOOLEAN_FLAG_KEYS[token as keyof typeof BOOLEAN_FLAG_KEYS]] = true;
       continue;

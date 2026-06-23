@@ -14,6 +14,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/bin/togetherlink.js', 0o755)\"",
+    "dev": "pnpm build && sh -c 'node scripts/watch-bin-mode.mjs & tsc -p tsconfig.json --watch --preserveWatchOutput'",
+    "watch": "pnpm dev",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepack": "pnpm build",
     "test": "pnpm typecheck"
