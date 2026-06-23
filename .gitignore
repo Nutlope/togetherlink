@@ -147,3 +147,5 @@ vite.config.ts.timestamp-*
 .DS_Store
 
 images-test/*
+
+/scripts/bench-vision-out/*
