@@ -22,7 +22,16 @@ export const Route = createRootRoute({
           'A single self-updating binary that routes OpenCode and Claude Code through Together AI models like GLM 5.2.',
       },
     ],
-    links: [{ rel: 'stylesheet', href: appCss }],
+    links: [
+      { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
+      {
+        rel: 'icon',
+        href: '/togetherlink-logo.svg',
+        type: 'image/svg+xml',
+      },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+    ],
   }),
   component: RootComponent,
 })

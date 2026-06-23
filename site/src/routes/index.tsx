@@ -106,7 +106,12 @@ function Home() {
         </a>
         <span className="h-[18px] w-px bg-line" />
         <div className="flex items-center gap-2 text-base font-semibold text-ink">
-          <span className="relative size-5 rounded-[5px] bg-ink after:absolute after:inset-[5px] after:rounded-sm after:bg-white" />
+          <img
+            className="block size-[22px]"
+            src="/togetherlink-logo.svg"
+            alt=""
+            aria-hidden="true"
+          />
           togetherlink
         </div>
         <nav className="ml-auto flex gap-[22px] text-sm font-medium text-muted max-[520px]:ml-0 max-[520px]:basis-full max-[520px]:gap-[18px]">
