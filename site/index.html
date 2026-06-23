@@ -7,141 +7,214 @@
     <meta name="description" content="A single self-updating binary that routes OpenCode and Claude Code through Together AI models like GLM 5.2." />
     <style>
       :root {
-        --bg: #0b0d10;
-        --panel: #14181d;
-        --ink: #e7e9ee;
-        --mut: #9aa3b2;
-        --acc: #7c5cff;
-        --acc2: #2dd4bf;
-        --line: #232932;
-        --code-bg: #0f1217;
+        --bg: #ffffff;
+        --ink: #0a0a0a;
+        --mut: #6b7280;
+        --faint: #9ca3af;
+        --line: #eceef1;
+        --line2: #e5e7eb;
+        --acc: #0a0a0a;
+        --code-bg: #fafafa;
+        --shadow: 0 1px 2px rgba(10,10,10,.04), 0 8px 24px rgba(10,10,10,.05);
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; padding: 0; }
       body {
-        background: radial-gradient(1200px 600px at 50% -10%, #1a1f29 0%, var(--bg) 55%) fixed;
+        background: var(--bg);
         color: var(--ink);
-        font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
       }
-      a { color: var(--acc2); text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
-      header { padding: 28px 0 8px; display: flex; align-items: center; gap: 12px; }
-      .logo { font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
-      .logo .dot { color: var(--acc); }
-      nav { margin-left: auto; }
-      nav a { color: var(--mut); margin-left: 18px; font-size: 14px; }
-      nav a:hover { color: var(--ink); text-decoration: none; }
-      .hero { padding: 64px 0 32px; text-align: center; }
+      a { color: var(--ink); text-decoration: none; }
+      a:hover { color: var(--mut); }
+      .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+      header {
+        padding: 24px 0 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .logo {
+        font-weight: 600;
+        font-size: 16px;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .logo .mark {
+        width: 20px; height: 20px;
+        border-radius: 5px;
+        background: var(--ink);
+        display: inline-block;
+        position: relative;
+      }
+      .logo .mark::after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 2px;
+        background: var(--bg);
+      }
+      nav { margin-left: auto; display: flex; gap: 22px; }
+      nav a { color: var(--mut); font-size: 14px; font-weight: 500; }
+      nav a:hover { color: var(--ink); }
+
+      .hero { padding: 88px 0 40px; text-align: center; }
+      .eyebrow {
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--mut);
+        border: 1px solid var(--line2);
+        border-radius: 100px;
+        padding: 5px 14px;
+        margin-bottom: 28px;
+        background: var(--bg);
+      }
       .hero h1 {
-        font-size: clamp(34px, 6vw, 56px);
-        line-height: 1.05;
-        letter-spacing: -0.02em;
-        margin: 0 0 18px;
-        font-weight: 800;
+        font-size: clamp(34px, 6vw, 52px);
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+        margin: 0 0 20px;
+        font-weight: 600;
       }
-      .hero h1 .grad {
-        background: linear-gradient(92deg, var(--acc), var(--acc2));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-      }
-      .hero p { color: var(--mut); font-size: 19px; max-width: 620px; margin: 0 auto 32px; }
+      .hero p { color: var(--mut); font-size: 19px; max-width: 600px; margin: 0 auto 36px; line-height: 1.5; }
+
       .install {
         background: var(--code-bg);
-        border: 1px solid var(--line);
+        border: 1px solid var(--line2);
         border-radius: 12px;
-        padding: 18px 18px 18px 20px;
-        max-width: 640px;
-        margin: 0 auto 14px;
+        padding: 16px 16px 16px 18px;
+        max-width: 600px;
+        margin: 0 auto 16px;
         display: flex;
         align-items: center;
         gap: 12px;
-        font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
         font-size: 14px;
         text-align: left;
-        position: relative;
+        box-shadow: var(--shadow);
       }
       .install code { color: var(--ink); flex: 1; overflow-x: auto; white-space: nowrap; }
-      .install .prompt { color: var(--acc2); }
+      .install .prompt { color: var(--faint); user-select: none; }
       .install button {
-        background: transparent;
-        border: 1px solid var(--line);
+        background: var(--bg);
+        border: 1px solid var(--line2);
         color: var(--mut);
         border-radius: 8px;
-        padding: 7px 12px;
+        padding: 7px 13px;
         font-size: 13px;
+        font-weight: 500;
         cursor: pointer;
         transition: all .15s;
         white-space: nowrap;
         font-family: inherit;
       }
-      .install button:hover { color: var(--ink); border-color: var(--acc); }
-      .install button.copied { color: var(--acc2); border-color: var(--acc2); }
-      .hint { color: var(--mut); font-size: 13px; margin-top: 8px; }
-      .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 56px 0; }
-      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 20px; }
-      .card h3 { margin: 0 0 8px; font-size: 17px; }
-      .card p { margin: 0; color: var(--mut); font-size: 14.5px; }
-      .card .tag { display: inline-block; font-size: 11px; font-weight: 600; color: var(--acc2); border: 1px solid var(--acc2); border-radius: 20px; padding: 2px 9px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .04em; }
-      .card .tag.soon { color: var(--mut); border-color: var(--line); }
-      .steps { margin: 24px 0 64px; }
-      .steps h2 { font-size: 22px; margin: 0 0 18px; }
-      .step { display: flex; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
-      .step:first-of-type { border-top: none; }
-      .step .n { color: var(--acc); font-weight: 700; min-width: 22px; }
-      .step code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; font-family: "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 13px; color: var(--ink); }
-      footer { border-top: 1px solid var(--line); padding: 28px 0 48px; color: var(--mut); font-size: 14px; }
-      footer .links a { margin-right: 18px; }
-      .ver { color: var(--mut); font-size: 13px; }
+      .install button:hover { color: var(--ink); border-color: var(--ink); }
+      .install button.copied { color: var(--ink); border-color: var(--ink); background: var(--ink); color: var(--bg); }
+      .hint { color: var(--faint); font-size: 13px; margin-top: 10px; }
+
+      .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin: 72px 0; }
+      .card {
+        background: var(--bg);
+        border: 1px solid var(--line2);
+        border-radius: 14px;
+        padding: 24px 22px 22px;
+        transition: border-color .15s, box-shadow .15s;
+      }
+      .card:hover { border-color: var(--faint); box-shadow: var(--shadow); }
+      .card h3 { margin: 14px 0 8px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+      .card p { margin: 0; color: var(--mut); font-size: 14.5px; line-height: 1.55; }
+      .card code { color: var(--ink); }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 4px 9px;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        background: #f3f4f6;
+      }
+      .tag .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+      .tag.soon { color: var(--mut); background: var(--code-bg); }
+      .tag.soon .dot { background: var(--faint); }
+      .tag.updates .dot { background: var(--ink); }
+
+      .steps { margin: 8px 0 80px; }
+      .steps h2 { font-size: 20px; margin: 0 0 20px; font-weight: 600; letter-spacing: -0.01em; }
+      .step { display: flex; gap: 18px; padding: 18px 0; border-top: 1px solid var(--line); align-items: baseline; }
+      .step:first-of-type { border-top: none; padding-top: 4px; }
+      .step .n { color: var(--faint); font-weight: 600; font-size: 14px; min-width: 18px; }
+      .step .body { color: var(--mut); font-size: 15px; }
+      .step code {
+        background: var(--code-bg);
+        border: 1px solid var(--line2);
+        border-radius: 6px;
+        padding: 2px 7px;
+        font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+        font-size: 13px;
+        color: var(--ink);
+      }
+
+      footer { border-top: 1px solid var(--line); padding: 32px 0 56px; color: var(--faint); font-size: 14px; }
+      footer .links { display: flex; gap: 22px; margin-bottom: 10px; }
+      footer .links a { color: var(--mut); }
+      footer .links a:hover { color: var(--ink); }
+      .ver { font-size: 13px; }
     </style>
   </head>
   <body>
     <div class="wrap">
       <header>
-        <div class="logo">togetherlink</div>
+        <div class="logo"><span class="mark"></span> togetherlink</div>
         <nav>
           <a href="https://github.com/riccardogiorato/togetherlink">GitHub</a>
-          <a href="https://api.together.ai/settings/api-keys" target="_blank" rel="noopener">Get an API key</a>
+          <a href="https://api.together.ai/settings/api-keys" target="_blank" rel="noopener">API keys</a>
         </nav>
       </header>
 
       <section class="hero">
-        <h1>Use <span class="grad">Together AI</span> models in<br />OpenCode &amp; Claude Code</h1>
-        <p>One small, self-updating binary. Install in a second, run <code>topencode</code> or <code>tclaude</code>, and your existing tools route through Together AI models like GLM&nbsp;5.2 — no proxy to run, no config to write.</p>
+        <span class="eyebrow">Together AI · for OpenCode &amp; Claude Code</span>
+        <h1>Together models,<br />right inside your editor.</h1>
+        <p>One tiny, always-current binary. Install in a second, run <code style="color:var(--ink)">topencode</code> or <code style="color:var(--ink)">tclaude</code>, and your existing tools route through Together AI models like GLM&nbsp;5.2 — no proxy to run, no config to write.</p>
 
         <div class="install" id="installBox">
           <span class="prompt">$</span>
           <code id="installCmd">curl -fsSL https://togetherlink.vercel.app/install.sh | sh</code>
           <button id="copyBtn" aria-label="Copy install command">Copy</button>
         </div>
-        <div class="hint">Works on macOS &amp; Linux · installs Bun for you if needed · auto-updates in the background</div>
+        <div class="hint">macOS &amp; Linux · installs Bun for you if needed · keeps itself up to date</div>
       </section>
 
       <section class="features">
         <div class="card">
-          <span class="tag">Supported</span>
+          <span class="tag"><span class="dot"></span>Supported</span>
           <h3>OpenCode</h3>
-          <p>Run <code style="color:var(--ink)">topencode</code> and OpenCode launches with Together GLM&nbsp;5.2 wired in — config injected, nothing written to disk.</p>
+          <p>Run <code>topencode</code> and OpenCode launches with Together GLM&nbsp;5.2 wired in — config injected, nothing written to disk.</p>
         </div>
         <div class="card">
-          <span class="tag soon">Supported · optimizing</span>
+          <span class="tag soon"><span class="dot"></span>Supported · optimizing</span>
           <h3>Claude Code</h3>
-          <p>Run <code style="color:var(--ink)">tclaude</code> and Claude Code routes through a local translation proxy. A lighter shared-daemon build is coming via auto-update.</p>
+          <p>Run <code>tclaude</code> and Claude Code routes through a local translation proxy. A lighter shared-daemon build arrives via auto-update.</p>
         </div>
         <div class="card">
-          <span class="tag soon">Auto-updating</span>
-          <h3>Stays current</h3>
-          <p>The binary checks for new versions in the background and swaps itself atomically. Your <code style="color:var(--ink)">topencode</code> command never changes; it just gets better.</p>
+          <span class="tag updates"><span class="dot"></span>Always current</span>
+          <h3>Auto-updating</h3>
+          <p>The binary checks for new versions in the background and swaps itself atomically. Your command never changes — it just gets better.</p>
         </div>
       </section>
 
       <section class="steps">
         <h2>Get started</h2>
-        <div class="step"><span class="n">1</span><div>Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code> and adds the <code>togetherlink</code>, <code>tclaude</code> and <code>topencode</code> commands.</div></div>
-        <div class="step"><span class="n">2</span><div>Run <code>topencode</code> (or <code>tclaude</code>). On first launch it asks once for your Together API key — press Enter to skip and add it later.</div></div>
-        <div class="step"><span class="n">3</span><div>That's it. Your tool runs against Together models. Updates arrive automatically; opt out anytime with <code>TOGETHERLINK_NO_AUTOPDATE=1</code>.</div></div>
+        <div class="step"><span class="n">1</span><div class="body">Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code> and adds <code>togetherlink</code>, <code>tclaude</code> and <code>topencode</code>.</div></div>
+        <div class="step"><span class="n">2</span><div class="body">Run <code>topencode</code> (or <code>tclaude</code>). On first launch it asks once for your Together API key — press Enter to skip and add it later.</div></div>
+        <div class="step"><span class="n">3</span><div class="body">That's it. Your tool runs against Together models and stays up to date on its own.</div></div>
       </section>
 
       <footer>
@@ -151,7 +224,7 @@
           <a href="https://api.together.ai" target="_blank" rel="noopener">Together AI</a>
           <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode</a>
         </div>
-        <p class="ver" id="ver">MIT-style · Apache-2.0</p>
+        <p class="ver" id="ver">Apache-2.0</p>
       </footer>
     </div>
 
@@ -165,7 +238,6 @@
           btn.classList.add("copied");
           setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
         } catch (e) {
-          // Clipboard can fail on non-HTTPS / old browsers; fall back to selection.
           const range = document.createRange();
           range.selectNode(document.getElementById("installCmd"));
           window.getSelection().removeAllRanges();
@@ -174,15 +246,9 @@
           setTimeout(() => { btn.textContent = "Copy"; }, 1600);
         }
       });
-      // Show the currently-shipped version from the manifest, so the page
-      // and the binary always advertise the same release.
       fetch("latest.json", { cache: "no-store" })
         .then((r) => r.json())
-        .then((m) => {
-          if (m && m.version) {
-            document.getElementById("ver").textContent = "v" + m.version + " · Apache-2.0";
-          }
-        })
+        .then((m) => { if (m && m.version) document.getElementById("ver").textContent = "v" + m.version + " · Apache-2.0"; })
         .catch(() => {});
     </script>
   </body>

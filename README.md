@@ -17,7 +17,7 @@ topencode            # OpenCode with Together GLM 5.2 (officially supported)
 tclaude              # Claude Code through a local Together proxy
 ```
 
-On first launch, togetherlink asks once for your Together API key (press Enter to skip — the key is optional and can be added later with `togetherlink configure` or `TOGETHER_API_KEY`). The binary self-updates in the background from `togetherlink.dev`; opt out with `TOGETHERLINK_NO_AUTOPDATE=1` or `--no-update`.
+On first launch, togetherlink asks once for your Together API key (press Enter to skip — the key is optional and can be added later with `togetherlink configure` or `TOGETHER_API_KEY`). The binary keeps itself up to date automatically from `togetherlink.vercel.app`.
 
 ## Local Development
 
