@@ -24,6 +24,7 @@
         color: var(--ink);
         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
         text-rendering: optimizeLegibility;
       }
       a { color: var(--ink); text-decoration: none; }
@@ -88,8 +89,9 @@
         letter-spacing: -0.03em;
         margin: 0 0 20px;
         font-weight: 600;
+        text-wrap: balance;
       }
-      .hero p { color: var(--mut); font-size: 19px; max-width: 600px; margin: 0 auto 36px; line-height: 1.5; }
+      .hero p { color: var(--mut); font-size: 19px; max-width: 600px; margin: 0 auto 36px; line-height: 1.5; text-wrap: pretty; }
 
       .install {
         background: var(--code-bg);
@@ -106,7 +108,20 @@
         text-align: left;
         box-shadow: var(--shadow);
       }
-      .install code { color: var(--ink); flex: 1; overflow-x: auto; white-space: nowrap; }
+      .install code {
+        color: var(--ink);
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: visible;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        font-size: var(--fit-font-size, 14px);
+        line-height: 1.4;
+      }
+      .install code.fit-wrap {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
       .install .prompt { color: var(--faint); user-select: none; }
       .install button {
         background: var(--bg);
@@ -114,13 +129,15 @@
         color: var(--mut);
         border-radius: 8px;
         padding: 7px 13px;
+        min-width: 58px;
         font-size: 13px;
         font-weight: 500;
         cursor: pointer;
-        transition: all .15s;
+        transition: color .15s, border-color .15s, background-color .15s, transform .15s;
         white-space: nowrap;
         font-family: inherit;
       }
+      .install button:active { transform: scale(0.96); }
       .install button:hover { color: var(--ink); border-color: var(--ink); }
       .install button.copied { color: var(--ink); border-color: var(--ink); background: var(--ink); color: var(--bg); }
       .hint { color: var(--faint); font-size: 13px; margin-top: 10px; }
@@ -176,6 +193,20 @@
       footer .links a { color: var(--mut); }
       footer .links a:hover { color: var(--ink); }
       .ver { font-size: 13px; }
+
+      @media (max-width: 520px) {
+        .wrap { padding: 0 18px; }
+        header {
+          flex-wrap: wrap;
+          row-gap: 14px;
+        }
+        nav {
+          flex-basis: 100%;
+          margin-left: 0;
+          gap: 18px;
+        }
+        .hero { padding-top: 64px; }
+      }
     </style>
   </head>
   <body>
@@ -199,7 +230,7 @@
 
         <div class="install" id="installBox">
           <span class="prompt">$</span>
-          <code id="installCmd">curl -fsSL https://togetherlink.vercel.app/install.sh | sh</code>
+          <code id="installCmd" data-fit-text data-fit-max="14" data-fit-min="10">curl -fsSL https://togetherlink.vercel.app/install.sh | sh</code>
           <button id="copyBtn" aria-label="Copy install command">Copy</button>
         </div>
         <div class="hint">macOS &amp; Linux · installs Bun for you if needed · keeps itself up to date</div>
@@ -244,19 +275,48 @@
     <script>
       const cmd = document.getElementById("installCmd").textContent.trim();
       const btn = document.getElementById("copyBtn");
+      const fitText = (el) => {
+        const max = Number(el.dataset.fitMax || 14);
+        const min = Number(el.dataset.fitMin || 10);
+        let low = min;
+        let high = max;
+        el.classList.remove("fit-wrap");
+        el.style.setProperty("--fit-font-size", `${max}px`);
+        if (el.scrollWidth <= el.clientWidth) return;
+        for (let i = 0; i < 12; i += 1) {
+          const mid = (low + high) / 2;
+          el.style.setProperty("--fit-font-size", `${mid}px`);
+          if (el.scrollWidth <= el.clientWidth) low = mid;
+          else high = mid;
+        }
+        el.style.setProperty("--fit-font-size", `${Math.max(min, low - 0.1)}px`);
+        if (el.scrollWidth > el.clientWidth) el.classList.add("fit-wrap");
+      };
+      const fitAllText = () => {
+        document.querySelectorAll("[data-fit-text]").forEach(fitText);
+      };
+      fitAllText();
+      if ("ResizeObserver" in window) {
+        const resizeObserver = new ResizeObserver(fitAllText);
+        document.querySelectorAll("[data-fit-text]").forEach((el) => resizeObserver.observe(el.parentElement || el));
+      } else {
+        window.addEventListener("resize", fitAllText);
+      }
       btn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(cmd);
           btn.textContent = "Copied";
           btn.classList.add("copied");
-          setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
+          fitAllText();
+          setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); fitAllText(); }, 1400);
         } catch (e) {
           const range = document.createRange();
           range.selectNode(document.getElementById("installCmd"));
           window.getSelection().removeAllRanges();
           window.getSelection().addRange(range);
           btn.textContent = "Select ⌘C";
-          setTimeout(() => { btn.textContent = "Copy"; }, 1600);
+          fitAllText();
+          setTimeout(() => { btn.textContent = "Copy"; fitAllText(); }, 1600);
         }
       });
       fetch("latest.json", { cache: "no-store" })
