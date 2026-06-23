@@ -12,12 +12,14 @@ const features = [
     body: (
       <>
         Run <code>topencode</code> and OpenCode launches with Together GLM 5.2
-        wired in - config injected, nothing written to disk.
+        wired in - config injected into an ephemeral session, nothing written
+        to disk. Close it and your OpenCode setup is exactly as it was.
       </>
     ),
     supportLabel: 'Ephemeral launch',
     supportValue: '100%',
     icon: <OpenCodeMark />,
+    accent: undefined,
   },
   {
     title: 'Claude Code',
@@ -26,13 +28,14 @@ const features = [
     body: (
       <>
         Run <code>tclaude</code> and Claude Code routes through a local
-        translation proxy. A lighter shared-daemon build arrives via
-        auto-update.
+        translation proxy - no edits to your real config. You keep your Claude
+        Code subscription and login the whole time.
       </>
     ),
     supportLabel: 'Proxy compatibility',
     supportValue: '85%',
     icon: <ClaudeMark />,
+    accent: undefined,
   },
   {
     title: 'Auto-updating',
@@ -47,6 +50,7 @@ const features = [
     supportLabel: 'Self-update path',
     supportValue: '100%',
     icon: <UpdateMark />,
+    accent: undefined,
   },
 ]
 
@@ -132,7 +136,7 @@ function Home() {
         </nav>
       </header>
 
-      <section className="py-[88px] pb-10 text-center max-[520px]:pt-16">
+      <section className="py-[88px] pb-4 text-center max-[520px]:pt-16">
         <span className="mb-7 inline-block rounded-full border border-line-strong bg-white px-3.5 py-1.5 text-[13px] font-medium text-muted">
           Together AI - for OpenCode & Claude Code
         </span>
@@ -141,10 +145,10 @@ function Home() {
           <br />
           right inside your editor.
         </h1>
-        <p className="mx-auto mt-5 mb-9 max-w-[600px] text-pretty text-[19px] leading-normal text-muted">
-          One tiny, always-current binary. Install in a second, run{' '}
+        <p className="mx-auto mt-5 mb-9 max-w-[560px] text-pretty text-[19px] leading-normal text-muted">
+          One tiny, always-current binary. Run{' '}
           <code className="text-ink">topencode</code> or{' '}
-          <code className="text-ink">tclaude</code>, and your existing tools
+          <code className="text-ink">tclaude</code> and your existing tools
           route through Together AI models like GLM 5.2 - no proxy to run, no
           config to write.
         </p>
@@ -175,16 +179,42 @@ function Home() {
           macOS & Linux - installs Bun for you if needed - keeps itself up to
           date
         </div>
+
+        <div className="mx-auto mt-8 max-w-[680px] overflow-hidden rounded-[18px] border border-emerald-200/70 bg-[linear-gradient(135deg,#f0fdf4_0%,#f7fee7_55%,#ffffff_100%)] text-left shadow-[0_1px_2px_rgba(10,10,10,.04),0_10px_30px_-12px_rgba(16,185,129,.18)]">
+          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:gap-5">
+            <span className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-full border border-emerald-300/70 bg-white text-emerald-600 shadow-[inset_0_1px_0_rgba(255,255,255,.8)]">
+              <ShieldMark />
+            </span>
+            <p className="m-0 text-[14.5px] leading-relaxed text-muted">
+              <strong className="font-semibold text-ink">
+                Non-destructive by design.
+              </strong>{' '}
+              Every change happens in an ephemeral session - nothing is saved to
+              disk, no files are rewritten. Your Claude Code subscription and
+              your existing OpenCode or Claude Code config are never touched.
+              Install and drop it any time; everything goes back exactly as it
+              was.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted">
+            <Guarantee icon={<NoDiskMark />} label="Nothing written to disk" />
+            <Guarantee icon={<NoDiskMark />} label="No config overwritten" />
+            <Guarantee icon={<NoDiskMark />} label="Keep your subscription" />
+          </div>
+        </div>
       </section>
 
-      <section className="my-[72px] grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-3.5">
+      <section className="mt-[52px] mb-[72px] grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-3.5">
         {features.map((feature) => (
           <article
             key={feature.title}
             className="rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]"
           >
             <div className="flex items-start justify-between gap-3.5">
-              <span className="inline-flex size-[42px] shrink-0 items-center justify-center rounded-[10px] border border-line-strong bg-code text-ink shadow-[inset_0_1px_0_rgba(255,255,255,.72)]">
+              <span
+                className="inline-flex size-[42px] shrink-0 items-center justify-center rounded-[10px] border border-line-strong bg-code text-ink shadow-[inset_0_1px_0_rgba(255,255,255,.72)] data-[accent=emerald]:border-emerald-200 data-[accent=emerald]:bg-emerald-50 data-[accent=emerald]:text-emerald-600"
+                data-accent={feature.accent}
+              >
                 {feature.icon}
               </span>
               <span
@@ -226,7 +256,9 @@ function Home() {
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date
-          on its own.
+          on its own. Change your mind? Just stop using it - nothing was saved,
+          so your Claude Code subscription and your OpenCode/Claude Code config
+          are untouched.
         </Step>
       </section>
 
@@ -295,6 +327,52 @@ function ClaudeMark() {
       <path
         fill="#d97757"
         d="M233.96 800.215 468.644 668.537l3.947-11.436-3.947-6.363h-11.436l-39.221-2.416-134.094-3.624-116.296-4.832-112.671-6.04-28.349-6.041L0 592.752l2.738-17.477 23.839-16.027 34.148 2.98 75.463 5.155 113.235 7.812 82.148 4.832 121.691 12.644h19.329l2.738-7.812-6.604-4.832-5.154-4.832-117.182-79.41-126.846-83.919-66.442-48.322-35.92-24.483-18.12-22.953-7.813-50.094 32.617-35.92 43.812 2.98 11.195 2.98 44.376 34.148 94.792 73.369 123.785 91.168 18.121 15.06 7.248-5.154.886-3.624-8.134-13.611-67.329-121.691-71.839-123.785-31.973-51.302-8.456-30.765c-2.98-12.644-5.154-23.275-5.154-36.241L312.322 13.208l20.537-6.604 49.53 6.604 20.859 18.121 30.765 70.389 49.852 110.819 77.316 150.684 22.631 44.698 12.08 41.396 4.511 12.645h7.812v-7.248l6.362-84.886 11.759-104.215 11.436-134.094 3.946-37.772 18.685-45.262L697.53 24l28.993 13.852L750.363 72l-3.302 22.067-14.175 92.134-27.785 144.322-18.121 96.645h10.55l12.081-12.081 48.886-64.912 82.148-102.685 36.241-40.752 42.282-45.02 27.141-21.423h51.302l37.772 56.134-16.913 57.987-52.832 67.007-43.812 56.778-62.819 84.564-39.221 67.651 3.624 5.396 9.342-.886 141.906-30.201 76.671-13.852 91.49-15.705 41.396 19.329 4.51 19.651-16.268 40.188-97.852 24.161-114.765 22.953-170.899 40.429-2.094 1.53 2.416 2.98 76.993 7.248 32.94 1.772h80.617l150.121 11.195 39.221 25.933 23.517 31.732-3.946 24.161-60.403 30.765-81.503-19.329-190.228-45.262-65.235-16.268h-9.02v5.396l54.362 53.154 99.624 89.96 124.752 115.973 6.362 28.671-16.027 22.631-16.912-2.416-109.611-82.47-42.282-37.127-95.758-80.618h-6.363v8.456l22.067 32.295 116.537 175.168 6.04 53.718-8.456 17.476-30.201 10.55-33.181-6.04-68.215-95.758-70.389-107.839-56.779-96.644-6.926 3.946-33.503 360.886-15.705 18.443L565.53 1200l-30.201-22.953-16.027-37.127 16.027-73.369 19.329-95.758 15.705-76.107 14.174-94.55 8.456-31.41-.563-2.095-6.927.886-71.275 97.852-108.402 146.497-85.772 91.812-20.537 8.134-35.597-18.443 3.302-32.939 19.893-29.316 118.711-151.007 71.597-93.583 46.228-54.04-.323-7.812h-2.738L205.289 929.396l-56.135 7.248-24.161-22.63 2.98-37.128 11.436-12.081 94.792-65.234-.322.322Z"
+      />
+    </svg>
+  )
+}
+
+function ShieldMark() {
+  return (
+    <svg className="size-[17px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3l7 2.5v5.2c0 4.6-3.1 8.9-7 10.3-3.9-1.4-7-5.7-7-10.3V5.5L12 3z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 12l2 2 4-4.2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function Guarantee({
+  icon,
+  label,
+}: Readonly<{ icon: ReactNode; label: string }>) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-emerald-500">{icon}</span>
+      {label}
+    </span>
+  )
+}
+
+function NoDiskMark() {
+  return (
+    <svg className="size-[13px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 12.5l5 5 9-11"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   )
