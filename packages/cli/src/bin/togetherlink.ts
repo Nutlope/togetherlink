@@ -1,7 +1,12 @@
 #!/usr/bin/env node
+import { loadEnvFile } from "../lib/load-env.js";
 import { parseArgs } from "../lib/parse-args.js";
 import { printHelp, runConfigure } from "../lib/commands/global.js";
 import { dispatchHarnessCommand } from "../lib/commands/harness.js";
+
+// Load a .env (cwd → repo root) before anything reads process.env, so keys
+// like TOGETHER_API_KEY / EXA_API_KEY are available without manual sourcing.
+loadEnvFile();
 
 async function main() {
   const { positional, flags } = parseArgs(process.argv.slice(2));
