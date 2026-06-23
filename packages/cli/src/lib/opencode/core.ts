@@ -69,12 +69,12 @@ export function buildOpencodeConfigJson({
 
   const provider: OpencodeProviderConfig = {
     npm: "@ai-sdk/togetherai",
-    // Short provider label: OpenCode appends this provider `name` to every
-    // model line in the /models picker (e.g. "GLM 5.2 · default  Together AI"),
-    // so a long name both repeats and pushes lines past the picker's truncation
-    // width (opencode #20968). "Together" is short enough that names don't
-    // get ellipsized.
-    name: "Together",
+    // Provider label: OpenCode appends this provider `name` to every model
+    // line in the /models picker (e.g. "GLM 5.2 · default  Together AI"). Kept
+    // as the full brand name; the model display names are kept short so the
+    // full suffix still fits without hitting the picker's truncation width
+    // (opencode #20968).
+    name: "Together AI",
     options: { apiKey: apiKeyEnvRef },
     models,
     // Restrict /models to exactly the curated set. Without this, OpenCode also
