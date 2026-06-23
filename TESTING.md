@@ -80,62 +80,6 @@ pnpm -F @togetherlink/cli exec togetherlink claude -- \
 
 This broader prompt may take more turns because GLM can overuse tools. It should still finish without a Together API error.
 
-Web-search smoke test:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink claude -- \
-  --print \
-  --output-format json \
-  --no-session-persistence \
-  --permission-mode bypassPermissions \
-  "was there a fifa world cup match yesterday?"
-```
-
-Expected result:
-
-- Claude Code may make an internal request with a native Anthropic `web_search_20250305` tool.
-- The proxy should execute the lowercase `web_search` tool internally, using Exa search.
-- `TOGETHERLINK_DEBUG=1` should show `exa search request` with a non-empty `query`.
-- Claude Code should not report `Did 0 searches`.
-- The JSON result has `"is_error": false`.
-
-Exa requires an API key:
-
-- Without `EXA_API_KEY`, the proxy returns a clear `Web search error: EXA_API_KEY is not set...` message instead of inventing results.
-- With `EXA_API_KEY`, the proxy calls `https://api.exa.ai/search` sending `x-api-key: $EXA_API_KEY`.
-- A provider error (e.g. invalid/over-quota key) is still a valid smoke result if the debug log proves the proxy called Exa and the final answer reports search unavailable instead of inventing results.
-
-Direct native web-search proxy test:
-
-```bash
-node --input-type=module <<'EOF'
-import { readGlobalConfig, resolveStoredApiKey } from './packages/cli/dist/lib/global-config.js';
-import { startClaudeProxy } from './packages/cli/dist/lib/claude/proxy.js';
-import { CLAUDE_DEFAULT_MODEL } from './packages/cli/dist/lib/claude/defaults.js';
-
-const config = await readGlobalConfig(process.env.HOME);
-const apiKey = resolveStoredApiKey(config.apiKey) || process.env.TOGETHER_API_KEY;
-if (!apiKey) throw new Error('No Together API key configured.');
-const proxy = await startClaudeProxy({ apiKey, modelId: CLAUDE_DEFAULT_MODEL, debug: true });
-try {
-  const response = await fetch(`${proxy.url}/v1/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: CLAUDE_DEFAULT_MODEL,
-      max_tokens: 400,
-      system: 'You must use the web_search tool for current facts before answering.',
-      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
-      messages: [{ role: 'user', content: 'Use web_search to find the latest news headline, then answer with sources.' }]
-    })
-  });
-  console.log(await response.text());
-} finally {
-  await proxy.close();
-}
-EOF
-```
-
 ## What These Tests Cover
 
 The basic chat test catches:
@@ -157,13 +101,6 @@ The repo-context test catches:
 - Multi-turn tool loops.
 - Large tool-result payloads.
 - Reasoning preservation across tool calls.
-
-The web-search test catches:
-
-- Native Anthropic server-tool conversion bugs.
-- Missing schema for `web_search_20250305`, which can make GLM emit `{}` instead of a search query.
-- Exa invocation and clear provider errors when search is unavailable.
-- `max_uses` regressions that would otherwise burn provider calls.
 
 ## Direct Together API Probe
 

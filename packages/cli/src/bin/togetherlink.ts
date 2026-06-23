@@ -22,11 +22,6 @@ async function main() {
     return;
   }
 
-  if (command === "uninstall") {
-    console.log("`uninstall` isn't built yet — for now, run `<harness> off` for each configured harness.");
-    return;
-  }
-
   await dispatchHarnessCommand(command, verb, flags);
 }
 
