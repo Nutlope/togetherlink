@@ -80,6 +80,25 @@ pnpm -F @togetherlink/cli exec togetherlink claude -- \
 
 This broader prompt may take more turns because GLM can overuse tools. It should still finish without a Together API error.
 
+Web-search smoke test:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink claude -- \
+  --print \
+  --output-format json \
+  --no-session-persistence \
+  --permission-mode bypassPermissions \
+  "was there a fifa world cup match yesterday?"
+```
+
+Expected result:
+
+- The top-level tool debug log shows `WebSearch` with a non-empty `query`.
+- Claude Code may make an internal request with a native Anthropic `web_search_20250305` tool.
+- The internal lowercase `web_search` tool call should also have a non-empty `query`.
+- Claude Code should not report `Did 0 searches`.
+- The JSON result has `"is_error": false`.
+
 ## What These Tests Cover
 
 The basic chat test catches:
@@ -101,6 +120,12 @@ The repo-context test catches:
 - Multi-turn tool loops.
 - Large tool-result payloads.
 - Reasoning preservation across tool calls.
+
+The web-search test catches:
+
+- Native Anthropic server-tool conversion bugs.
+- Missing schema for `web_search_20250305`, which can make GLM emit `{}` instead of a search query.
+- Streaming tool-input regressions for `WebSearch` and `WebFetch`.
 
 ## Direct Together API Probe
 

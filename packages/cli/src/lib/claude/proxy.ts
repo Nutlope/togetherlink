@@ -1,8 +1,8 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
-import { TOGETHER_BASE_URL } from "./together-core.js";
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./claude-defaults.js";
+import { TOGETHER_BASE_URL } from "../together-core.js";
+import { CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./defaults.js";
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
@@ -23,8 +23,16 @@ type AnthropicMessagesRequest = {
   stream?: boolean;
   system?: string | AnthropicContentBlock[];
   messages?: AnthropicMessage[];
-  tools?: Array<{ name: string; description?: string; input_schema?: unknown }>;
+  tools?: AnthropicTool[];
   tool_choice?: unknown;
+};
+
+type AnthropicTool = {
+  name?: string;
+  description?: string;
+  input_schema?: unknown;
+  type?: string;
+  [key: string]: unknown;
 };
 
 type OpenAIMessage = {
@@ -140,6 +148,7 @@ async function handleProxyRequest(
     stream: body.stream,
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
+    tools: summarizeAnthropicTools(body.tools),
   });
   const openAiResponse = await callTogetherChatCompletions(body, options);
   const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
@@ -166,7 +175,7 @@ async function callTogetherChatCompletions(
       function: {
         name: tool.name,
         description: tool.description ?? "",
-        parameters: tool.input_schema ?? { type: "object", properties: {} },
+        parameters: toOpenAIToolParameters(tool),
       },
     })),
     reasoning_effort: "high",
@@ -209,6 +218,26 @@ async function callTogetherChatCompletions(
 function resolveTargetModel(_requestedModel: string | undefined, _options: ClaudeProxyOptions): string {
   const targetModel = CLAUDE_DEFAULT_TOGETHER_MODEL;
   return targetModel;
+}
+
+function toOpenAIToolParameters(tool: AnthropicTool): unknown {
+  if (tool.input_schema) {
+    return tool.input_schema;
+  }
+  if (tool.type === "web_search_20250305" || tool.name === "web_search") {
+    return {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    };
+  }
+  return { type: "object", properties: {} };
 }
 
 function toOpenAIMessages(body: AnthropicMessagesRequest): OpenAIMessage[] {
@@ -400,6 +429,22 @@ function stringifyAnthropicContent(content: AnthropicMessagesRequest["system"]):
 
 function stringifyUnknown(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? "");
+}
+
+function summarizeAnthropicTools(tools: AnthropicTool[] | undefined): Array<Record<string, unknown>> | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+  return tools.slice(0, 5).map((tool) => ({
+    name: tool.name,
+    type: tool.type,
+    inputSchemaKeys: objectKeys(tool.input_schema),
+    rawKeys: Object.keys(tool),
+  }));
+}
+
+function objectKeys(value: unknown): string[] | undefined {
+  return typeof value === "object" && value !== null ? Object.keys(value) : undefined;
 }
 
 function parseJsonOrEmpty(value: string | undefined): unknown {

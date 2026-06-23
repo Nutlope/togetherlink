@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_MODEL_NAME, CLAUDE_MODEL_CAPABILITIES } from "./claude-defaults.js";
-import { startClaudeProxy } from "./claude-proxy.js";
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_MODEL_NAME, CLAUDE_MODEL_CAPABILITIES } from "./defaults.js";
+import { startClaudeProxy } from "./proxy.js";
 
 const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_API_KEY",

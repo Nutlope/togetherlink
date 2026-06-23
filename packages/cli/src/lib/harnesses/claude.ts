@@ -1,8 +1,8 @@
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_TOGETHER_MODEL } from "../claude-defaults.js";
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_TOGETHER_MODEL } from "../claude/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext } from "../harness-types.js";
 import { resolveTogetherApiKey } from "../together-core.js";
-import { runClaudeTogether } from "../claude-core.js";
+import { runClaudeTogether } from "../claude/core.js";
 
 async function claudeResolveKey(ctx: HarnessContext): Promise<string> {
   return ctx.apiKey ?? process.env.TOGETHER_API_KEY?.trim() ?? "";
