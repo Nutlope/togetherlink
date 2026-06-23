@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_MODEL_NAME, CLAUDE_MODEL_CAPABILITIES } from "./defaults.js";
 import { startClaudeProxy } from "./proxy.js";
 
@@ -21,13 +22,14 @@ export function buildClaudeEnv({
   apiKey,
   modelId = CLAUDE_DEFAULT_MODEL,
   proxyUrl,
-}: ClaudeLaunchOptions & { proxyUrl: string }): NodeJS.ProcessEnv {
+  authToken,
+}: ClaudeLaunchOptions & { proxyUrl: string; authToken: string }): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of CONFLICTING_ENV_KEYS) {
     delete env[key];
   }
   env.ANTHROPIC_BASE_URL = proxyUrl;
-  env.ANTHROPIC_AUTH_TOKEN = "togetherlink-local-proxy";
+  env.ANTHROPIC_AUTH_TOKEN = authToken;
   env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1";
   env.ANTHROPIC_MODEL = modelId;
   env.ANTHROPIC_DEFAULT_OPUS_MODEL = modelId;
@@ -83,9 +85,11 @@ export function buildClaudeEnv({
 
 export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<ClaudeLaunchResult> {
   const modelId = options.modelId ?? CLAUDE_DEFAULT_MODEL;
+  const authToken = randomLocalProxyToken();
   const proxy = await startClaudeProxy({
     apiKey: options.apiKey,
     modelId,
+    authToken,
     debug: process.env.TOGETHERLINK_DEBUG === "1",
   });
 
@@ -105,9 +109,10 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
       "claude",
       [...claudeArgsWithoutModelOverrides(options.args ?? []), ...claudeExtraSettingsArgs(options.args ?? [])],
       {
-      env: buildClaudeEnv({ ...options, proxyUrl: proxy.url }),
-      stdio: "inherit",
-    });
+        env: buildClaudeEnv({ ...options, proxyUrl: proxy.url, authToken }),
+        stdio: "inherit",
+      },
+    );
 
     return await new Promise<ClaudeLaunchResult>((resolve, reject) => {
       child.on("error", reject);
@@ -120,6 +125,10 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     process.stderr.write(`${proxy.costSummary()}\n`);
     await proxy.close();
   }
+}
+
+function randomLocalProxyToken(): string {
+  return `togetherlink-${randomBytes(24).toString("base64url")}`;
 }
 
 function claudeArgsWithoutModelOverrides(args: string[]): string[] {

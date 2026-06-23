@@ -7,17 +7,6 @@ import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from ".
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { VERSION } from "../lib/version.js";
 
-// Load a .env (cwd → repo root) before anything reads process.env, so keys
-// like TOGETHER_API_KEY / EXA_API_KEY are available without manual sourcing.
-loadEnvFile();
-
-// If EXA_API_KEY still isn't set (not in the env or .env), fall back to the
-// key stored by `togetherlink configure`, so the proxy's web search works
-// without the user re-sourcing .env every session. Done without awaiting on
-// startup is unsafe (the proxy may read env before this resolves), so we load
-// it synchronously via the stored config path for the common case.
-await loadStoredExaKey();
-
 async function loadStoredExaKey(): Promise<void> {
   if (process.env.EXA_API_KEY) {
     return;
@@ -79,7 +68,18 @@ async function main() {
   // Self-update first (throttled, bounded, never throws). Placed before arg
   // parsing so even `togetherlink help` keeps an install current, but it's a
   // no-op unless this is the installed bundle and the throttle window passed.
+  // Keep this before loading project .env files so a repo cannot redirect the
+  // updater with TOGETHERLINK_MANIFEST_URL / TOGETHERLINK_HOME.
   await maybeSelfUpdate();
+
+  // Load a .env (cwd → repo root) after self-update, and only for approved
+  // credential keys, so local project env files cannot control the CLI runtime.
+  loadEnvFile();
+
+  // If EXA_API_KEY still isn't set (not in the env or .env), fall back to the
+  // key stored by `togetherlink configure`, so the proxy's web search works
+  // without the user re-sourcing .env every session.
+  await loadStoredExaKey();
 
   const { positional, flags } = parseArgs(process.argv.slice(2));
   const [command, verb] = positional;

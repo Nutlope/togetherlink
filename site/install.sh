@@ -102,10 +102,43 @@ find_writable_path_dir() {
 }
 
 if LINK_DIR="$(find_writable_path_dir)"; then
-  ln -sf "$BIN_DIR/togetherlink" "$LINK_DIR/togetherlink"
-  ln -sf "$BIN_DIR/tclaude" "$LINK_DIR/tclaude"
-  ln -sf "$BIN_DIR/topencode" "$LINK_DIR/topencode"
-  ok "Linked commands into current PATH → $LINK_DIR"
+  links_changed=0
+  links_skipped=0
+
+  install_link() {
+    name="$1"
+    target="$2"
+    dest="$LINK_DIR/$name"
+
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+      current="$(readlink "$dest" 2>/dev/null || true)"
+      case "$current" in
+        "$BIN_DIR"/*)
+          ln -sf "$target" "$dest"
+          links_changed=$((links_changed + 1))
+          return 0
+          ;;
+        *)
+          links_skipped=$((links_skipped + 1))
+          info "Skipped $dest (already exists; remove it or put $BIN_DIR earlier on PATH to use togetherlink here)"
+          return 0
+          ;;
+      esac
+    fi
+
+    ln -s "$target" "$dest"
+    links_changed=$((links_changed + 1))
+  }
+
+  install_link togetherlink "$BIN_DIR/togetherlink"
+  install_link tclaude "$BIN_DIR/tclaude"
+  install_link topencode "$BIN_DIR/topencode"
+  if [ "$links_changed" -gt 0 ]; then
+    ok "Linked $links_changed command(s) into current PATH → $LINK_DIR"
+  fi
+  if [ "$links_skipped" -gt 0 ]; then
+    info "Skipped $links_skipped existing command(s) in $LINK_DIR"
+  fi
 fi
 
 # --- 5. Help the user get it on PATH permanently -----------------------------

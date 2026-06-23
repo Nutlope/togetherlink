@@ -24,6 +24,8 @@ pnpm --filter @togetherlink/models build
 
 SITE_DIR="$ROOT/site"
 mkdir -p "$SITE_DIR"
+cp "$ROOT/scripts/install.sh" "$SITE_DIR/install.sh"
+echo "✓ installer → site/install.sh"
 
 # Bundle the CLI entry. --target=bun keeps Bun-only runtime assumptions; the
 # result is a single self-contained JS file with models inlined.

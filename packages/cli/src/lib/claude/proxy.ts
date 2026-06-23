@@ -1,6 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./defaults.js";
 import { GLM_5_2 } from "@togetherlink/models";
@@ -130,6 +130,7 @@ type ExaSearchResponse = {
 export type ClaudeProxyOptions = {
   apiKey: string;
   modelId: string;
+  authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
 };
@@ -141,6 +142,9 @@ export type ClaudeProxyHandle = {
 };
 
 export async function startClaudeProxy(options: ClaudeProxyOptions): Promise<ClaudeProxyHandle> {
+  if (!options.authToken) {
+    throw new Error("Claude proxy auth token is required.");
+  }
   // Create a shared tracker if the caller didn't supply one, so the handle can
   // always report a session total at shutdown.
   const costTracker = options.costTracker ?? new CostTracker();
@@ -193,6 +197,11 @@ async function handleProxyRequest(
 
   if (req.method === "GET" && path === "/healthz") {
     writeJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (!isAuthorized(req, options.authToken)) {
+    writeAnthropicError(res, 401, "authentication_error", "Unauthorized local proxy request.");
     return;
   }
 
@@ -298,6 +307,27 @@ async function handleProxyRequest(
   } else {
     writeJson(res, 200, anthropicMessage);
   }
+}
+
+function isAuthorized(req: IncomingMessage, authToken: string): boolean {
+  const authorization = req.headers.authorization;
+  if (constantTimeEqual(authorization, `Bearer ${authToken}`)) {
+    return true;
+  }
+  const apiKey = req.headers["x-api-key"];
+  return typeof apiKey === "string" && constantTimeEqual(apiKey, authToken);
+}
+
+function constantTimeEqual(actual: string | undefined, expected: string): boolean {
+  if (typeof actual !== "string") {
+    return false;
+  }
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  if (actualBytes.length !== expectedBytes.length) {
+    return false;
+  }
+  return timingSafeEqual(actualBytes, expectedBytes);
 }
 
 async function callTogetherChatCompletions(
