@@ -57,6 +57,15 @@
         border-radius: 2px;
         background: var(--bg);
       }
+      .brand-logo {
+        height: 22px;
+        width: auto;
+        display: block;
+        opacity: 0.9;
+        transition: opacity 0.15s ease;
+      }
+      .brand-logo:hover { opacity: 1; }
+      .sep { width: 1px; height: 18px; background: var(--line); }
       nav { margin-left: auto; display: flex; gap: 22px; }
       nav a { color: var(--mut); font-size: 14px; font-weight: 500; }
       nav a:hover { color: var(--ink); }
@@ -172,6 +181,10 @@
   <body>
     <div class="wrap">
       <header>
+        <a href="https://www.together.ai/" target="_blank" rel="noopener" aria-label="Together AI">
+          <img class="brand-logo" src="together-ai.png" alt="Together AI" />
+        </a>
+        <span class="sep"></span>
         <div class="logo"><span class="mark"></span> togetherlink</div>
         <nav>
           <a href="https://github.com/riccardogiorato">GitHub</a>
