@@ -6,6 +6,8 @@ import { CLAUDE_DEFAULT_MODEL, CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string; signature?: string }
+  | { type: "redacted_thinking"; data: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content?: unknown };
 
@@ -28,6 +30,8 @@ type AnthropicMessagesRequest = {
 type OpenAIMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | null;
+  reasoning?: string;
+  reasoning_content?: string;
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
 };
@@ -39,6 +43,8 @@ type OpenAIChatResponse = {
     finish_reason?: string | null;
     message?: {
       content?: string | null;
+      reasoning?: string | null;
+      reasoning_content?: string | null;
       tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
     };
   }>;
@@ -163,6 +169,8 @@ async function callTogetherChatCompletions(
         parameters: tool.input_schema ?? { type: "object", properties: {} },
       },
     })),
+    reasoning_effort: "high",
+    chat_template_kwargs: { clear_thinking: false },
     stream: false,
   };
   debugLog(options, "together request", {
@@ -190,6 +198,10 @@ async function callTogetherChatCompletions(
     id: json.id,
     choices: json.choices?.length ?? 0,
     finishReason: json.choices?.[0]?.finish_reason,
+    toolCalls: json.choices?.[0]?.message?.tool_calls?.map((toolCall) => ({
+      name: toolCall.function?.name,
+      argumentsPreview: toolCall.function?.arguments?.slice(0, 300),
+    })),
   });
   return json;
 }
@@ -213,10 +225,15 @@ function toOpenAIMessages(body: AnthropicMessagesRequest): OpenAIMessage[] {
     }
 
     const textParts: string[] = [];
+    const reasoningParts: string[] = [];
     const toolCalls: OpenAIMessage["tool_calls"] = [];
     for (const block of message.content) {
       if (block.type === "text") {
         textParts.push(block.text);
+      } else if (block.type === "thinking") {
+        reasoningParts.push(block.thinking);
+      } else if (block.type === "redacted_thinking") {
+        reasoningParts.push(block.data);
       } else if (block.type === "tool_result") {
         messages.push({
           role: "tool",
@@ -232,11 +249,15 @@ function toOpenAIMessages(body: AnthropicMessagesRequest): OpenAIMessage[] {
       }
     }
 
-    messages.push({
-      role: message.role,
-      content: textParts.join("\n") || null,
-      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-    });
+    const content = textParts.join("\n");
+    if (content || reasoningParts.length > 0 || toolCalls.length > 0) {
+      messages.push({
+        role: message.role,
+        content: content || null,
+        ...(reasoningParts.length > 0 ? { reasoning: reasoningParts.join("\n") } : {}),
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      });
+    }
   }
 
   return messages;
@@ -246,6 +267,14 @@ function toAnthropicMessage(response: OpenAIChatResponse, model: string): Record
   const choice = response.choices?.[0];
   const message = choice?.message ?? {};
   const content: Array<Record<string, unknown>> = [];
+  const reasoning = message.reasoning ?? message.reasoning_content;
+  if (reasoning) {
+    content.push({
+      type: "thinking",
+      thinking: reasoning,
+      signature: `togetherlink:${Buffer.from(reasoning).toString("base64url")}`,
+    });
+  }
   if (message.content) {
     content.push({ type: "text", text: message.content });
   }
@@ -282,12 +311,30 @@ function writeAnthropicStream(res: ServerResponse, message: Record<string, unkno
   writeSse(res, "message_start", { type: "message_start", message: { ...message, content: [] } });
   const content = Array.isArray(message.content) ? message.content : [];
   content.forEach((block, index) => {
-    writeSse(res, "content_block_start", { type: "content_block_start", index, content_block: block });
+    const contentBlock = isToolUseBlock(block) ? { ...block, input: {} } : block;
+    writeSse(res, "content_block_start", { type: "content_block_start", index, content_block: contentBlock });
     if (isTextBlock(block)) {
       writeSse(res, "content_block_delta", {
         type: "content_block_delta",
         index,
         delta: { type: "text_delta", text: block.text },
+      });
+    } else if (isThinkingBlock(block)) {
+      writeSse(res, "content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "thinking_delta", thinking: block.thinking },
+      });
+      writeSse(res, "content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "signature_delta", signature: block.signature ?? "" },
+      });
+    } else if (isToolUseBlock(block)) {
+      writeSse(res, "content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
       });
     }
     writeSse(res, "content_block_stop", { type: "content_block_stop", index });
@@ -375,4 +422,18 @@ function mapStopReason(reason: string | null | undefined): string {
 
 function isTextBlock(block: unknown): block is { type: "text"; text: string } {
   return typeof block === "object" && block !== null && "type" in block && block.type === "text" && "text" in block;
+}
+
+function isThinkingBlock(block: unknown): block is { type: "thinking"; thinking: string; signature?: string } {
+  return (
+    typeof block === "object" &&
+    block !== null &&
+    "type" in block &&
+    block.type === "thinking" &&
+    "thinking" in block
+  );
+}
+
+function isToolUseBlock(block: unknown): block is { type: "tool_use"; input?: unknown } {
+  return typeof block === "object" && block !== null && "type" in block && block.type === "tool_use";
 }
