@@ -38,6 +38,22 @@ export function buildClaudeEnv({
     modelId === CLAUDE_DEFAULT_MODEL ? CLAUDE_DEFAULT_MODEL_NAME : `Together ${modelId}`;
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = "Local Anthropic-to-Together proxy";
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES = CLAUDE_MODEL_CAPABILITIES;
+
+  // Label each tier row so the model picker is unambiguous: these point at
+  // Together AI's GLM-5.2 via the local proxy — NOT Anthropic Claude. Without
+  // these, Claude Code falls back to its hardcoded claude-opus/sonnet/haiku ids
+  // and shows misleading "Claude …" names, or a bare id with a generic "Custom
+  // Opus model" label. Setting the same id across all three tiers is correct:
+  // the proxy forces GLM-5.2 regardless of which tier a call is routed as, so
+  // the labels are honest about what actually runs.
+  const displayName = env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME;
+  const notAnthropicDescription = "Together AI (GLM-5.2) via togetherlink — not Anthropic";
+  env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME = displayName;
+  env.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION = notAnthropicDescription;
+  env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME = displayName;
+  env.ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION = notAnthropicDescription;
+  env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME = displayName;
+  env.ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION = notAnthropicDescription;
   return env;
 }
 
@@ -50,6 +66,13 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   });
 
   try {
+    // Always-on banner so the user can never be in doubt that this is routing
+    // to Together AI (GLM-5.2), not Anthropic — the model picker alone isn't
+    // enough since most users never open it. Goes to stderr so it never
+    // corrupts claude's stdout (which pipelines/headless mode depend on).
+    process.stderr.write(
+      `togetherlink ▸ Routing Claude Code → Together AI (GLM-5.2). Not Anthropic.\n`,
+    );
     if (process.env.TOGETHERLINK_DEBUG === "1") {
       process.stderr.write(`[togetherlink proxy] listening: ${proxy.url}\n`);
       process.stderr.write(`[togetherlink claude] custom model: ${modelId}\n`);

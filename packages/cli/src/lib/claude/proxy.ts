@@ -162,9 +162,13 @@ async function handleProxyRequest(
     // reads `max_input_tokens` as the context window and `max_tokens` as the
     // output cap per model object (since Mar 2026 — there is no `context_window`
     // field). Without these, Claude Code falls back to a ~200K default and
-    // auto-compacts earlier than GLM-5.2's true 262K window, and the context
-    // indicator shows the wrong "% used". Advertise the real limits so
+    // auto-compacts earlier than GLM-5.2's true 256K (262144) window, and the
+    // context indicator shows the wrong "% used". Advertise the real limits so
     // compaction triggers at the right point.
+    //
+    // A single entry only: GLM-5.2 on Together reports context_length 262144 —
+    // there is no 1M tier, so we must not advertise a `[1m]` variant. Doing so
+    // would make Claude Code try to send >262K-token requests the model rejects.
     writeJson(res, 200, {
       data: [
         {
@@ -172,15 +176,6 @@ async function handleProxyRequest(
           type: "model",
           object: "model",
           display_name: "Together GLM 5.2",
-          max_input_tokens: MODEL_CONTEXT_WINDOW,
-          max_tokens: MODEL_OUTPUT_LIMIT,
-          created_at: "2026-06-16T00:00:00Z",
-        },
-        {
-          id: `${options.modelId}[1m]`,
-          type: "model",
-          object: "model",
-          display_name: "Together GLM 5.2 (1M)",
           max_input_tokens: MODEL_CONTEXT_WINDOW,
           max_tokens: MODEL_OUTPUT_LIMIT,
           created_at: "2026-06-16T00:00:00Z",
