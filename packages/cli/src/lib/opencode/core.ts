@@ -14,6 +14,14 @@ type OpencodeConfig = {
   model?: string;
   provider?: Record<string, Record<string, unknown>>;
   agent?: Record<string, Record<string, unknown>>;
+  /**
+   * Provider ids OpenCode won't auto-load. We disable "opencode" — the Zen
+   * gateway provider (its models are registered under the `opencode/*`
+   * namespace, not `zen/*`, per opencode issue #6979). togetherlink routes
+   * everything to Together, so Zen's auto-loaded models are pure clutter in
+   * the picker; this keeps /models to only the Together flagships we curate.
+   */
+  disabled_providers?: string[];
 };
 
 type OpencodeProviderConfig = {
@@ -82,6 +90,11 @@ export function buildOpencodeConfigJson({
     // text-only primary can still describe pasted images. To add more
     // sub-agents later, add entries under `agent`.
     model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
+    // Disable OpenCode's auto-loaded Zen gateway (provider id "opencode", the
+    // `opencode/*` namespace) so /models shows only our curated Together
+    // flagships — not Zen's tested-model list. opencode issue #6979 confirms
+    // the id is "opencode", not "zen".
+    disabled_providers: ["opencode"],
     agent: {
       build: {
         prompt: buildPrompt,

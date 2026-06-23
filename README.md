@@ -93,11 +93,21 @@ The `@vision` subagent is pinned to Kimi-K2.7-Code.
 
 ## /models is curated
 
-OpenCode merges a provider's declared `models` block on top of its full
-[models.dev](https://models.dev) catalog, so without filtering, `/models` shows
-hundreds of Together models. The config sets a `whitelist` (added in opencode
-[PR #3416][oc-3416]) restricting the Together provider to **only** the current
-flagships togetherlink ships — each with a short tip in its display name:
+OpenCode normally shows two extra sources of clutter alongside our declared
+Together models, both suppressed by the emitted config:
+
+- **Together's full serverless catalog** — OpenCode merges a provider's declared
+  `models` block on top of its full [models.dev](https://models.dev) catalog.
+  The config sets a `whitelist` (added in opencode
+  [PR #3416][oc-3416]) restricting the Together provider to **only** the
+  current flagships togetherlink ships.
+- **OpenCode Zen** — the auto-loaded `opencode/*` gateway provider (a curated
+  paid model list). The config sets `disabled_providers: ["opencode"]` to hide
+  it (the provider id is `opencode`, not `zen` — see opencode
+  [issue #6979][oc-6979]).
+
+So `/models` shows only the 6 curated flagships, each with a tip in its display
+name:
 
 | Model id | Vision | Use case |
 |---|---|---|
@@ -114,6 +124,7 @@ That's all you'll see in `/models`. The curated set lives in
 [oc-25553]: https://github.com/sst/opencode/issues/25553
 [oc-20021]: https://github.com/sst/opencode/issues/20021
 [oc-3416]: https://github.com/sst/opencode/pull/3416
+[oc-6979]: https://github.com/sst/opencode/issues/6979
 
 ## Testing Claude Code
 
