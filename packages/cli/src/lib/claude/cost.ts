@@ -52,6 +52,7 @@ export class CostTracker {
   private visionPromptTokens = 0;
   private visionCompletionTokens = 0;
   private visionCostUsd = 0;
+  private externalSummary: string | undefined;
   // Running totals snapshot at the start of the current /v1/messages request,
   // so we can report a per-request delta on top of the session total.
   private requestStartCost = 0;
@@ -121,6 +122,10 @@ export class CostTracker {
     return cost;
   }
 
+  setExternalSummary(summary: string): void {
+    this.externalSummary = summary;
+  }
+
   get totals(): TokenUsage {
     return {
       promptTokens: this.promptTokens,
@@ -141,6 +146,9 @@ export class CostTracker {
 
   /** One-line session summary suitable for a single stderr line at shutdown. */
   summarize(): string {
+    if (this.externalSummary) {
+      return this.externalSummary;
+    }
     const main =
       `[togetherlink cost] session total: $${this.costUsd.toFixed(4)} ` +
       `(${this.formatTokens(this.promptTokens)} in` +

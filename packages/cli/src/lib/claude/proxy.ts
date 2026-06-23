@@ -1,11 +1,14 @@
-import http, { type IncomingMessage, type ServerResponse } from "node:http";
-import { once } from "node:events";
+import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
-import { CLAUDE_LOCAL_PROXY_HOST, CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
+import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
+
+// Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
+// can reference the model type without depending on @togetherlink/models directly.
+export type { ModelDefinition };
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
@@ -114,6 +117,59 @@ type TogetherFetchResult =
 const RETRYABLE_STATUSES = new Set([429, 503]);
 const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 const MAX_RETRIES = 3;
+const CONTEXT_LENGTH_RETRY_FLOOR = 1;
+const TOGETHERLINK_IDENTITY_PROMPT =
+  "You are running inside Claude Code through togetherlink's local Anthropic-to-Together proxy. " +
+  "The upstream model is a Together AI model, not an Anthropic Claude model. " +
+  "If asked what model you are, identify yourself as the selected Together AI backend routed by togetherlink, " +
+  "and do not claim to be Claude, Claude Fable, Opus, Sonnet, or Haiku.";
+
+function clampRequestedMaxTokens(maxTokens: number | undefined, model: ModelDefinition): number | undefined {
+  if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens)) {
+    return maxTokens;
+  }
+  return Math.min(Math.max(CONTEXT_LENGTH_RETRY_FLOOR, Math.floor(maxTokens)), model.limit.output);
+}
+
+function maxTokensForContextLengthRetry(
+  error: TogetherApiError,
+  model: ModelDefinition,
+  currentMaxTokens: number | undefined,
+): number | undefined {
+  if (error.status !== 400) {
+    return undefined;
+  }
+  const inputTokens = parseTogetherContextLengthInputTokens(error.message);
+  if (inputTokens === undefined) {
+    return undefined;
+  }
+  const availableOutputTokens = Math.min(model.limit.context - inputTokens, model.limit.output);
+  if (availableOutputTokens < CONTEXT_LENGTH_RETRY_FLOOR) {
+    return undefined;
+  }
+  const retryMaxTokens = Math.floor(availableOutputTokens);
+  if (typeof currentMaxTokens === "number" && retryMaxTokens >= currentMaxTokens) {
+    return undefined;
+  }
+  return retryMaxTokens;
+}
+
+function parseTogetherContextLengthInputTokens(message: string): number | undefined {
+  const parentheticalMatch = message.match(/maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is);
+  if (parentheticalMatch) {
+    return parseTokenCount(parentheticalMatch[1]);
+  }
+  const resolvedInputMatch = message.match(/request resolved to\s+([\d,_]+)\s+input tokens\b/is);
+  return parseTokenCount(resolvedInputMatch?.[1]);
+}
+
+function parseTokenCount(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value.replaceAll(/[,_]/g, ""), 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
 type ExaSearchResult = {
   title?: string;
@@ -142,53 +198,15 @@ export type ClaudeProxyOptions = {
   costTracker?: CostTracker | undefined;
 };
 
-export type ClaudeProxyHandle = {
-  url: string;
-  close: () => Promise<void>;
-  costSummary: () => string;
-};
-
-export async function startClaudeProxy(options: ClaudeProxyOptions): Promise<ClaudeProxyHandle> {
-  if (!options.authToken) {
-    throw new Error("Claude proxy auth token is required.");
-  }
-  // Create a shared tracker if the caller didn't supply one, so the handle can
-  // always report a session total at shutdown.
-  const costTracker = options.costTracker ?? new CostTracker(options.modelDefinition);
-  const serverOptions: ClaudeProxyOptions = { ...options, costTracker };
-
-  const server = http.createServer((req, res) => {
-    handleProxyRequest(req, res, serverOptions).catch((err: unknown) => {
-      // A TogetherApiError (thrown from callTogetherChatCompletions) carries the
-      // real upstream status and the mapped Anthropic type — render it honestly
-      // so Claude Code shows "rate limit" / "authentication" etc. instead of a
-      // generic 500. Anything else is an unexpected proxy fault → 500 api_error.
-      if (isTogetherApiError(err)) {
-        writeAnthropicError(res, err.anthropicStatus, err.anthropicType, err.message);
-        return;
-      }
-      writeAnthropicError(res, 500, "api_error", err instanceof Error ? err.message : String(err));
-    });
-  });
-
-  server.listen(0, CLAUDE_LOCAL_PROXY_HOST);
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Failed to bind local Claude proxy.");
-  }
-
-  return {
-    url: `http://${CLAUDE_LOCAL_PROXY_HOST}:${address.port}`,
-    close: async () => {
-      server.close();
-      await once(server, "close");
-    },
-    costSummary: () => costTracker.summarize(),
-  };
-}
-
-async function handleProxyRequest(
+/**
+ * Handle one claude-facing `/v1/*` (or health/models) request against a single
+ * session's options. The shared daemon resolves the session from the request's
+ * Bearer/x-api-key token, then calls this with that session's `options`. There
+ * is no in-process per-session server anymore — the daemon owns the single
+ * `http.Server` (see daemon/server.ts), so this handler is the only proxy
+ * entrypoint.
+ */
+export async function handleProxyRequest(
   req: IncomingMessage,
   res: ServerResponse,
   options: ClaudeProxyOptions,
@@ -310,13 +328,27 @@ async function handleProxyRequest(
   }
 }
 
-function isAuthorized(req: IncomingMessage, authToken: string): boolean {
+/**
+ * Pull the presented auth token from a request — the `Bearer` value of the
+ * Authorization header, or the `x-api-key` header. The shared daemon uses this
+ * as the session key: each `togetherlink claude` run mints a random token,
+ * registers it with the daemon, and spawns claude with that token, so the
+ * daemon can resolve incoming `/v1/*` requests to the owning session (and its
+ * CostTracker) without any other routing signal.
+ */
+export function extractToken(req: IncomingMessage): string | undefined {
   const authorization = req.headers.authorization;
-  if (constantTimeEqual(authorization, `Bearer ${authToken}`)) {
-    return true;
+  if (typeof authorization === "string" && authorization.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length);
   }
   const apiKey = req.headers["x-api-key"];
-  return typeof apiKey === "string" && constantTimeEqual(apiKey, authToken);
+  return typeof apiKey === "string" ? apiKey : undefined;
+}
+
+/** Constant-time token match against the request's presented token. */
+function isAuthorized(req: IncomingMessage, authToken: string): boolean {
+  const token = extractToken(req);
+  return token !== undefined && constantTimeEqual(token, authToken);
 }
 
 function constantTimeEqual(actual: string | undefined, expected: string): boolean {
@@ -339,7 +371,7 @@ async function callTogetherChatCompletions(
   const nativeTools = nativeServerTools(body.tools);
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
-  const messages = toOpenAIMessages(body);
+  const messages = toOpenAIMessages(body, targetModel.definition);
   const tools = body.tools?.map((tool) => ({
     type: "function",
     function: {
@@ -351,13 +383,15 @@ async function callTogetherChatCompletions(
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+    let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
     const payload = {
       model: targetModel.definition.id,
       messages:
         turn === 0 && nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages,
-      max_tokens: body.max_tokens,
+      max_tokens: maxTokens,
       temperature: body.temperature,
       tools,
+      tool_choice: toOpenAIToolChoice(body.tool_choice),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       chat_template_kwargs: { clear_thinking: false },
       stream: false,
@@ -371,7 +405,22 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    const response = await fetchTogether(payload, options);
+    let response = await fetchTogether(payload, options);
+    if (!response.ok) {
+      const initialError = response.error;
+      const retryMaxTokens = maxTokensForContextLengthRetry(initialError, targetModel.definition, maxTokens);
+      if (retryMaxTokens !== undefined) {
+        maxTokens = retryMaxTokens;
+        payload.max_tokens = maxTokens;
+        debugLog(options, "retrying together request with reduced max_tokens", {
+          model: payload.model,
+          maxTokens,
+          originalError: initialError.message,
+          turn,
+        });
+        response = await fetchTogether(payload, options);
+      }
+    }
 
     if (!response.ok) {
       // Surfaced via fetchTogether as a TogetherApiError after exhausting retries
@@ -408,7 +457,7 @@ async function callTogetherChatCompletions(
     messages.push({
       role: "assistant",
       content: json.choices?.[0]?.message?.content ?? null,
-      ...(reasoning ? { reasoning } : {}),
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
       tool_calls: toolCalls.map((toolCall) => ({
         id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
         type: "function",
@@ -460,7 +509,7 @@ function resolveTargetModel(requestedModel: string | undefined, options: ClaudeP
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
 }
 
-type TogetherReasoningEffort = "high" | "max";
+type TogetherReasoningEffort = "max";
 
 function togetherReasoningEffort(
   body: AnthropicMessagesRequest,
@@ -478,11 +527,11 @@ function togetherReasoningEffort(
   }
 
   const budgetTokens = body.thinking?.budget_tokens;
-  if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens)) {
-    return budgetTokens >= 32_000 ? "max" : "high";
+  if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens) && budgetTokens >= 32_000) {
+    return "max";
   }
 
-  return "high";
+  return undefined;
 }
 
 function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
@@ -493,9 +542,6 @@ function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffo
   const effort = value.toLowerCase();
   if (effort === "max" || effort === "xhigh") {
     return "max";
-  }
-  if (effort === "low" || effort === "medium" || effort === "high") {
-    return "high";
   }
   return undefined;
 }
@@ -710,6 +756,23 @@ function toOpenAIToolParameters(tool: AnthropicTool): unknown {
   return { type: "object", properties: {} };
 }
 
+function toOpenAIToolChoice(toolChoice: unknown): unknown {
+  if (!toolChoice || typeof toolChoice !== "object") {
+    return undefined;
+  }
+  const choice = toolChoice as { type?: unknown; name?: unknown };
+  if (choice.type === "auto") {
+    return "auto";
+  }
+  if (choice.type === "any") {
+    return "required";
+  }
+  if (choice.type === "tool" && typeof choice.name === "string" && choice.name) {
+    return { type: "function", function: { name: choice.name } };
+  }
+  return undefined;
+}
+
 function nativeServerTools(tools: AnthropicTool[] | undefined): NativeServerTool[] {
   return (tools ?? []).flatMap((tool) => {
     if (!isWebSearchTool(tool)) {
@@ -828,8 +891,15 @@ function trimSearchText(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 600);
 }
 
-function toOpenAIMessages(body: AnthropicMessagesRequest): OpenAIMessage[] {
-  const messages: OpenAIMessage[] = [];
+function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDefinition): OpenAIMessage[] {
+  const messages: OpenAIMessage[] = [
+    {
+      role: "system",
+      content: targetModel
+        ? `${TOGETHERLINK_IDENTITY_PROMPT}\nSelected Together backend: ${targetModel.name} (${targetModel.id}).`
+        : TOGETHERLINK_IDENTITY_PROMPT,
+    },
+  ];
   const system = stringifyAnthropicContent(body.system);
   if (system) {
     messages.push({ role: "system", content: system });
@@ -871,7 +941,7 @@ function toOpenAIMessages(body: AnthropicMessagesRequest): OpenAIMessage[] {
       messages.push({
         role: message.role,
         content: content || null,
-        ...(reasoningParts.length > 0 ? { reasoning: reasoningParts.join("\n") } : {}),
+        ...(reasoningParts.length > 0 ? { reasoning_content: reasoningParts.join("\n") } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       });
     }
@@ -944,7 +1014,7 @@ async function streamAnthropicFromTogether(
   options: ClaudeProxyOptions,
 ): Promise<void> {
   const targetModel = resolveTargetModel(body.model, options);
-  const messages = toOpenAIMessages(body);
+  const messages = toOpenAIMessages(body, targetModel.definition);
   const tools = body.tools?.map((tool) => ({
     type: "function",
     function: {
@@ -954,13 +1024,15 @@ async function streamAnthropicFromTogether(
     },
   }));
   const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+  let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
 
   const payload = {
     model: targetModel.definition.id,
     messages,
-    max_tokens: body.max_tokens,
+    max_tokens: maxTokens,
     temperature: body.temperature,
     tools,
+    tool_choice: toOpenAIToolChoice(body.tool_choice),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
     stream: true,
@@ -993,15 +1065,43 @@ async function streamAnthropicFromTogether(
   }
 
   if (!response.ok) {
-    const error = await mapTogetherError(response);
-    debugLog(options, "together stream error", {
-      status: error.status,
-      anthropicType: error.anthropicType,
-      code: error.code,
-      body: error.message.slice(0, 1000),
-    });
-    writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
-    return;
+    let error = await mapTogetherError(response);
+    const retryMaxTokens = maxTokensForContextLengthRetry(error, targetModel.definition, maxTokens);
+    if (retryMaxTokens !== undefined) {
+      maxTokens = retryMaxTokens;
+      payload.max_tokens = maxTokens;
+      debugLog(options, "retrying together stream with reduced max_tokens", {
+        model: payload.model,
+        maxTokens,
+        originalError: error.message,
+      });
+      try {
+        response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${options.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (err) {
+        writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (!response.ok) {
+        error = await mapTogetherError(response);
+      }
+    }
+    if (!response.ok) {
+      debugLog(options, "together stream error", {
+        status: error.status,
+        anthropicType: error.anthropicType,
+        code: error.code,
+        body: error.message.slice(0, 1000),
+      });
+      writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
+      return;
+    }
   }
   if (!response.body) {
     writeAnthropicError(res, 500, "api_error", "Together returned no stream body.");
@@ -1390,12 +1490,12 @@ function writeSse(res: ServerResponse, event: string, data: unknown): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-function writeJson(res: ServerResponse, status: number, value: unknown): void {
+export function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(value));
 }
 
-function writeAnthropicError(
+export function writeAnthropicError(
   res: ServerResponse,
   status: number,
   type: string,
@@ -1408,7 +1508,7 @@ function writeAnthropicError(
 }
 
 /** Whether a thrown value is a normalized Together upstream error. */
-function isTogetherApiError(value: unknown): value is TogetherApiError {
+export function isTogetherApiError(value: unknown): value is TogetherApiError {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -1425,11 +1525,11 @@ function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): v
   process.stderr.write(`[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`);
 }
 
-function requestPath(req: IncomingMessage): string {
+export function requestPath(req: IncomingMessage): string {
   return new URL(req.url ?? "/", "http://127.0.0.1").pathname;
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -1455,9 +1555,91 @@ function stringifyUnknown(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? "");
 }
 
+/**
+ * Small bounded LRU keyed by string. Uses a Map's insertion-order semantics:
+ * `get` re-inserts (delete + set) to move the entry to the most-recently-used
+ * position; `set` evicts the oldest entry (the Map's first key) while the entry
+ * count or the approximate byte total exceeds the cap. No timers, no external
+ * deps — just stdlib. The `byteSize` of a value defaults to its string length
+ * (good enough for ASCII-dominant description text).
+ */
+class LruCache<K, V> {
+  private readonly map = new Map<K, V>();
+  private readonly maxEntries: number;
+  private readonly maxBytes: number;
+  private readonly sizeOf: (value: V) => number;
+  private bytes = 0;
+
+  constructor(maxEntries: number, maxBytes: number, sizeOf?: (value: V) => number) {
+    this.maxEntries = maxEntries;
+    this.maxBytes = maxBytes;
+    this.sizeOf = sizeOf ?? ((value) => (typeof value === "string" ? value.length : 1));
+  }
+
+  get(key: K): V | undefined {
+    if (!this.map.has(key)) {
+      return undefined;
+    }
+    const value = this.map.get(key) as V;
+    // Move to most-recently-used: delete + re-insert.
+    this.map.delete(key);
+    this.map.set(key, value);
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    const existing = this.map.get(key);
+    if (existing !== undefined) {
+      this.bytes -= this.sizeOf(existing);
+      this.map.delete(key);
+    }
+    this.map.set(key, value);
+    this.bytes += this.sizeOf(value);
+    this.evict(key);
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+
+  /**
+   * Evict oldest entries until we're under the entry and byte caps. `justSet`
+   * is the key we just inserted; we never evict it, so a single entry larger
+   * than the byte cap (a long image description) is still cached for its first
+   * turn rather than being evicted the instant it's inserted and re-billed
+   * every turn — the cap is a guardrail, not an exact budget.
+   */
+  private evict(justSet?: K): void {
+    while (this.map.size > this.maxEntries || this.bytes > this.maxBytes) {
+      const oldest = this.map.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      const key = oldest.value;
+      if (key === justSet) {
+        // The only over-budget entry is the one we just added; keep it.
+        break;
+      }
+      const value = this.map.get(key) as V;
+      this.bytes -= this.sizeOf(value);
+      this.map.delete(key);
+    }
+    if (this.bytes < 0) {
+      this.bytes = 0;
+    }
+  }
+}
+
 // Cross-request cache: the same image recurs in conversation history across
 // turns, so keep its description to avoid re-billing the vision model each time.
-const imageDescriptionCache = new Map<string, string>();
+// Bounded so a long session of distinct images can't grow the daemon's heap
+// without limit: evict the least-recently-used entry once we exceed either the
+// entry cap or the (approximate) byte cap. Byte size is approximated by the
+// description string length — ASCII-dominant text, so length ≈ bytes; the cap is
+// a guardrail, not an exact budget.
+const IMAGE_CACHE_MAX_ENTRIES = 64;
+const IMAGE_CACHE_MAX_BYTES = 4 * 1024 * 1024;
+const imageDescriptionCache = new LruCache<string, string>(IMAGE_CACHE_MAX_ENTRIES, IMAGE_CACHE_MAX_BYTES);
 
 /**
  * Find every image/url block in the request, describe it with the vision model,
@@ -1596,6 +1778,9 @@ function parseJsonOrEmpty(value: string | undefined): unknown {
 }
 
 function mapStopReason(reason: string | null | undefined): string {
+  if (reason === "tool_calls") {
+    return "tool_use";
+  }
   if (reason === "length") {
     return "max_tokens";
   }

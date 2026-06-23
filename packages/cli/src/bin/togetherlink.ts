@@ -99,6 +99,24 @@ async function main() {
     return;
   }
 
+  // Internal entry point: the daemon self-spawns with `--daemon` via
+  // ensureDaemon() (launch.ts). Runs the shared proxy server forever; never
+  // returns. Keep this before any command that needs a key — the daemon needs
+  // no daemon-wide credentials (each session registers its own).
+  if (command === "--daemon") {
+    const { runDaemon } = await import("../lib/daemon/server.js");
+    await runDaemon();
+    return;
+  }
+
+  // User-facing daemon control. Not a harness, so handle it before the harness
+  // dispatch (which would reject "daemon" as an unknown harness).
+  if (command === "daemon") {
+    const { runDaemonCommand } = await import("../lib/daemon/cli.js");
+    await runDaemonCommand(verb);
+    return;
+  }
+
   // First-run key setup only matters for the harness-launching commands.
   if ((command === "claude" || command === "opencode") && verb !== "status") {
     await maybePromptApiKey();
