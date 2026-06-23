@@ -64,6 +64,10 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
       child.on("exit", (status, signal) => resolve({ status, signal }));
     });
   } finally {
+    // Always print the real GLM-5.2 cost at shutdown — Claude Code's own
+    // /usage estimate can't price a non-Anthropic model, so this is the
+    // accurate source. Goes to stderr so it never corrupts claude's stdout.
+    process.stderr.write(`${proxy.costSummary()}\n`);
     await proxy.close();
   }
 }

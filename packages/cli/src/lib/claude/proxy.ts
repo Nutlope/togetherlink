@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./defaults.js";
+import { CostTracker } from "./cost.js";
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
@@ -65,6 +66,9 @@ type OpenAIChatResponse = {
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
+    total_tokens?: number;
+    cached_tokens?: number;
+    reasoning_tokens?: number;
   };
 };
 
@@ -86,16 +90,23 @@ export type ClaudeProxyOptions = {
   apiKey: string;
   modelId: string;
   debug?: boolean;
+  costTracker?: CostTracker;
 };
 
 export type ClaudeProxyHandle = {
   url: string;
   close: () => Promise<void>;
+  costSummary: () => string;
 };
 
 export async function startClaudeProxy(options: ClaudeProxyOptions): Promise<ClaudeProxyHandle> {
+  // Create a shared tracker if the caller didn't supply one, so the handle can
+  // always report a session total at shutdown.
+  const costTracker = options.costTracker ?? new CostTracker();
+  const serverOptions: ClaudeProxyOptions = { ...options, costTracker };
+
   const server = http.createServer((req, res) => {
-    handleProxyRequest(req, res, options).catch((err: unknown) => {
+    handleProxyRequest(req, res, serverOptions).catch((err: unknown) => {
       writeAnthropicError(res, 500, err instanceof Error ? err.message : String(err));
     });
   });
@@ -113,6 +124,7 @@ export async function startClaudeProxy(options: ClaudeProxyOptions): Promise<Cla
       server.close();
       await once(server, "close");
     },
+    costSummary: () => costTracker.summarize(),
   };
 }
 
@@ -163,6 +175,7 @@ async function handleProxyRequest(
   }
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
+  options.costTracker?.beginRequest();
   debugLog(options, "anthropic request", {
     model: body.model,
     stream: body.stream,
@@ -172,6 +185,18 @@ async function handleProxyRequest(
   });
   const openAiResponse = await callTogetherChatCompletions(body, options);
   const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
+
+  const delta = options.costTracker?.requestDelta;
+  const totals = options.costTracker?.totals;
+  if (options.debug && delta && totals) {
+    debugLog(options, "request cost", {
+      requestCostUsd: Number(delta.costUsd.toFixed(6)),
+      requestInputTokens: delta.promptTokens,
+      requestCachedTokens: delta.cachedTokens,
+      requestOutputTokens: delta.completionTokens,
+      sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+    });
+  }
 
   if (body.stream) {
     writeAnthropicStream(res, anthropicMessage);
@@ -233,10 +258,17 @@ async function callTogetherChatCompletions(
       throw new Error(`Together API returned ${response.status}: ${text.slice(0, 500)}`);
     }
     const json = (await response.json()) as OpenAIChatResponse;
+    const usage = json.usage;
+    const promptTokens = usage?.prompt_tokens ?? 0;
+    const completionTokens = usage?.completion_tokens ?? 0;
+    const cachedTokens = usage?.cached_tokens ?? 0;
+    const incrementalCost = options.costTracker?.addUsage(promptTokens, cachedTokens, completionTokens) ?? 0;
     debugLog(options, "together response", {
       id: json.id,
       choices: json.choices?.length ?? 0,
       finishReason: json.choices?.[0]?.finish_reason,
+      usage: { promptTokens, completionTokens, cachedTokens },
+      incrementalCostUsd: Number(incrementalCost.toFixed(6)),
       toolCalls: json.choices?.[0]?.message?.tool_calls?.map((toolCall) => ({
         name: toolCall.function?.name,
         argumentsPreview: toolCall.function?.arguments?.slice(0, 300),
