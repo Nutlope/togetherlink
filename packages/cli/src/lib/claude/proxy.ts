@@ -508,7 +508,7 @@ function resolveTargetModel(requestedModel: string | undefined, options: ClaudeP
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
 }
 
-type TogetherReasoningEffort = "high" | "max";
+type TogetherReasoningEffort = "max";
 
 function togetherReasoningEffort(
   body: AnthropicMessagesRequest,
@@ -526,11 +526,11 @@ function togetherReasoningEffort(
   }
 
   const budgetTokens = body.thinking?.budget_tokens;
-  if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens)) {
-    return budgetTokens >= 32_000 ? "max" : "high";
+  if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens) && budgetTokens >= 32_000) {
+    return "max";
   }
 
-  return "high";
+  return undefined;
 }
 
 function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
@@ -541,9 +541,6 @@ function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffo
   const effort = value.toLowerCase();
   if (effort === "max" || effort === "xhigh") {
     return "max";
-  }
-  if (effort === "low" || effort === "medium" || effort === "high") {
-    return "high";
   }
   return undefined;
 }
