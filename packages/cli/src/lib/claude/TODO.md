@@ -71,57 +71,31 @@ Provider/library candidates:
 
 ## Important
 
-### Launch target preference: terminal vs desktop
+### `image` / `url` content blocks (vision interception)
 
 Why:
 
-- `togetherlink configure` can ask whether the user prefers launching Claude through the terminal CLI or a native macOS desktop app.
-- This should be a `togetherlink` preference, not a persistent Claude Code `on/off` modification.
-- Users should not need to remember different commands if they usually prefer one surface.
+- GLM-5.2 (`zai-org/GLM-5.2`) is text-only — Together's GLM-5.2 quickstart lists no vision/image capability.
+- Claude Code sends images (pasted photos, screenshots, dragged files) as Anthropic `image` content blocks in `/v1/messages`.
+- Today the proxy's `toOpenAIMessages` only handles `text`, `thinking`, `tool_use`, and `tool_result` blocks. An `image` block is silently dropped, so only the accompanying text reaches GLM-5.2 — which then answers about an image it never saw (weak/fake model-only behavior).
 
-Needed:
+Current shape (observed via the proxy's `image blocks detected` debug log):
 
-- Add a global config field such as `harnesses.claude.launchTarget`.
-- Prompt during `togetherlink configure`:
-  - `terminal`: default and safest; launch `claude` CLI with local proxy env.
-  - `desktop`: experimental on macOS; launch a Claude app process with local proxy env if supported.
-- Add explicit flags to override the saved default:
-  - `togetherlink claude --target terminal`
-  - `togetherlink claude --target desktop`
-- Keep `terminal` as the default until desktop is verified end-to-end.
+- `{ type: "image", source: { type: "base64", media_type: "image/png", data: "<base64>" } }` in a user message's `content` array.
+- Newer Anthropic beta also supports `{ type: "url", url: "<https url>" }`.
+
+Plan:
+
+- Detect image/url blocks in `toOpenAIMessages` (the `extractImageBlocks` debug hook already proves detection works).
+- For each image, route it to a vision-capable Together serverless model (e.g. `moonshotai/Kimi-K2.6` or another from the serverless catalog's vision list) using the OpenAI `image_url` shape: `{ type: "image_url", image_url: { url: "data:<media_type>;base64,<data>" } }`.
+- Get the vision model's textual description, then substitute a `text` block back into the GLM-5.2 turn so the main model reasons over the description rather than the pixels.
+- Log which vision model was used and the token cost of the image-analysis sub-call.
 
 Open questions:
 
-- Which app should be launched: Claude Desktop consumer app, Claude Code desktop surface, or another Anthropic app bundle?
-- Does the installed app honor `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, and `ANTHROPIC_CUSTOM_MODEL_OPTION`?
-- Does it use the same `/v1/messages` protocol as Claude Code CLI?
-- Does it support custom model discovery through `/v1/models`?
-
-Findings from local app inspection:
-
-- `/Applications/Claude.app` contains a `deploymentMode` config key with `"3p"` and `"1p"` values.
-- The app bundle includes custom third-party provider language such as "Selects the inference backend. Setting this key activates third-party mode."
-- The app has a `ccd-environment-config.json` file under `~/Library/Application Support/Claude/`, but its `envVars` value is stored as an opaque encoded/encrypted blob.
-- The desktop app appears to construct Claude Code session env itself, including `ANTHROPIC_BASE_URL`, so launching the app process with shell env may not be enough.
-- A quick process launch opened the app but did not produce proxy `/v1/models` or `/v1/messages` traffic, so desktop-through-proxy is not verified.
-
-Likely paths to investigate:
-
-- Third-party mode config (`deploymentMode: "3p"`) rather than raw shell env.
-- A separate app support directory/profile for third-party inference, if present in newer versions or created by setup flows.
-- Whether desktop agent mode force-overrides `ANTHROPIC_BASE_URL` for spawned Claude Code sessions.
-
-macOS launch options to test:
-
-- Spawn the app executable directly with env, for example `/Applications/Claude.app/Contents/MacOS/...`.
-- Use `open -a Claude` only if env propagation is verified.
-- Avoid `launchctl setenv` for ephemeral mode unless the user explicitly asks for persistent desktop routing, because it changes the broader GUI session environment.
-
-Risks:
-
-- Native desktop apps launched through Finder or `open` may not inherit terminal env vars.
-- Consumer Claude Desktop may use app auth/session behavior instead of API-token routing.
-- If the desktop app ignores custom endpoint env vars, the CLI cannot force the proxy without lower-level traffic interception, which we should not do.
+- Which Together vision model gives the best quality/latency/cost tradeoff for screenshots and photos?
+- Should the description be injected inline, or returned as a synthetic `tool_result` so Claude Code renders it as tool output?
+- Do we preserve the original image for the user's transcript while only swapping the model-facing content?
 
 ### `code_execution_*`
 

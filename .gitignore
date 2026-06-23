@@ -143,3 +143,7 @@ vite.config.ts.timestamp-*
 .vite/
 
 *.jsonl
+
+.DS_Store
+
+images-test/*

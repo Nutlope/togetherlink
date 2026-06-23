@@ -183,6 +183,10 @@ async function handleProxyRequest(
     toolCount: body.tools?.length ?? 0,
     tools: summarizeAnthropicTools(body.tools),
   });
+  const imageBlocks = extractImageBlocks(body);
+  if (imageBlocks.length > 0) {
+    debugLog(options, "image blocks detected", imageBlocks);
+  }
   const openAiResponse = await callTogetherChatCompletions(body, options);
   const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
@@ -662,6 +666,66 @@ function stringifyAnthropicContent(content: AnthropicMessagesRequest["system"]):
 
 function stringifyUnknown(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? "");
+}
+
+/**
+ * Walks the request for image-like content blocks and returns a debug-friendly
+ * summary (base64/url data truncated). Used to learn the exact shape Claude
+ * Code sends when a user attaches a photo or screenshot, so the proxy can
+ * intercept and route images to a vision-capable Together model.
+ */
+function extractImageBlocks(body: AnthropicMessagesRequest): Array<Record<string, unknown>> {
+  const found: Array<Record<string, unknown>> = [];
+  const knownTypes = new Set(["text", "thinking", "redacted_thinking", "tool_use", "tool_result"]);
+
+  const inspectBlock = (block: unknown, location: string): void => {
+    if (typeof block !== "object" || block === null) {
+      return;
+    }
+    const record = block as Record<string, unknown>;
+    const type = record.type;
+    const isImageLike =
+      type === "image" || type === "url" || type === "document" || (typeof type === "string" && !knownTypes.has(type));
+    if (!isImageLike) {
+      return;
+    }
+    const summary: Record<string, unknown> = { location, type, rawKeys: Object.keys(record) };
+    const source = record.source as Record<string, unknown> | undefined;
+    if (source) {
+      summary.sourceType = source.type;
+      summary.mediaType = source.media_type;
+      const data = source.data;
+      summary.dataPreview = typeof data === "string" ? `${data.slice(0, 32)}… (${data.length} chars)` : typeof data;
+    }
+    const url = record.url;
+    if (typeof url === "string") {
+      summary.urlPreview = url.length > 64 ? `${url.slice(0, 64)}…` : url;
+    }
+    found.push(summary);
+  };
+
+  const inspectContent = (content: unknown, location: string): void => {
+    if (!Array.isArray(content)) {
+      return;
+    }
+    for (const block of content) {
+      inspectBlock(block, location);
+      // tool_result content can itself be an array of blocks (e.g. an image
+      // returned by a tool), so recurse one level.
+      const inner = (block as Record<string, unknown> | null)?.content;
+      if (Array.isArray(inner)) {
+        for (const innerBlock of inner) {
+          inspectBlock(innerBlock, `${location}/tool_result`);
+        }
+      }
+    }
+  };
+
+  inspectContent(body.system, "system");
+  for (const message of body.messages ?? []) {
+    inspectContent(message.content, `messages[${message.role}]`);
+  }
+  return found;
 }
 
 function summarizeAnthropicTools(tools: AnthropicTool[] | undefined): Array<Record<string, unknown>> | undefined {
