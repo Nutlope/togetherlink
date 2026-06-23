@@ -74,7 +74,7 @@ export function costPerToken(costPerMillion: number): number {
  */
 export const GLM_5_2: ModelDefinition = {
   id: "zai-org/GLM-5.2",
-  name: "Together GLM 5.2",
+  name: "GLM 5.2 · default",
   anthropicAlias: "together-glm-5-2",
   cost: { input: 1.4, output: 4.4, cache_read: 0.26 },
   limit: { context: 262_144, output: 164_000 },
@@ -94,7 +94,7 @@ export const GLM_5_2: ModelDefinition = {
  */
 export const KIMI_K2_6: ModelDefinition = {
   id: "moonshotai/Kimi-K2.6",
-  name: "Kimi K2.6 (vision + reasoning)",
+  name: "Kimi K2.6 · vision",
   anthropicAlias: null,
   cost: { input: 1.2, output: 4.5, cache_read: 0.2 },
   limit: { context: 262_144, output: 262_144 },
@@ -112,7 +112,7 @@ export const KIMI_K2_6: ModelDefinition = {
  */
 export const MINIMAX_M3: ModelDefinition = {
   id: "MiniMaxAI/MiniMax-M3",
-  name: "MiniMax M3 (vision, 512K ctx, cheapest)",
+  name: "MiniMax M3 · vision · 512K",
   anthropicAlias: null,
   cost: { input: 0.3, output: 1.2, cache_read: 0.06 },
   limit: { context: 524_288, output: 128_000 },
@@ -130,7 +130,7 @@ export const MINIMAX_M3: ModelDefinition = {
  */
 export const QWEN_3_7_MAX: ModelDefinition = {
   id: "Qwen/Qwen3.7-Max",
-  name: "Qwen 3.7 Max (vision, 1M ctx, strongest Qwen)",
+  name: "Qwen 3.7 Max · vision · 1M",
   anthropicAlias: null,
   cost: { input: 2.5, output: 7.5, cache_read: 0 },
   limit: { context: 1_000_000, output: 65_536 },
@@ -148,7 +148,7 @@ export const QWEN_3_7_MAX: ModelDefinition = {
  */
 export const DEEPSEEK_V4_PRO: ModelDefinition = {
   id: "deepseek-ai/DeepSeek-V4-Pro",
-  name: "DeepSeek V4 Pro (512K ctx, long-context reasoning)",
+  name: "DeepSeek V4 Pro · 512K",
   anthropicAlias: null,
   cost: { input: 1.74, output: 3.48, cache_read: 0.2 },
   limit: { context: 512_000, output: 384_000 },

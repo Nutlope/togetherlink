@@ -69,7 +69,12 @@ export function buildOpencodeConfigJson({
 
   const provider: OpencodeProviderConfig = {
     npm: "@ai-sdk/togetherai",
-    name: "Together AI",
+    // Short provider label: OpenCode appends this provider `name` to every
+    // model line in the /models picker (e.g. "GLM 5.2 · default  Together AI"),
+    // so a long name both repeats and pushes lines past the picker's truncation
+    // width (opencode #20968). "Together" is short enough that names don't
+    // get ellipsized.
+    name: "Together",
     options: { apiKey: apiKeyEnvRef },
     models,
     // Restrict /models to exactly the curated set. Without this, OpenCode also
@@ -99,14 +104,15 @@ export function buildOpencodeConfigJson({
       build: {
         prompt: buildPrompt,
       },
-      // Describes images the primary model can't see. The unified build prompt
-      // tells a text-only primary to invoke this automatically via the Task tool
-      // when it detects an image was attached; vision primaries see images
-      // directly and don't need it. Users can also @mention it.
+      // Describes images the primary model can't see. NOTE: due to opencode
+      // issue #25553, images attached via clipboard/@mention aren't forwarded to
+      // subagents, so the build prompt tells text-only primaries NOT to auto-
+      // invoke this (it only errors). The subagent stays available for explicit
+      // @vision use and may work for file-attached images once #25553 is fixed.
       vision: {
         mode: "subagent",
         description:
-          "Describes images the user attaches or pastes. Invoke this subagent automatically (via the Task tool) whenever an image was attached and you can't see it, so you can reason over the description. Users may also invoke it with @vision.",
+          "Describes images the user attaches, for use by a text-only primary model. Because of an OpenCode bug (#25553) the image is not always forwarded to this subagent, so the primary agent does not auto-invoke it. You can still invoke it explicitly with @vision; if it reports it can't see the image, switch to a vision-capable model via /models instead.",
         model: OPENCODE_VISION_MODEL_SELECTOR,
         prompt: visionPrompt,
       },

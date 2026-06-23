@@ -68,28 +68,25 @@ runtime capabilities, so it stays correct even if you switch models mid-session:
 
 - **Vision-capable primary** (Kimi K2.6, Kimi K2.7-Code, MiniMax M3, Qwen 3.7
   Max): OpenCode sends the image directly to the model — it sees it and just
-  uses it. No subagent needed.
+  uses it. **This is the working path for images.**
 - **Text-only primary** (GLM-5.2, DeepSeek V4 Pro): OpenCode strips the image
-  bytes before they reach the model, but still tells it an image was attached.
-  The model is instructed to **invoke the `@vision` subagent itself via the
-  Task tool** to describe the image, then reason over the description. You can
-  also invoke it explicitly:
+  bytes before they reach the model. The model tells you plainly it can't see
+  images and that you should switch to a vision-capable model via `/models`
+  (Kimi K2.6, MiniMax M3, or Qwen 3.7 Max) and re-send the image.
 
-```
-@vision describe what's in this screenshot
-```
+### The `@vision` subagent and why it doesn't work for clipboard images
 
-The `@vision` subagent is pinned to Kimi-K2.7-Code.
+A `@vision` subagent is still registered (pinned to Kimi-K2.7-Code), but it
+**does not work for clipboard-pasted images today**: OpenCode has an open bug
+([#25553][oc-25553]) where an image attached with `@vision` is not forwarded to
+the subagent — the subagent only errors with *"this model does not support image
+input"*. The build prompt is therefore configured to tell text-only primaries
+**not** to auto-invoke `@vision` (it would just produce that error). The
+reliable path is to switch the primary model to a vision one via `/models`.
 
-### Caveats
-
-- Auto-delegation (text-only primary → `@vision`) depends on the model noticing
-  the attachment marker and using the Task tool; it may not always fire.
-- There is an open upstream bug ([#25553][oc-25553]) where an image attached with
-  a `@vision` mention isn't always forwarded to the subagent in some UIs. A fix
-  for the subtask path was merged ([#20021][oc-20021]).
-- If vision just won't work, switch the primary model to a vision-capable one via
-  `/models` so it sees images directly.
+A fix for the subagent image-forwarding path is in progress upstream
+([PR #32302][oc-32302]); once it merges, `@vision` for clipboard images should
+work and the prompt can re-enable auto-delegation.
 
 ## /models is curated
 
@@ -106,8 +103,10 @@ Together models, both suppressed by the emitted config:
   it (the provider id is `opencode`, not `zen` — see opencode
   [issue #6979][oc-6979]).
 
-So `/models` shows only the 6 curated flagships, each with a tip in its display
-name:
+So `/models` shows only the 6 curated flagships. Each model's display name
+carries a short tip (since OpenCode model entries have no separate description
+field), and the provider label is shortened to `Together` so the per-line suffix
+OpenCode appends doesn't push names past the picker's truncation width:
 
 | Model id | Vision | Use case |
 |---|---|---|
@@ -122,7 +121,7 @@ That's all you'll see in `/models`. The curated set lives in
 [`@togetherlink/models`](packages/models/src/index.ts) (`SELECTABLE_MODELS`).
 
 [oc-25553]: https://github.com/sst/opencode/issues/25553
-[oc-20021]: https://github.com/sst/opencode/issues/20021
+[oc-32302]: https://github.com/sst/opencode/pull/32302
 [oc-3416]: https://github.com/sst/opencode/pull/3416
 [oc-6979]: https://github.com/sst/opencode/issues/6979
 
