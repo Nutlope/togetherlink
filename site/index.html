@@ -214,21 +214,6 @@
         font-size: 13px;
         font-variant-numeric: tabular-nums;
       }
-      .meter {
-        margin-top: 8px;
-        height: 6px;
-        background: #f0f1f3;
-        border-radius: 999px;
-        overflow: hidden;
-      }
-      .meter span {
-        display: block;
-        height: 100%;
-        width: var(--value);
-        background: var(--ink);
-        border-radius: inherit;
-      }
-      .meter.soft span { background: #737373; }
 
       .steps { margin: 8px 0 80px; }
       .steps h2 { font-size: 20px; margin: 0 0 20px; font-weight: 600; letter-spacing: -0.01em; }
@@ -309,7 +294,6 @@
           <p>Run <code>topencode</code> and OpenCode launches with Together GLM&nbsp;5.2 wired in — config injected, nothing written to disk.</p>
           <div class="support">
             <div class="support-row"><span>Ephemeral launch</span><strong>100%</strong></div>
-            <div class="meter" style="--value:100%"><span></span></div>
           </div>
         </div>
         <div class="card">
@@ -325,7 +309,6 @@
           <p>Run <code>tclaude</code> and Claude Code routes through a local translation proxy. A lighter shared-daemon build arrives via auto-update.</p>
           <div class="support">
             <div class="support-row"><span>Proxy compatibility</span><strong>85%</strong></div>
-            <div class="meter soft" style="--value:85%"><span></span></div>
           </div>
         </div>
         <div class="card">
@@ -343,7 +326,6 @@
           <p>The binary checks for new versions in the background and swaps itself atomically. Your command never changes — it just gets better.</p>
           <div class="support">
             <div class="support-row"><span>Self-update path</span><strong>100%</strong></div>
-            <div class="meter" style="--value:100%"><span></span></div>
           </div>
         </div>
       </section>
