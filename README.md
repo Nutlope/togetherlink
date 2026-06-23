@@ -60,6 +60,33 @@ pnpm -F @togetherlink/cli exec togetherlink opencode status --json
 pnpm -F @togetherlink/cli exec togetherlink opencode off
 ```
 
+## Images and vision in OpenCode
+
+The OpenCode default model (GLM-5.2) is **text-only** — it cannot see images.
+OpenCode gates this client-side: when you paste or attach an image, the image
+part is dropped before it reaches GLM-5.2, so the model only sees your text.
+
+There is no automatic routing to a vision model (unlike the Claude proxy, which
+intercepts images server-side). Instead a `@vision` subagent is registered on a
+vision-capable Together model. To describe an image, invoke it explicitly:
+
+```
+@vision describe what's in this screenshot
+```
+
+The subagent replies with a description, which the primary model can then reason
+over. If you paste an image without `@vision`, GLM-5.2 will tell you it can't see
+images and prompt you to use `@vision` — that's intentional, so you don't get a
+fake/guessed description.
+
+> Note: `@vision` relies on OpenCode's subagent invocation, which has had
+> reliability bugs upstream ([#19538][oc-19538], [#29616][oc-29616]). If `@vision`
+> doesn't fire, switch the primary model to a vision-capable one via `/models`
+> (the vision models are registered there) so it sees the image directly.
+
+[oc-19538]: https://github.com/sst/opencode/issues/19538
+[oc-29616]: https://github.com/sst/opencode/issues/29616
+
 ## Testing Claude Code
 
 Claude Code is ephemeral only. `togetherlink` does not write `~/.claude/settings.json` and there is no `claude on/off` flow to remember.

@@ -54,6 +54,16 @@ export function buildClaudeEnv({
   env.ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION = notAnthropicDescription;
   env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME = displayName;
   env.ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION = notAnthropicDescription;
+
+  // Disable Claude Code's periodic "How is Claude doing this session?" survey.
+  // It's an internal TUI prompt (not a request the proxy could intercept), and
+  // its rating rides on Anthropic's telemetry channel — which bypasses our proxy
+  // entirely, so it can't be captured. Default to off; only respect an explicit
+  // user opt-in (e.g. "1" re-enables). Uses the targeted kill switch rather than
+  // DISABLE_TELEMETRY so we don't also suppress error reporting / auto-updater.
+  if (env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY === undefined) {
+    env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY = "1";
+  }
   return env;
 }
 
