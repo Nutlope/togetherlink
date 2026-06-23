@@ -81,18 +81,35 @@ chmod +x "$BIN_DIR/topencode"
 ok "Wrappers installed: togetherlink, tclaude, topencode → $BIN_DIR"
 
 # --- 4. Help the user get it on PATH -----------------------------------------
+path_line="export PATH=\"$BIN_DIR:\$PATH\""
+
+detect_shell_rc() {
+  case "${SHELL:-}" in
+    */zsh)  printf "%s/.zshrc" "$HOME" ;;
+    */bash) printf "%s/.bashrc" "$HOME" ;;
+    *)      printf "%s/.profile" "$HOME" ;;
+  esac
+}
+
 case ":$PATH:" in
   *":$BIN_DIR:"*) ok "Already on PATH" ;;
   *)
-    bold "Add togetherlink to your PATH:"
-    SHELL_RC=""
-    case "$SHELL" in
-      */zsh)  SHELL_RC="$HOME/.zshrc" ;;
-      */bash) SHELL_RC="$HOME/.bashrc" ;;
-      *)      SHELL_RC="$HOME/.profile" ;;
-    esac
-    info "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> $SHELL_RC"
-    info "  then start a new shell (or: export PATH=\"$BIN_DIR:\$PATH\")"
+    SHELL_RC="$(detect_shell_rc)"
+    mkdir -p "$(dirname "$SHELL_RC")"
+    touch "$SHELL_RC"
+
+    if grep -Fqs "$path_line" "$SHELL_RC"; then
+      ok "PATH already configured in $SHELL_RC"
+    else
+      {
+        printf "\n# togetherlink\n"
+        printf "%s\n" "$path_line"
+      } >> "$SHELL_RC"
+      ok "Added togetherlink to PATH in $SHELL_RC"
+    fi
+
+    info "Restart your shell, or run this now:"
+    info "  export PATH=\"$BIN_DIR:\$PATH\""
     ;;
 esac
 
