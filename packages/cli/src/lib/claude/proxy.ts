@@ -245,6 +245,39 @@ async function handleProxyRequest(
   // GLM-5.2 can't see images: describe each image/url block with a vision model
   // and replace it with a text block, so GLM reasons over the description.
   await resolveImageBlocks(body, options);
+  // When the inbound request is streaming AND there are no native server-side
+  // tools (web_search), stream Together's response directly to Claude Code as
+  // Anthropic SSE — reasoning, text, and tool_use deltas land as they're
+  // generated, so the user sees first tokens (and the live thinking trace) while
+  // GLM is still working, instead of one burst at the very end. Thinking stays
+  // ON (reasoning_effort "high"): GLM-5.2's strength on agentic/coding work comes
+  // from that reasoning — we just make it visible and streaming rather than
+  // buffered-then-flushed. When native web_search tools ARE present, a single
+  // /v1/messages request can span several upstream turns (model calls web_search
+  // → we run Exa → feed result back); those intermediate turns must stay buffered
+  // (their output never reaches the client), so we fall back to the fully buffered
+  // loop for correctness. The common coding path declares no web_search tool, so
+  // it streams. See the OpenCode ephemeral harness memory for why high reasoning
+  // is the intended config, not something to dial down.
+  const nativeTools = nativeServerTools(body.tools);
+  if (body.stream && nativeTools.length === 0) {
+    await streamAnthropicFromTogether(res, body, options);
+    if (options.debug) {
+      const delta = options.costTracker?.requestDelta;
+      const totals = options.costTracker?.totals;
+      if (delta && totals) {
+        debugLog(options, "request cost", {
+          requestCostUsd: Number(delta.costUsd.toFixed(6)),
+          requestInputTokens: delta.promptTokens,
+          requestCachedTokens: delta.cachedTokens,
+          requestOutputTokens: delta.completionTokens,
+          sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+        });
+      }
+    }
+    return;
+  }
+
   const openAiResponse = await callTogetherChatCompletions(body, options);
   const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
@@ -808,6 +841,424 @@ function toAnthropicMessage(response: OpenAIChatResponse, model: string): Record
       output_tokens: response.usage?.completion_tokens ?? 0,
     },
   };
+}
+
+/**
+ * Stream Together's chat-completions SSE straight through to Claude Code as
+ * Anthropic-shaped SSE, emitting reasoning / text / tool_use deltas as they
+ * arrive. This is what makes Claude Code show first tokens and the live
+ * thinking trace while GLM is still generating — the buffered path waited for
+ * the entire generation (including all high-effort reasoning) before emitting
+ * anything, so perceived latency equaled total generation time.
+ *
+ * Block ordering is the correctness-critical part: Anthropic SSE requires
+ * contiguous content_block indices, each block opened with content_block_start
+ * before any delta and closed with content_block_stop before the next opens. We
+ * track which block types are open and only start each once. reasoning → text →
+ * tool_use, in that arrival order.
+ *
+ * If the upstream call fails (non-OK status after retries), we surface an honest
+ * Anthropic error event if nothing has been streamed yet; if we've already
+ * started streaming, the partial stream is already in the client's hands and we
+ * just close (the standard SSE failure shape).
+ */
+async function streamAnthropicFromTogether(
+  res: ServerResponse,
+  body: AnthropicMessagesRequest,
+  options: ClaudeProxyOptions,
+): Promise<void> {
+  const targetModel = resolveTargetModel(body.model, options);
+  const messages = toOpenAIMessages(body);
+  const tools = body.tools?.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description ?? "",
+      parameters: toOpenAIToolParameters(tool),
+    },
+  }));
+
+  const payload = {
+    model: targetModel,
+    messages,
+    max_tokens: body.max_tokens,
+    temperature: body.temperature,
+    tools,
+    reasoning_effort: "high",
+    chat_template_kwargs: { clear_thinking: false },
+    stream: true,
+    // Guarantee Together sends a usage chunk at the end so cost tracking has
+    // real token counts (without this, some streamed responses omit usage).
+    stream_options: { include_usage: true },
+  };
+
+  debugLog(options, "together stream request", {
+    model: payload.model,
+    messageCount: payload.messages.length,
+    toolCount: payload.tools?.length ?? 0,
+    maxTokens: payload.max_tokens,
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
+    return;
+  }
+
+  if (!response.ok) {
+    const error = await mapTogetherError(response);
+    debugLog(options, "together stream error", {
+      status: error.status,
+      anthropicType: error.anthropicType,
+      code: error.code,
+      body: error.message.slice(0, 1000),
+    });
+    writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
+    return;
+  }
+  if (!response.body) {
+    writeAnthropicError(res, 500, "api_error", "Together returned no stream body.");
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
+  const model = body.model ?? options.modelId;
+  // Start the stream with an empty message; content blocks are added as the
+  // upstream emits them. usage is filled in from the final usage chunk (or
+  // stays 0 if Together omits it despite include_usage).
+  writeSse(res, "message_start", {
+    type: "message_start",
+    message: {
+      id: messageId,
+      type: "message",
+      role: "assistant",
+      model,
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  });
+
+  const blockManager = new StreamBlockManager(res);
+  let stopReason = "end_turn";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
+
+  try {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = consumeSseLines(buffer, (data) => {
+        if (!data) {
+          return;
+        }
+        const event = parseStreamData(data);
+        if (!event) {
+          return;
+        }
+        const delta = event.delta;
+        if (delta) {
+          const reasoning = delta.reasoning ?? delta.reasoning_content;
+          if (typeof reasoning === "string" && reasoning.length > 0) {
+            blockManager.emitThinking(reasoning);
+          }
+          if (typeof delta.content === "string" && delta.content.length > 0) {
+            blockManager.emitText(delta.content);
+          }
+          if (Array.isArray(delta.tool_calls)) {
+            for (const toolCall of delta.tool_calls) {
+              blockManager.emitToolCall(toolCall);
+            }
+          }
+        }
+        if (event.usage) {
+          inputTokens = event.usage.prompt_tokens ?? inputTokens;
+          outputTokens = event.usage.completion_tokens ?? outputTokens;
+          cachedTokens = event.usage.cached_tokens ?? cachedTokens;
+        }
+        if (event.finish_reason) {
+          stopReason = mapStopReason(event.finish_reason);
+        }
+      });
+    }
+  } catch (err) {
+    debugLog(options, "together stream read error", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Mid-stream failure: best-effort close whatever block is open, then end.
+    // The client already has partial output; we can't retroactively emit an
+    // error event in a way Anthropic SSE expects after content has started.
+  }
+
+  blockManager.close();
+  if (inputTokens > 0 || outputTokens > 0) {
+    options.costTracker?.addUsage(inputTokens, cachedTokens, outputTokens);
+  }
+  debugLog(options, "together stream done", {
+    stopReason,
+    usage: { inputTokens, outputTokens, cachedTokens },
+    blocks: blockManager.summary(),
+  });
+
+  writeSse(res, "message_delta", {
+    type: "message_delta",
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+  });
+  writeSse(res, "message_stop", { type: "message_stop" });
+  res.end();
+}
+
+/**
+ * Parses one SSE `data:` JSON payload into a normalized stream event. Returns
+ * null for non-JSON lines (Together occasionally sends `[DONE]` or comments).
+ * Tolerates both `usage` on a final choices-bearing chunk and on a dedicated
+ * empty-choices usage chunk (the `stream_options.include_usage` shape).
+ */
+function parseStreamData(
+  data: string,
+): {
+  delta?: {
+    reasoning?: string | null;
+    reasoning_content?: string | null;
+    content?: string | null;
+    tool_calls?: Array<{
+      index?: number;
+      id?: string;
+      type?: string;
+      function?: { name?: string; arguments?: string };
+    }>;
+  } | null;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    cached_tokens?: number;
+  } | null;
+  finish_reason?: string | null;
+} | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const obj = parsed as Record<string, unknown>;
+  const choices = obj.choices;
+  const choice = Array.isArray(choices) && choices.length > 0 ? (choices[0] as Record<string, unknown>) : null;
+  return {
+    delta: (choice?.delta as Record<string, unknown> | undefined) ?? null,
+    usage: (obj.usage as Record<string, unknown> | undefined) ?? null,
+    finish_reason:
+      typeof choice?.finish_reason === "string" ? (choice.finish_reason as string) : null,
+  };
+}
+
+/**
+ * Calls `onData` for each complete SSE `data:` line in `buffer`, returns the
+ * leftover partial line (no trailing newline yet). SSE events are separated by
+ * blank lines; a `data:` field may itself span multiple lines, so we join them
+ * into one payload before parsing.
+ */
+function consumeSseLines(buffer: string, onData: (data: string) => void): string {
+  let remaining = buffer;
+  for (;;) {
+    // Find the next event boundary (blank line = \n\n, or \r\n\r\n).
+    const boundary = remaining.search(/\r?\n\r?\n/);
+    if (boundary === -1) {
+      break;
+    }
+    const rawEvent = remaining.slice(0, boundary);
+    remaining = remaining.replace(/.*?(\r?\n){2}/s, "");
+    // Within one event, concatenate every `data:` line (strip the prefix). A
+    // multi-line data field arrives as separate `data:` lines per OpenAI SSE.
+    const dataLines = rawEvent
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /, ""));
+    if (dataLines.length > 0) {
+      onData(dataLines.join("\n"));
+    }
+  }
+  return remaining;
+}
+
+/**
+ * Manages the content_block lifecycle on the Anthropic SSE stream. Tracks which
+ * block type is currently open so we emit content_block_start exactly once per
+ * block and content_block_stop before the next opens. Indices are contiguous
+ * starting at 0, in arrival order: thinking → text → tool_use(…).
+ */
+class StreamBlockManager {
+  private nextIndex = 0;
+  private openBlock:
+    | { type: "thinking"; index: number; reasoning: string }
+    | { type: "text"; index: number }
+    | { type: "tool_use"; index: number; id: string; name: string; arguments: string }
+    | null = null;
+  private blockCount = 0;
+
+  constructor(private readonly res: ServerResponse) {}
+
+  emitThinking(reasoning: string): void {
+    if (!this.openBlock || this.openBlock.type !== "thinking") {
+      this.closeOpenBlock();
+      this.openBlock = { type: "thinking", index: this.nextIndex, reasoning: "" };
+      writeSse(this.res, "content_block_start", {
+        type: "content_block_start",
+        index: this.openBlock.index,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      this.blockCount += 1;
+    }
+    this.openBlock.reasoning += reasoning;
+    writeSse(this.res, "content_block_delta", {
+      type: "content_block_delta",
+      index: this.openBlock.index,
+      delta: { type: "thinking_delta", thinking: reasoning },
+    });
+  }
+
+  emitText(text: string): void {
+    if (!this.openBlock || this.openBlock.type !== "text") {
+      this.closeOpenBlock();
+      this.openBlock = { type: "text", index: this.nextIndex };
+      writeSse(this.res, "content_block_start", {
+        type: "content_block_start",
+        index: this.openBlock.index,
+        content_block: { type: "text", text: "" },
+      });
+      this.blockCount += 1;
+    }
+    writeSse(this.res, "content_block_delta", {
+      type: "content_block_delta",
+      index: this.openBlock.index,
+      delta: { type: "text_delta", text },
+    });
+  }
+
+  emitToolCall(toolCall: {
+    index?: number;
+    id?: string;
+    type?: string;
+    function?: { name?: string; arguments?: string };
+  }): void {
+    // Tool calls arrive across multiple chunks: the first carries id + name,
+    // later chunks carry arguments JSON fragments (possibly split mid-string).
+    // We accumulate into one block keyed by Together's tool-call `index`; if
+    // the index doesn't match the open tool_use block, start a new one.
+    const tcIndex = typeof toolCall.index === "number" ? toolCall.index : 0;
+    const name = toolCall.function?.name;
+    const argsFragment = toolCall.function?.arguments ?? "";
+    // A tool_use block is open and matches this delta when the open block is a
+    // tool_use AND its upstream tool-call index equals this delta's index. A new
+    // index means a new tool call → start a fresh block. Check the open block's
+    // type directly (not via optional chaining) so TS narrows it to the
+    // tool_use variant for reuse.
+    const open = this.openBlock;
+    if (open && open.type === "tool_use" && this.currentToolCallIndex === tcIndex) {
+      if (argsFragment) {
+        open.arguments += argsFragment;
+        writeSse(this.res, "content_block_delta", {
+          type: "content_block_delta",
+          index: open.index,
+          delta: { type: "input_json_delta", partial_json: argsFragment },
+        });
+      }
+      return;
+    }
+
+    this.closeOpenBlock();
+    const id = toolCall.id ?? `toolu_${randomUUID().replaceAll("-", "")}`;
+    const toolName = name ?? "tool";
+    const block: { type: "tool_use"; index: number; id: string; name: string; arguments: string } = {
+      type: "tool_use",
+      index: this.nextIndex,
+      id,
+      name: toolName,
+      arguments: "",
+    };
+    this.openBlock = block;
+    this.currentToolCallIndex = tcIndex;
+    writeSse(this.res, "content_block_start", {
+      type: "content_block_start",
+      index: block.index,
+      // Anthropic streams tool_use with input: {} on the start event; the
+      // real input arrives as input_json_delta fragments that the client
+      // accumulates into the final input object.
+      content_block: { type: "tool_use", id, name: toolName, input: {} },
+    });
+    this.blockCount += 1;
+    if (argsFragment) {
+      block.arguments += argsFragment;
+      writeSse(this.res, "content_block_delta", {
+        type: "content_block_delta",
+        index: block.index,
+        delta: { type: "input_json_delta", partial_json: argsFragment },
+      });
+    }
+  }
+
+  private currentToolCallIndex = -1;
+
+  closeOpenBlock(): void {
+    if (!this.openBlock) {
+      return;
+    }
+    // For a thinking block, emit the signature (derived from the full reasoning
+    // via the same base64url scheme the buffered path uses) as a signature_delta
+    // before closing. The signature is computed over the complete accumulated
+    // reasoning, which we only have at close time — so we send it once here.
+    if (this.openBlock.type === "thinking") {
+      const signature = `togetherlink:${Buffer.from(this.openBlock.reasoning).toString("base64url")}`;
+      writeSse(this.res, "content_block_delta", {
+        type: "content_block_delta",
+        index: this.openBlock.index,
+        delta: { type: "signature_delta", signature },
+      });
+    }
+    writeSse(this.res, "content_block_stop", {
+      type: "content_block_stop",
+      index: this.openBlock.index,
+    });
+    this.nextIndex += 1;
+    this.openBlock = null;
+  }
+
+  close(): void {
+    this.closeOpenBlock();
+  }
+
+  summary(): string {
+    return `${this.blockCount} block(s)`;
+  }
 }
 
 function writeAnthropicStream(res: ServerResponse, message: Record<string, unknown>): void {

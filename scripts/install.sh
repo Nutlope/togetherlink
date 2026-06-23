@@ -80,7 +80,35 @@ chmod +x "$BIN_DIR/topencode"
 
 ok "Wrappers installed: togetherlink, tclaude, topencode → $BIN_DIR"
 
-# --- 4. Help the user get it on PATH -----------------------------------------
+# --- 4. Link into the current PATH when possible -----------------------------
+find_writable_path_dir() {
+  old_ifs="$IFS"
+  IFS=:
+  for dir in $PATH; do
+    IFS="$old_ifs"
+    [ -n "$dir" ] || continue
+    [ "$dir" != "$BIN_DIR" ] || continue
+    [ -d "$dir" ] && [ -w "$dir" ] || continue
+    case "$dir" in
+      "$HOME"/*|/usr/local/bin|/opt/homebrew/bin)
+        printf "%s" "$dir"
+        return 0
+        ;;
+    esac
+    IFS=:
+  done
+  IFS="$old_ifs"
+  return 1
+}
+
+if LINK_DIR="$(find_writable_path_dir)"; then
+  ln -sf "$BIN_DIR/togetherlink" "$LINK_DIR/togetherlink"
+  ln -sf "$BIN_DIR/tclaude" "$LINK_DIR/tclaude"
+  ln -sf "$BIN_DIR/topencode" "$LINK_DIR/topencode"
+  ok "Linked commands into current PATH → $LINK_DIR"
+fi
+
+# --- 5. Help the user get it on PATH permanently -----------------------------
 path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
 detect_shell_rc() {
