@@ -21,6 +21,14 @@ type OpencodeProviderConfig = {
   name: string;
   options: { apiKey: string };
   models?: Record<string, unknown>;
+  /**
+   * Restricts the provider so ONLY these model ids appear in /models
+   * (otherwise OpenCode merges our declared models on top of Together's full
+   * models.dev catalog, surfacing hundreds of unrelated models). Added in
+   * opencode PR #3416: "Whitelist restricts to only specified models
+   * (empty whitelist = no models); blacklist is treated over whitelist."
+   */
+  whitelist?: string[];
 };
 
 /**
@@ -47,13 +55,16 @@ export function buildOpencodeConfigJson({
   visionPrompt?: string;
 } = {}): OpencodeConfig {
   const models: Record<string, unknown> = {};
+  const whitelist: string[] = [];
   if (modelId === OPENCODE_DEFAULT_MODEL) {
     models[modelId] = OPENCODE_GLM52_MODEL_ENTRY;
+    whitelist.push(modelId);
   }
   // Always register the vision models so the @vision subagent (and /models)
   // can use them, regardless of the primary model.
   for (const [id, entry] of Object.entries(OPENCODE_VISION_MODEL_ENTRIES)) {
     models[id] = entry;
+    whitelist.push(id);
   }
 
   const provider: OpencodeProviderConfig = {
@@ -61,6 +72,11 @@ export function buildOpencodeConfigJson({
     name: "Together AI",
     options: { apiKey: apiKeyEnvRef },
     models,
+    // Restrict /models to exactly the models we declare above. Without this,
+    // OpenCode also shows Together's full catalog (hundreds of models) because
+    // the `models` block merges onto the provider's models.dev catalog rather
+    // than replacing it (opencode PR #3416 added whitelist/blacklist filtering).
+    whitelist,
   };
 
   return {
@@ -77,12 +93,13 @@ export function buildOpencodeConfigJson({
       build: {
         prompt: buildPrompt,
       },
-      // GLM-5.2 can't see images; this subagent describes them on request.
-      // Invoke via @vision when the user pastes/attaches an image.
+      // GLM-5.2 can't see images; this subagent describes them. The primary
+      // `build` agent is instructed to invoke it automatically via the Task tool
+      // when it detects an image was attached (users can also @mention it).
       vision: {
         mode: "subagent",
         description:
-          "Describes images the user pastes or attaches. Use @vision when the main model can't see an image.",
+          "Describes images the user attaches or pastes. Invoke this subagent automatically (via the Task tool) whenever an image was attached and the primary model can't see it, so you can reason over the description. Users may also invoke it with @vision.",
         model: OPENCODE_VISION_MODEL_SELECTOR,
         prompt: visionPrompt,
       },

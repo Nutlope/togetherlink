@@ -62,30 +62,43 @@ pnpm -F @togetherlink/cli exec togetherlink opencode off
 
 ## Images and vision in OpenCode
 
-The OpenCode default model (GLM-5.2) is **text-only** — it cannot see images.
-OpenCode gates this client-side: when you paste or attach an image, the image
-part is dropped before it reaches GLM-5.2, so the model only sees your text.
+The OpenCode default model (GLM-5.2) is **text-only** — it cannot see image
+content. When you paste or attach an image, OpenCode strips the image bytes
+before they reach GLM-5.2, but the model is still told an image was attached.
 
-There is no automatic routing to a vision model (unlike the Claude proxy, which
-intercepts images server-side). Instead a `@vision` subagent is registered on a
-vision-capable Together model. To describe an image, invoke it explicitly:
+A `@vision` subagent is registered on a vision-capable Together model
+(Kimi-K2.7-Code). The primary `build` agent is instructed to **invoke `@vision`
+itself via the Task tool** when it detects an image was attached — you should
+not need to do anything. The subagent describes the image and the primary model
+reasons over that description.
+
+If auto-delegation doesn't fire, you can invoke it explicitly:
 
 ```
 @vision describe what's in this screenshot
 ```
 
-The subagent replies with a description, which the primary model can then reason
-over. If you paste an image without `@vision`, GLM-5.2 will tell you it can't see
-images and prompt you to use `@vision` — that's intentional, so you don't get a
-fake/guessed description.
+### Caveats
 
-> Note: `@vision` relies on OpenCode's subagent invocation, which has had
-> reliability bugs upstream ([#19538][oc-19538], [#29616][oc-29616]). If `@vision`
-> doesn't fire, switch the primary model to a vision-capable one via `/models`
-> (the vision models are registered there) so it sees the image directly.
+- Auto-delegation depends on GLM-5.2 noticing the attachment marker and using
+  the Task tool; it may not always fire.
+- There is an open upstream bug ([#25553][oc-25553]) where an image attached with
+  a `@vision` mention isn't always forwarded to the subagent in some UIs. A fix
+  for the subtask path was merged ([#20021][oc-20021]).
+- If vision just won't work, switch the primary model to a vision-capable one via
+  `/models` (the vision models are registered there) so it sees images directly.
 
-[oc-19538]: https://github.com/sst/opencode/issues/19538
-[oc-29616]: https://github.com/sst/opencode/issues/29616
+## /models is curated
+
+OpenCode merges a provider's declared `models` block on top of its full
+[models.dev](https://models.dev) catalog, so without filtering, `/models` shows
+hundreds of Together models. The config sets a `whitelist` (added in opencode
+[PR #3416][oc-3416]) restricting the Together provider to **only** the models
+togetherlink declares: GLM-5.2 plus the vision models. That's all you'll see.
+
+[oc-25553]: https://github.com/sst/opencode/issues/25553
+[oc-20021]: https://github.com/sst/opencode/issues/20021
+[oc-3416]: https://github.com/sst/opencode/pull/3416
 
 ## Testing Claude Code
 

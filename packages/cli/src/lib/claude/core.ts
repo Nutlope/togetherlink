@@ -87,7 +87,10 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
       process.stderr.write(`[togetherlink proxy] listening: ${proxy.url}\n`);
       process.stderr.write(`[togetherlink claude] custom model: ${modelId}\n`);
     }
-    const child = spawn("claude", claudeArgsWithoutModelOverrides(options.args ?? []), {
+    const child = spawn(
+      "claude",
+      [...claudeArgsWithoutModelOverrides(options.args ?? []), ...claudeExtraSettingsArgs(options.args ?? [])],
+      {
       env: buildClaudeEnv({ ...options, proxyUrl: proxy.url }),
       stdio: "inherit",
     });
@@ -122,4 +125,25 @@ function claudeArgsWithoutModelOverrides(args: string[]): string[] {
     sanitized.push(arg);
   }
   return sanitized;
+}
+
+// Extra settings.json keys togetherlink applies by default. These are
+// settings-only (no env-var equivalent), so they're injected via claude's
+// `--settings <json>` flag, which *merges* into the user's existing settings
+// rather than replacing them. We bail out entirely if the user already passed
+// `--settings` themselves, so we never clobber their explicit config.
+function claudeExtraSettingsArgs(args: string[]): string[] {
+  for (const arg of args) {
+    if (arg === "--settings" || arg.startsWith("--settings=")) {
+      return [];
+    }
+  }
+
+  // skipWebFetchPreflight: the WebFetch tool pings api.anthropic.com directly
+  // (bypassing ANTHROPIC_BASE_URL / our proxy) for its domain safety check. In
+  // a togetherlink session api.anthropic.com isn't our model endpoint, so the
+  // preflight fails and WebFetch breaks entirely. Skipping it restores
+  // WebFetch without reaching Anthropic. Only sends a boolean — no other
+  // settings keys are added here.
+  return ["--settings", JSON.stringify({ skipWebFetchPreflight: true })];
 }

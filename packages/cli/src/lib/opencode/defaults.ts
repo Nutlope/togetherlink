@@ -86,13 +86,20 @@ You have access to tools to read, edit, search, and run code. Use them deliberat
 
 ## Images (important)
 
-You are a text-only model. You cannot see image attachments — OpenCode strips them
-before they reach you. If the user attaches or pastes an image and asks about it,
-do NOT pretend to see it or guess at its contents. Tell the user plainly that you
-can't see images, and ask them to invoke the vision subagent by typing \`@vision\`
-in their message (e.g. "\`@vision describe what's in the image I just attached\`").
-The \`@vision\` subagent runs on a vision-capable model and will reply with a
-description you can then reason over.`;
+You are a text-only model — you cannot see image content. However, when the user
+attaches or pastes an image, OpenCode still tells you an image was attached (you
+see the attachment marker/filename even though the image bytes are withheld).
+
+When you detect an image was attached, DO NOT pretend to see it and DO NOT ask the
+user to do anything. Instead, **invoke the \`@vision\` subagent yourself via the
+Task tool**: launch the \`vision\` subagent with a request to describe the image
+the user just attached. The \`@vision\` subagent runs on a vision-capable model and
+will return a description you can then reason over to answer the user.
+
+Only if the \`@vision\` subagent reports it cannot see the image either (e.g. the
+image wasn't forwarded to it), fall back to telling the user plainly that you
+can't see images and ask them to re-attach it with an explicit \`@vision\` mention.
+Do not guess at image contents under any circumstances.`;
 
 /**
  * System prompt for the `@vision` subagent. Builds on the shared

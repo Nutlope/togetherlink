@@ -82,6 +82,37 @@ type OpenAIChatResponse = {
   };
 };
 
+/**
+ * Together upstream error, normalized. Carries the real HTTP status and a
+ * best-effort message/code pulled from Together's `error` object, plus the
+ * Anthropic error type/status we map it to (so the caller can render an honest
+ * Anthropic-shaped error instead of flattening everything to 500).
+ *
+ * `retryable` is true for transient faults (429, 503, overloaded) — fetchTogether
+ * retries those before throwing. Everything else is thrown on the first hit.
+ */
+type TogetherApiError = {
+  status: number;
+  anthropicStatus: number;
+  anthropicType: string;
+  message: string;
+  code?: string | undefined;
+  retryAfterMs?: number | undefined;
+  retryable: boolean;
+};
+
+type TogetherFetchResult =
+  | { ok: true; json: OpenAIChatResponse; error?: undefined }
+  | { ok: false; error: TogetherApiError; json?: undefined };
+
+// Transient upstream faults worth retrying with backoff. 429 = rate limited;
+// 503/overloaded = server-side temporary capacity. Everything else (401, 400,
+// 402, 404, 5xx other than 503) is non-retryable — retrying a bad key or a
+// malformed request just delays the same failure.
+const RETRYABLE_STATUSES = new Set([429, 503]);
+const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
+const MAX_RETRIES = 3;
+
 type ExaSearchResult = {
   title?: string;
   url?: string;
@@ -117,7 +148,15 @@ export async function startClaudeProxy(options: ClaudeProxyOptions): Promise<Cla
 
   const server = http.createServer((req, res) => {
     handleProxyRequest(req, res, serverOptions).catch((err: unknown) => {
-      writeAnthropicError(res, 500, err instanceof Error ? err.message : String(err));
+      // A TogetherApiError (thrown from callTogetherChatCompletions) carries the
+      // real upstream status and the mapped Anthropic type — render it honestly
+      // so Claude Code shows "rate limit" / "authentication" etc. instead of a
+      // generic 500. Anything else is an unexpected proxy fault → 500 api_error.
+      if (isTogetherApiError(err)) {
+        writeAnthropicError(res, err.anthropicStatus, err.anthropicType, err.message);
+        return;
+      }
+      writeAnthropicError(res, 500, "api_error", err instanceof Error ? err.message : String(err));
     });
   });
 
@@ -186,7 +225,7 @@ async function handleProxyRequest(
   }
 
   if (req.method !== "POST" || path !== "/v1/messages") {
-    writeAnthropicError(res, 404, `Unsupported route ${req.method ?? ""} ${req.url ?? ""}`.trim());
+    writeAnthropicError(res, 404, "not_found_error", `Unsupported route ${req.method ?? ""} ${req.url ?? ""}`.trim());
     return;
   }
 
@@ -266,21 +305,15 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    const response = await fetchTogether(payload, options);
 
     if (!response.ok) {
-      const text = await response.text();
-      debugLog(options, "together error", { status: response.status, body: text.slice(0, 1000) });
-      throw new Error(`Together API returned ${response.status}: ${text.slice(0, 500)}`);
+      // Surfaced via fetchTogether as a TogetherApiError after exhausting retries
+      // for transient faults (429/overloaded). Non-retryable, or retries
+      // exhausted — map to the matching Anthropic error shape and stop.
+      throw response.error;
     }
-    const json = (await response.json()) as OpenAIChatResponse;
+    const json = response.json;
     const usage = json.usage;
     const promptTokens = usage?.prompt_tokens ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
@@ -356,6 +389,196 @@ async function callTogetherChatCompletions(
 function resolveTargetModel(_requestedModel: string | undefined, _options: ClaudeProxyOptions): string {
   const targetModel = CLAUDE_DEFAULT_TOGETHER_MODEL;
   return targetModel;
+}
+
+/**
+ * POST to Together with automatic retry for transient faults (429 / 503 /
+ * overloaded). On a non-retryable status, or after MAX_RETRIES retries, returns
+ * `{ ok: false, error }` carrying the mapped Anthropic error shape — the caller
+ * throws it to surface an honest error instead of flattening to 500.
+ *
+ * Backoff honors `Retry-After` when Together sends it (seconds or HTTP-date),
+ * else exponential 1s → 2s → 4s with up to ±25% jitter. Deterministic jitter is
+ * derived from the attempt index so the same call retraces the same waits
+ * (Math.random would break workflow resume determinism).
+ */
+async function fetchTogether(
+  payload: Record<string, unknown>,
+  options: ClaudeProxyOptions,
+): Promise<TogetherFetchResult> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      // Network-level failure (DNS, connection reset, timeout). Treat as
+      // retryable transient — the request never reached Together, so it's
+      // safe to try again. If it keeps failing, surface as overloaded_error.
+      if (attempt < MAX_RETRIES) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      return {
+        ok: false,
+        error: {
+          status: 0,
+          anthropicStatus: 503,
+          anthropicType: "overloaded_error",
+          message: err instanceof Error ? err.message : String(err),
+          retryable: false,
+        },
+      };
+    }
+
+    if (response.ok) {
+      return { ok: true, json: (await response.json()) as OpenAIChatResponse };
+    }
+
+    const error = await mapTogetherError(response);
+    debugLog(options, "together error", {
+      status: error.status,
+      anthropicType: error.anthropicType,
+      code: error.code,
+      retryable: error.retryable,
+      attempt,
+      body: error.message.slice(0, 1000),
+    });
+
+    if (!error.retryable || attempt >= MAX_RETRIES) {
+      return { ok: false, error };
+    }
+    await sleep(error.retryAfterMs ?? backoffMs(attempt));
+  }
+  // Unreachable: loop returns on every path. Satisfies exhaustiveness.
+  return {
+    ok: false,
+    error: {
+      status: 0,
+      anthropicStatus: 500,
+      anthropicType: "api_error",
+      message: "Together request failed after retries.",
+      retryable: false,
+    },
+  };
+}
+
+/**
+ * Read a non-OK Together response and normalize it into a TogetherApiError with
+ * the mapped Anthropic error type. Pulls the human message and code from
+ * Together's `error` object (it nests message under `error.message` for
+ * validation errors, and as a string for auth errors).
+ */
+async function mapTogetherError(response: Response): Promise<TogetherApiError> {
+  const raw = await response.text();
+  let code: string | undefined;
+  let message = raw.slice(0, 500);
+  try {
+    const parsed = JSON.parse(raw) as {
+      error?: {
+        message?: string | { message?: string; type?: string; code?: string };
+        type?: string;
+        code?: string;
+      };
+    };
+    const err = parsed.error;
+    if (err) {
+      code = err.code ?? (typeof err.message === "object" ? err.message.code : undefined);
+      const msg =
+        typeof err.message === "object"
+          ? err.message.message
+          : typeof err.message === "string"
+            ? err.message
+            : undefined;
+      message = msg ?? err.type ?? message;
+    }
+  } catch {
+    // Keep the raw slice as the message if the body wasn't JSON.
+  }
+
+  const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+  const retryable =
+    RETRYABLE_STATUSES.has(response.status) ||
+    (typeof code === "string" && RETRYABLE_ERROR_CODES.has(code));
+
+  const mapped = mapStatusToAnthropicError(response.status);
+  return {
+    status: response.status,
+    anthropicStatus: mapped.status,
+    anthropicType: mapped.type,
+    message: `Together API returned ${response.status}: ${message}`,
+    code,
+    retryAfterMs,
+    retryable,
+  };
+}
+
+/**
+ * Map an upstream HTTP status to the Anthropic error shape Claude Code knows how
+ * to render (the binary recognizes api_error, authentication_error,
+ * rate_limit_error, invalid_request_error, overloaded_error, not_found_error,
+ * permission_error, billing_error, timeout_error). Defaults to api_error.
+ */
+function mapStatusToAnthropicError(status: number): { status: number; type: string } {
+  switch (status) {
+    case 400:
+      return { status: 400, type: "invalid_request_error" };
+    case 401:
+      return { status: 401, type: "authentication_error" };
+    case 402:
+      return { status: 402, type: "billing_error" };
+    case 403:
+      return { status: 403, type: "permission_error" };
+    case 404:
+      return { status: 404, type: "not_found_error" };
+    case 408:
+      return { status: 408, type: "timeout_error" };
+    case 429:
+      return { status: 429, type: "rate_limit_error" };
+    case 503:
+      return { status: 503, type: "overloaded_error" };
+    case 500:
+    case 502:
+    case 504:
+      return { status: 500, type: "api_error" };
+    default:
+      return { status: status || 500, type: "api_error" };
+  }
+}
+
+/** Parse a Retry-After header (integer seconds or HTTP-date) to milliseconds. */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const seconds = Number.parseInt(value, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return undefined;
+}
+
+/** Exponential backoff: 1s, 2s, 4s (for attempts 0,1,2). */
+function backoffMs(attempt: number): number {
+  const base = 1000 * 2 ** attempt; // 1s, 2s, 4s
+  // Deterministic ±25% jitter from the attempt index so waits are spread across
+  // concurrent requests without Math.random (which would break resume determinism).
+  const jitter = (attempt % 2 === 0 ? 1 : -1) * base * 0.2;
+  return Math.max(100, base + jitter);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toOpenAIToolParameters(tool: AnthropicTool): unknown {
@@ -643,11 +866,27 @@ function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-function writeAnthropicError(res: ServerResponse, status: number, message: string): void {
+function writeAnthropicError(
+  res: ServerResponse,
+  status: number,
+  type: string,
+  message: string,
+): void {
   writeJson(res, status, {
     type: "error",
-    error: { type: status === 404 ? "not_found_error" : "api_error", message },
+    error: { type, message },
   });
+}
+
+/** Whether a thrown value is a normalized Together upstream error. */
+function isTogetherApiError(value: unknown): value is TogetherApiError {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "anthropicType" in value &&
+    "anthropicStatus" in value &&
+    "retryable" in value
+  );
 }
 
 function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): void {
