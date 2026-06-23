@@ -71,31 +71,28 @@ Provider/library candidates:
 
 ## Important
 
-### `image` / `url` content blocks (vision interception)
+### `image` / `url` content blocks (vision interception) — IMPLEMENTED
 
 Why:
 
 - GLM-5.2 (`zai-org/GLM-5.2`) is text-only — Together's GLM-5.2 quickstart lists no vision/image capability.
 - Claude Code sends images (pasted photos, screenshots, dragged files) as Anthropic `image` content blocks in `/v1/messages`.
-- Today the proxy's `toOpenAIMessages` only handles `text`, `thinking`, `tool_use`, and `tool_result` blocks. An `image` block is silently dropped, so only the accompanying text reaches GLM-5.2 — which then answers about an image it never saw (weak/fake model-only behavior).
+- Before this work, the proxy's `toOpenAIMessages` only handled `text`, `thinking`, `tool_use`, and `tool_result` blocks, so an `image` block was silently dropped — only the accompanying text reached GLM-5.2, which answered about an image it never saw.
 
-Current shape (observed via the proxy's `image blocks detected` debug log):
+How it works now (in `proxy.ts` + `vision.ts`):
 
-- `{ type: "image", source: { type: "base64", media_type: "image/png", data: "<base64>" } }` in a user message's `content` array.
-- Newer Anthropic beta also supports `{ type: "url", url: "<https url>" }`.
+- `resolveImageBlocks` runs before each `/v1/messages` call. It walks every message's `content` (and the system array), finds `image` and `url` blocks, describes each with a vision model, and replaces the block in place with a `text` block holding the description. GLM-5.2 then reasons over the description rather than the pixels.
+- Vision models are **fixed, not user-configurable** — curated for the best experience, with automatic failover from primary to fallback:
+  - Primary: `moonshotai/Kimi-K2.7-Code` (best speed/quality/price balance in the benchmark).
+  - Fallback: `Qwen/Qwen3.5-9B` (best verbatim OCR, used if Kimi errors).
+- Reasoning is disabled on the vision sub-call (`reasoning: { enabled: false }`, `temperature: 0.6`). With reasoning on, hybrid models emit empty `content` — see `scripts/bench-vision-results.md`.
+- Descriptions are cached by image hash (per-process), so the same image recurring in conversation history across turns is described once and not re-billed.
+- Debug logs (`TOGETHERLINK_DEBUG=1`): `image blocks detected`, `vision describe start/done` with model, length, and a preview.
+- Verified end-to-end: GLM-5.2 correctly identified a screenshot as "The Blind Test (theblindtest.io)" and quoted a headline that exists only in the image pixels — proof the description reached the model.
 
-Plan:
+Known limitation / future work:
 
-- Detect image/url blocks in `toOpenAIMessages` (the `extractImageBlocks` debug hook already proves detection works).
-- For each image, route it to a vision-capable Together serverless model (e.g. `moonshotai/Kimi-K2.6` or another from the serverless catalog's vision list) using the OpenAI `image_url` shape: `{ type: "image_url", image_url: { url: "data:<media_type>;base64,<data>" } }`.
-- Get the vision model's textual description, then substitute a `text` block back into the GLM-5.2 turn so the main model reasons over the description rather than the pixels.
-- Log which vision model was used and the token cost of the image-analysis sub-call.
-
-Open questions:
-
-- Which Together vision model gives the best quality/latency/cost tradeoff for screenshots and photos?
-- Should the description be injected inline, or returned as a synthetic `tool_result` so Claude Code renders it as tool output?
-- Do we preserve the original image for the user's transcript while only swapping the model-facing content?
+- The vision sub-call's own token cost is not yet folded into the proxy's `CostTracker`. The `CostTracker` only records the GLM-5.2 chat calls today, so the session cost summary under-reports by the (small) vision spend.
 
 ### `code_execution_*`
 

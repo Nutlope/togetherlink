@@ -1,10 +1,10 @@
-import { mkdir, readFile, writeFile, rm, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import type { HarnessContext } from "./harness-types.js";
 
 export const TOGETHER_BASE_URL = "https://api.together.ai/v1";
 export const TOGETHER_API_KEY_ENV_REF = "{env:TOGETHER_API_KEY}";
+export const EXA_API_KEY_ENV_REF = "{env:EXA_API_KEY}";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -27,50 +27,6 @@ export async function writeJsonAtomic(filePath: string, value: unknown): Promise
   const tmpPath = `${filePath}.tmp-${process.pid}`;
   await writeFile(tmpPath, serialized, { mode: 0o600 });
   await rename(tmpPath, filePath);
-}
-
-/**
- * Snapshot the raw bytes of a config file before togetherlink first touches
- * it, so `off` can restore it byte-for-byte. No-op if a snapshot already
- * exists (we only ever want the pre-togetherlink original).
- */
-export async function snapshotIfMissing(dataDir: string, key: string, sourcePath: string): Promise<void> {
-  const dest = snapshotPath(dataDir, key);
-  if (existsSync(dest)) {
-    return;
-  }
-  await mkdir(dataDir, { recursive: true });
-  if (!existsSync(sourcePath)) {
-    // Nothing existed before us — record that explicitly so `off` knows to
-    // remove the file entirely rather than restoring empty content.
-    await writeFile(dest, "", { mode: 0o600 });
-    await writeFile(`${dest}.absent`, "", { mode: 0o600 });
-    return;
-  }
-  const raw = await readFile(sourcePath);
-  await writeFile(dest, raw, { mode: 0o600 });
-}
-
-export async function restoreSnapshot(dataDir: string, key: string, destPath: string): Promise<boolean> {
-  const snapPath = snapshotPath(dataDir, key);
-  if (!existsSync(snapPath)) {
-    return false;
-  }
-  const wasAbsent = existsSync(`${snapPath}.absent`);
-  if (wasAbsent) {
-    await rm(destPath, { force: true });
-  } else {
-    const raw = await readFile(snapPath);
-    await mkdir(path.dirname(destPath), { recursive: true });
-    await writeFile(destPath, raw);
-  }
-  await rm(snapPath, { force: true });
-  await rm(`${snapPath}.absent`, { force: true });
-  return true;
-}
-
-function snapshotPath(dataDir: string, key: string): string {
-  return path.join(dataDir, `${key}.snapshot`);
 }
 
 /**

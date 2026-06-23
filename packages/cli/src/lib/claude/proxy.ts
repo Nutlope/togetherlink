@@ -4,13 +4,16 @@ import { randomUUID } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./defaults.js";
 import { CostTracker } from "./cost.js";
+import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string; signature?: string }
   | { type: "redacted_thinking"; data: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content?: unknown };
+  | { type: "tool_result"; tool_use_id: string; content?: unknown }
+  | { type: "image"; source: { type: string; media_type?: string; data?: string; url?: string } }
+  | { type: "url"; url: string };
 
 type AnthropicMessage = {
   role: "user" | "assistant";
@@ -89,8 +92,8 @@ type ExaSearchResponse = {
 export type ClaudeProxyOptions = {
   apiKey: string;
   modelId: string;
-  debug?: boolean;
-  costTracker?: CostTracker;
+  debug?: boolean | undefined;
+  costTracker?: CostTracker | undefined;
 };
 
 export type ClaudeProxyHandle = {
@@ -187,6 +190,9 @@ async function handleProxyRequest(
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
+  // GLM-5.2 can't see images: describe each image/url block with a vision model
+  // and replace it with a text block, so GLM reasons over the description.
+  await resolveImageBlocks(body, options);
   const openAiResponse = await callTogetherChatCompletions(body, options);
   const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
@@ -666,6 +672,59 @@ function stringifyAnthropicContent(content: AnthropicMessagesRequest["system"]):
 
 function stringifyUnknown(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? "");
+}
+
+// Cross-request cache: the same image recurs in conversation history across
+// turns, so keep its description to avoid re-billing the vision model each time.
+const imageDescriptionCache = new Map<string, string>();
+
+/**
+ * Find every image/url block in the request, describe it with the vision model,
+ * and replace it in place with a `text` block holding the description. GLM-5.2
+ * is text-only, so this is what lets Claude Code's images reach the model.
+ */
+async function resolveImageBlocks(body: AnthropicMessagesRequest, options: ClaudeProxyOptions): Promise<void> {
+  const descriptions = new Map<string, string>();
+
+  const resolve = async (block: AnthropicContentBlock): Promise<AnthropicContentBlock> => {
+    if (!isImageBlock(block) && !isUrlImageBlock(block)) {
+      return block;
+    }
+    const key = imageBlockKey(block);
+    let cached = descriptions.get(key) ?? imageDescriptionCache.get(key);
+    if (cached === undefined) {
+      debugLog(options, "vision describe start", { key });
+      const result = await describeImage(block as ImageBlock | UrlBlock, {
+        apiKey: options.apiKey,
+        debug: options.debug,
+      });
+      debugLog(options, "vision describe done", {
+        key,
+        model: result.model,
+        length: result.description.length,
+        preview: result.description.slice(0, 200),
+      });
+      if (result.usage) {
+        options.costTracker?.addVisionUsage(result.model, result.usage.promptTokens, result.usage.completionTokens);
+      }
+      cached = `${result.description}\n[described by ${result.model}]`;
+      imageDescriptionCache.set(key, cached);
+    }
+    descriptions.set(key, cached);
+    return { type: "text", text: `[Image description]\n${cached}` };
+  };
+
+  // Replace image blocks inside the system content array.
+  if (Array.isArray(body.system)) {
+    body.system = await Promise.all(body.system.map((block) => resolve(block)));
+  }
+
+  // Replace image blocks inside each message's content array.
+  for (const message of body.messages ?? []) {
+    if (Array.isArray(message.content)) {
+      message.content = await Promise.all(message.content.map((block) => resolve(block)));
+    }
+  }
 }
 
 /**

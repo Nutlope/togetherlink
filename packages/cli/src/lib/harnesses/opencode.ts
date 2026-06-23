@@ -1,35 +1,46 @@
-import {
-  opencodePathsFor,
-  opencodeProviderStatus,
-  opencodeCurrentModelId,
-  enableTogetherOpencode,
-  disableTogetherOpencode,
-} from "../opencode-core.js";
-import { readJsonIfExists, resolveTogetherApiKey } from "../together-core.js";
-import { isHarnessEnabled, setHarnessEnabled } from "../global-config.js";
+import { spawn } from "node:child_process";
+import { OPENCODE_DEFAULT_MODEL, OPENCODE_DEFAULT_MODEL_NAME } from "../opencode/defaults.js";
+import { buildOpencodeConfigJson, buildOpencodeEnv } from "../opencode/core.js";
+import { resolveTogetherApiKey } from "../together-core.js";
 import { defineHarness } from "../harness-types.js";
 import { HARNESS } from "../harness.js";
-import type { HarnessContext } from "../harness-types.js";
-
-// TODO: replace with the curated remote models.json default once that
-// manifest exists (see plan: "Default model picks come from a separate,
-// remotely-updatable curated manifest"). Placeholder is a real, current
-// Together coding model, not a fabricated id.
-const PLACEHOLDER_DEFAULT_MODEL = "Qwen/Qwen3-Coder-30B-A3B-Instruct";
+import type { HarnessContext, HarnessResult } from "../harness-types.js";
 
 async function opencodeResolveKey(ctx: HarnessContext): Promise<string> {
-  const { authPath } = opencodePathsFor(ctx);
-  const auth = await readJsonIfExists<Record<string, { key?: string } | undefined>>(authPath);
-  return auth.togetherai?.key ?? "";
+  return ctx.apiKey ?? process.env.TOGETHER_API_KEY?.trim() ?? "";
+}
+
+/**
+ * Strips any `--model`/`-m`/`--model=` from passthrough args so a user can't
+ * override the Together default. Parallel to Claude's
+ * `claudeArgsWithoutModelOverrides`.
+ */
+function opencodeArgsWithoutModelOverrides(args: string[]): string[] {
+  const sanitized: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === undefined) {
+      continue;
+    }
+    if (arg === "--model" || arg === "-m") {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--model=")) {
+      continue;
+    }
+    sanitized.push(arg);
+  }
+  return sanitized;
 }
 
 export default defineHarness({
   id: HARNESS.OPENCODE,
   label: "OpenCode",
+  mode: "ephemeral",
   resolveKey: opencodeResolveKey,
 
-  async on(ctx) {
-    const { configPath, authPath, dataDir } = opencodePathsFor(ctx);
+  async run(ctx: HarnessContext): Promise<HarnessResult> {
     const apiKey = await resolveTogetherApiKey({
       apiKey: ctx.apiKey,
       resolveKey: () => opencodeResolveKey(ctx),
@@ -38,40 +49,44 @@ export default defineHarness({
     if (!apiKey) {
       throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
     }
-    const result = await enableTogetherOpencode({
-      configPath,
-      authPath,
-      dataDir,
-      apiKey,
-      modelId: ctx.main ?? PLACEHOLDER_DEFAULT_MODEL,
+
+    const modelId = ctx.main ?? OPENCODE_DEFAULT_MODEL;
+    const configJson = buildOpencodeConfigJson({ modelId });
+    const env = buildOpencodeEnv({ apiKey, configJson });
+
+    if (process.env.TOGETHERLINK_DEBUG === "1") {
+      process.stderr.write(`[togetherlink opencode] custom model: ${modelId}\n`);
+      process.stderr.write(`[togetherlink opencode] config: ${JSON.stringify(configJson)}\n`);
+    }
+
+    const child = spawn("opencode", opencodeArgsWithoutModelOverrides(ctx.passthrough ?? []), {
+      env,
+      stdio: "inherit",
     });
-    await setHarnessEnabled(ctx.home, HARNESS.OPENCODE, true);
-    return {
-      message: `Together AI enabled for OpenCode (model: ${result.model}). Run \`opencode\` directly from now on — Together appears as a provider choice.`,
-    };
+
+    const result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        child.on("error", reject);
+        child.on("exit", (status, signal) => resolve({ status, signal }));
+      },
+    );
+
+    if (typeof result.status === "number") {
+      process.exitCode = result.status;
+    }
+    return {};
   },
 
-  async off(ctx) {
-    const { configPath, authPath, dataDir } = opencodePathsFor(ctx);
-    const wasEnabled = await isHarnessEnabled(ctx.home, HARNESS.OPENCODE);
-    const outcome = await disableTogetherOpencode({ configPath, authPath, dataDir, wasEnabled });
-    await setHarnessEnabled(ctx.home, HARNESS.OPENCODE, false);
+  async status(): Promise<HarnessResult> {
     return {
-      message:
-        outcome === "restored"
-          ? "Together AI disabled for OpenCode; original config restored."
-          : "Together AI was not active for OpenCode.",
+      payload: {
+        harness: HARNESS.OPENCODE,
+        mode: "ephemeral",
+        provider: "together",
+        currentModel: OPENCODE_DEFAULT_MODEL,
+        targetModel: OPENCODE_DEFAULT_MODEL,
+        modelName: OPENCODE_DEFAULT_MODEL_NAME,
+      },
     };
-  },
-
-  async status(ctx) {
-    const { configPath } = opencodePathsFor(ctx);
-    const config = await readJsonIfExists(configPath);
-    const payload = {
-      harness: HARNESS.OPENCODE,
-      provider: opencodeProviderStatus(config),
-      currentModel: opencodeCurrentModelId(config),
-    };
-    return { payload };
   },
 });

@@ -19,11 +19,3 @@ export async function loadHarness(harness: HarnessId): Promise<Harness> {
 export function isHarnessImplemented(harness: HarnessId): boolean {
   return harness in LOADERS;
 }
-
-export async function isHarnessConfigurable(harness: HarnessId): Promise<boolean> {
-  if (!isHarnessImplemented(harness)) {
-    return false;
-  }
-  const harnessModule = await loadHarness(harness);
-  return harnessModule.mode !== "ephemeral" && typeof harnessModule.on === "function";
-}

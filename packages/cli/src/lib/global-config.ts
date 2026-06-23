@@ -1,15 +1,9 @@
 import os from "node:os";
 import path from "node:path";
 import { readJsonIfExists, writeJsonAtomic, TOGETHER_API_KEY_ENV_REF } from "./together-core.js";
-import { ALL_HARNESSES, type HarnessId } from "./harness.js";
-
-type HarnessState = {
-  enabled: boolean;
-};
 
 export type GlobalConfig = {
   apiKey: string;
-  harnesses: Record<HarnessId, HarnessState>;
 };
 
 export function togetherlinkHome(home = os.homedir()): string {
@@ -24,7 +18,6 @@ export async function readGlobalConfig(home = os.homedir()): Promise<GlobalConfi
   const config = await readJsonIfExists<Partial<GlobalConfig>>(globalConfigPath(home));
   return {
     apiKey: config.apiKey ?? "",
-    harnesses: { ...defaultHarnessState(), ...(config.harnesses ?? {}) },
   };
 }
 
@@ -36,25 +29,6 @@ export async function setGlobalApiKey(home: string, apiKey: string): Promise<voi
   const config = await readGlobalConfig(home);
   config.apiKey = apiKey;
   await writeGlobalConfig(home, config);
-}
-
-export async function isHarnessEnabled(home: string, harness: HarnessId): Promise<boolean> {
-  const config = await readGlobalConfig(home);
-  return Boolean(config.harnesses[harness]?.enabled);
-}
-
-export async function setHarnessEnabled(home: string, harness: HarnessId, enabled: boolean): Promise<void> {
-  const config = await readGlobalConfig(home);
-  config.harnesses[harness] = { ...(config.harnesses[harness] ?? {}), enabled };
-  await writeGlobalConfig(home, config);
-}
-
-function defaultHarnessState(): Record<HarnessId, HarnessState> {
-  const state = {} as Record<HarnessId, HarnessState>;
-  for (const harness of ALL_HARNESSES) {
-    state[harness] = { enabled: false };
-  }
-  return state;
 }
 
 /**
