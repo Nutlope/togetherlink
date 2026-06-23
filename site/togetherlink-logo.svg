@@ -1,0 +1,13 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">TogetherLink TL logo</title>
+  <desc id="desc">A minimal TL monogram in a clean developer sans font.</desc>
+  <text
+    x="256"
+    y="352"
+    fill="#0A0A0A"
+    font-family="Inter, 'Helvetica Neue', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-size="284"
+    font-weight="700"
+    letter-spacing="-18"
+    text-anchor="middle">TL</text>
+</svg>

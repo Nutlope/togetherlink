@@ -169,11 +169,12 @@ pnpm -F @togetherlink/cli exec togetherlink claude -- --help
 pnpm -F @togetherlink/cli exec togetherlink claude -- --version
 ```
 
-The Claude local proxy always sends requests to Together GLM-5.2 (`zai-org/GLM-5.2`).
-Override only the displayed Claude model option for one launch:
+The Claude local proxy defaults to Together GLM-5.2 (`zai-org/GLM-5.2`) and can also route Claude Code through Kimi K2.7 Code.
+Pick a backend for one launch:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink claude --main together-glm-5-2
+pnpm -F @togetherlink/cli exec togetherlink claude --main together-kimi-k2-7-code
 ```
 
 Check the ephemeral defaults without launching Claude:

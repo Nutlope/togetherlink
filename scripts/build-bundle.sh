@@ -22,10 +22,10 @@ echo "Building togetherlink v${VERSION} bundle…"
 # first so `bun build` can resolve and inline it into the bundle.
 pnpm --filter @togetherlink/models build
 
-SITE_DIR="$ROOT/site"
+SITE_DIR="$ROOT/site/public"
 mkdir -p "$SITE_DIR"
 cp "$ROOT/scripts/install.sh" "$SITE_DIR/install.sh"
-echo "✓ installer → site/install.sh"
+echo "✓ installer → site/public/install.sh"
 
 # Bundle the CLI entry. --target=bun keeps Bun-only runtime assumptions; the
 # result is a single self-contained JS file with models inlined.
@@ -36,7 +36,7 @@ bun build \
   --define "process.env.TOGETHERLINK_VERSION=\"${VERSION}\"" \
   --outfile "$SITE_DIR/togetherlink.js"
 
-echo "✓ bundle → site/togetherlink.js ($(wc -c < "$SITE_DIR/togetherlink.js") bytes)"
+echo "✓ bundle → site/public/togetherlink.js ($(wc -c < "$SITE_DIR/togetherlink.js") bytes)"
 
 # Refresh the manifest the auto-updater and install script read.
 node -e "
@@ -48,5 +48,5 @@ const manifest = {
   publishedAt: new Date().toISOString(),
 };
 fs.writeFileSync('$SITE_DIR/latest.json', JSON.stringify(manifest, null, 2) + '\n');
-console.log('✓ manifest → site/latest.json (v' + version + ')');
+console.log('✓ manifest → site/public/latest.json (v' + version + ')');
 "

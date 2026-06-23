@@ -1,13 +1,15 @@
 {
   "name": "togetherlink",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Use Together AI models in Claude Code, OpenCode, and Codex",
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
     "build:bundle": "bash scripts/build-bundle.sh",
+    "build:site": "pnpm build:bundle && pnpm --filter @togetherlink/site build",
     "dev": "pnpm -F @togetherlink/cli dev",
+    "dev:site": "pnpm --filter @togetherlink/site dev",
     "watch": "pnpm dev",
     "typecheck": "pnpm -r typecheck"
   },

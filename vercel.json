@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "bash scripts/build-bundle.sh",
-  "outputDirectory": "site",
+  "buildCommand": "pnpm build:site",
+  "outputDirectory": "site/dist/client",
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [

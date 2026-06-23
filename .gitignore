@@ -150,6 +150,10 @@ images-test/*
 
 /scripts/bench-vision-out/*
 
+/site/public/install.sh
+/site/public/latest.json
+/site/public/togetherlink.js
+
 MVP-PLAN.md
 
 PLAN.md
