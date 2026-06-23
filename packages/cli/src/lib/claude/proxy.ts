@@ -3,6 +3,13 @@ import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_DEFAULT_TOGETHER_MODEL, CLAUDE_LOCAL_PROXY_HOST } from "./defaults.js";
+import { GLM_5_2 } from "@togetherlink/models";
+
+// Context window + output cap advertised to Claude Code via /v1/models
+// discovery. Sourced from the single GLM_5_2 model definition so the numbers
+// can't drift from the rest of the codebase.
+const MODEL_CONTEXT_WINDOW = GLM_5_2.limit.context;
+const MODEL_OUTPUT_LIMIT = GLM_5_2.limit.output;
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 
@@ -151,6 +158,13 @@ async function handleProxyRequest(
   }
 
   if (req.method === "GET" && path === "/v1/models") {
+    // Claude Code's model discovery (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)
+    // reads `max_input_tokens` as the context window and `max_tokens` as the
+    // output cap per model object (since Mar 2026 — there is no `context_window`
+    // field). Without these, Claude Code falls back to a ~200K default and
+    // auto-compacts earlier than GLM-5.2's true 262K window, and the context
+    // indicator shows the wrong "% used". Advertise the real limits so
+    // compaction triggers at the right point.
     writeJson(res, 200, {
       data: [
         {
@@ -158,6 +172,8 @@ async function handleProxyRequest(
           type: "model",
           object: "model",
           display_name: "Together GLM 5.2",
+          max_input_tokens: MODEL_CONTEXT_WINDOW,
+          max_tokens: MODEL_OUTPUT_LIMIT,
           created_at: "2026-06-16T00:00:00Z",
         },
         {
@@ -165,6 +181,8 @@ async function handleProxyRequest(
           type: "model",
           object: "model",
           display_name: "Together GLM 5.2 (1M)",
+          max_input_tokens: MODEL_CONTEXT_WINDOW,
+          max_tokens: MODEL_OUTPUT_LIMIT,
           created_at: "2026-06-16T00:00:00Z",
         },
       ],
