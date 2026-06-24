@@ -28,6 +28,9 @@ importers:
 
   packages/tests:
     devDependencies:
+      '@togetherlink/models':
+        specifier: workspace:*
+        version: link:../models
       '@types/node':
         specifier: ^26.0.0
         version: 26.0.0

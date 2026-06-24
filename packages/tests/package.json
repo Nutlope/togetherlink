@@ -10,6 +10,7 @@
     "test:opencode": "vitest run --config vitest.config.ts src/OpenCode.test.ts"
   },
   "devDependencies": {
+    "@togetherlink/models": "workspace:*",
     "@types/node": "^26.0.0",
     "vitest": "^4.0.15"
   }
