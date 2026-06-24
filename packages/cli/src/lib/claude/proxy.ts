@@ -7,7 +7,7 @@ import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
-import { stableHash } from "../stable-hash.js";
+import { stableHash, stableStringify } from "../stable-hash.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -273,15 +273,19 @@ export async function handleProxyRequest(
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
   const nativeTools = nativeServerTools(body.tools);
+  const tracePayload = tracePayloadForClaudeUpstream(body, options);
+  const upstreamMode: ProxyTraceEvent["upstreamMode"] = body.stream ? "stream" : "buffered";
   const traceBase = {
     id: randomUUID(),
     route: path,
     method: req.method ?? "POST",
     model: body.model ?? options.modelId,
     stream: Boolean(body.stream),
+    upstreamMode,
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
     requestPreview: summarizeAnthropicRequestContent(body),
-    cacheKey: cacheKeyForClaudeUpstreamPayload(body, options),
+    cacheKey: tracePayload.cacheKey,
+    promptProfile: tracePayload.promptProfile,
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount: nativeTools.length,
@@ -339,12 +343,7 @@ export async function handleProxyRequest(
     // GLM-5.2 can't see images: describe each image/url block with a vision model
     // and replace it with a text block, so GLM reasons over the description.
     await resolveImageBlocks(body, options);
-    // Cache is the default for Claude Code: Together currently reports/reuses
-    // prompt cache on non-streaming chat completions, so we buffer upstream and
-    // emit Anthropic SSE locally when Claude requested streaming. Set
-    // TOGETHERLINK_UPSTREAM_STREAM=1 to trade cacheability for true token-by-token
-    // upstream streaming. Native web_search turns stay buffered for correctness.
-    if (body.stream && nativeTools.length === 0 && preferUpstreamStreaming()) {
+    if (body.stream) {
       await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
       finalizeTrace(true, res.statusCode);
       if (options.debug) {
@@ -378,21 +377,13 @@ export async function handleProxyRequest(
       });
     }
 
-    if (body.stream) {
-      writeAnthropicStream(res, anthropicMessage);
-    } else {
-      writeJson(res, 200, anthropicMessage);
-    }
+    writeJson(res, 200, anthropicMessage);
     finalizeTrace(true, res.statusCode);
   } catch (err) {
     const status = isTogetherApiError(err) ? err.anthropicStatus : res.statusCode >= 400 ? res.statusCode : 500;
     finalizeTrace(false, status, err instanceof Error ? err.message : String(err));
     throw err;
   }
-}
-
-function preferUpstreamStreaming(): boolean {
-  return process.env.TOGETHERLINK_UPSTREAM_STREAM === "1";
 }
 
 function recordProxyTrace(
@@ -438,14 +429,19 @@ function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): strin
   return redactTraceError(parts.join("\n")).slice(0, 2000);
 }
 
-function cacheKeyForClaudeUpstreamPayload(
+function tracePayloadForClaudeUpstream(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
-): NonNullable<ProxyTraceEvent["cacheKey"]> {
+): {
+  cacheKey: NonNullable<ProxyTraceEvent["cacheKey"]>;
+  promptProfile: NonNullable<ProxyTraceEvent["promptProfile"]>;
+} {
   const targetModel = resolveTargetModel(body.model, options);
   const nativeTools = nativeServerTools(body.tools);
   const messages = toOpenAIMessages(body, targetModel.definition);
   const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+  const systemMessages = upstreamMessages.filter((message) => message.role === "system");
+  const nonSystemMessages = upstreamMessages.filter((message) => message.role !== "system");
   const tools = body.tools?.map((tool) => ({
     type: "function",
     function: {
@@ -464,14 +460,32 @@ function cacheKeyForClaudeUpstreamPayload(
     tool_choice: toOpenAIToolChoice(body.tool_choice),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
-    stream: body.stream && nativeTools.length === 0 && preferUpstreamStreaming(),
+    stream: Boolean(body.stream),
   };
+  const systemBytes = byteLength(systemMessages);
+  const toolsBytes = byteLength(tools ?? []);
+  const messagesBytes = byteLength(upstreamMessages);
+  const dynamicBytes = byteLength(nonSystemMessages);
   return {
-    systemHash: stableHash(upstreamMessages.filter((message) => message.role === "system")),
-    toolsHash: stableHash(tools ?? []),
-    messagesHash: stableHash(upstreamMessages),
-    fullHash: stableHash(upstreamPayload),
+    cacheKey: {
+      systemHash: stableHash(systemMessages),
+      toolsHash: stableHash(tools ?? []),
+      messagesHash: stableHash(upstreamMessages),
+      fullHash: stableHash(upstreamPayload),
+    },
+    promptProfile: {
+      stablePrefixBytes: systemBytes + toolsBytes,
+      dynamicBytes,
+      totalBytes: byteLength(upstreamPayload),
+      systemBytes,
+      toolsBytes,
+      messagesBytes,
+    },
   };
+}
+
+function byteLength(value: unknown): number {
+  return Buffer.byteLength(stableStringify(value), "utf8");
 }
 
 function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | undefined): string {
@@ -1634,52 +1648,6 @@ class StreamBlockManager {
   }
 }
 
-function writeAnthropicStream(res: ServerResponse, message: Record<string, unknown>): void {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-  writeSse(res, "message_start", { type: "message_start", message: { ...message, content: [] } });
-  const content = Array.isArray(message.content) ? message.content : [];
-  content.forEach((block, index) => {
-    const contentBlock = isToolUseBlock(block) ? { ...block, input: {} } : block;
-    writeSse(res, "content_block_start", { type: "content_block_start", index, content_block: contentBlock });
-    if (isTextBlock(block)) {
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "text_delta", text: block.text },
-      });
-    } else if (isThinkingBlock(block)) {
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "thinking_delta", thinking: block.thinking },
-      });
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "signature_delta", signature: block.signature ?? "" },
-      });
-    } else if (isToolUseBlock(block)) {
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
-      });
-    }
-    writeSse(res, "content_block_stop", { type: "content_block_stop", index });
-  });
-  writeSse(res, "message_delta", {
-    type: "message_delta",
-    delta: { stop_reason: message.stop_reason, stop_sequence: null },
-    usage: message.usage,
-  });
-  writeSse(res, "message_stop", { type: "message_stop" });
-  res.end();
-}
-
 function writeSse(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -1985,22 +1953,4 @@ function mapStopReason(reason: string | null | undefined): string {
     return "max_tokens";
   }
   return "end_turn";
-}
-
-function isTextBlock(block: unknown): block is { type: "text"; text: string } {
-  return typeof block === "object" && block !== null && "type" in block && block.type === "text" && "text" in block;
-}
-
-function isThinkingBlock(block: unknown): block is { type: "thinking"; thinking: string; signature?: string } {
-  return (
-    typeof block === "object" &&
-    block !== null &&
-    "type" in block &&
-    block.type === "thinking" &&
-    "thinking" in block
-  );
-}
-
-function isToolUseBlock(block: unknown): block is { type: "tool_use"; input?: unknown } {
-  return typeof block === "object" && block !== null && "type" in block && block.type === "tool_use";
 }

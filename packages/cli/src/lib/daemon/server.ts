@@ -375,31 +375,65 @@ function writeDashboardHtml(res: ServerResponse): void {
   <title>togetherlink Dashboard</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <style>
-    :root { color-scheme: light dark; --bg: #f7f7f5; --panel: #ffffff; --text: #1f2328; --muted: #667085; --line: #d8d8d2; --good: #12715b; --bad: #b42318; --chip: #edf2f7; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #111312; --panel: #191c1b; --text: #eef1ef; --muted: #a5aca8; --line: #303633; --chip: #242a27; } }
+    :root { color-scheme: light dark; --bg: #f6f5f1; --panel: #ffffff; --panel-soft: #fbfaf7; --text: #1d2327; --muted: #697279; --faint: #9aa1a7; --line: #dedbd1; --line-strong: #c9c5bb; --good: #08755f; --warn: #986800; --bad: #b42318; --codex: #2f5d8c; --claude: #b85f3f; --opencode: #171717; --chip: #efede7; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #101211; --panel: #181b1a; --panel-soft: #141716; --text: #eef1ef; --muted: #a6ada9; --faint: #737b76; --line: #303531; --line-strong: #454c47; --chip: #252a27; --opencode: #ecefeb; } }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    main { width: min(1180px, calc(100vw - 32px)); margin: 28px auto 56px; }
-    header { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
-    h2 { margin: 0 0 12px; font-size: 15px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+    main { width: min(1280px, calc(100vw - 32px)); margin: 24px auto 56px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; line-height: 1.1; }
+    h2 { margin: 0; font-size: 15px; line-height: 1.2; }
+    button, summary { font: inherit; }
     .muted { color: var(--muted); }
-    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-    .stat, .session { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
-    .stat b { display: block; font-size: 24px; margin-top: 2px; }
+    .faint { color: var(--faint); }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .stat, .session { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 2px rgba(17, 24, 39, .03); }
+    .stat { padding: 12px 14px; }
+    .stat b { display: block; font-size: 22px; margin-top: 1px; font-variant-numeric: tabular-nums; }
     .sessions { display: grid; gap: 12px; }
-    .session-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-    .title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .chip { border-radius: 999px; background: var(--chip); padding: 2px 8px; color: var(--muted); font-size: 12px; }
+    .session { overflow: hidden; }
+    .session summary { display: grid; grid-template-columns: minmax(260px, 1.45fr) repeat(5, minmax(92px, .6fr)) 26px; gap: 12px; align-items: center; padding: 13px 14px; cursor: pointer; list-style: none; }
+    .session summary::-webkit-details-marker { display: none; }
+    .session[open] summary { border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+    .session-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+    .agent-icon { display: inline-flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); }
+    .agent-icon svg { width: 20px; height: 20px; display: block; }
+    .agent-icon[data-agent=claude] { color: var(--claude); }
+    .agent-icon[data-agent=codex] { color: var(--codex); }
+    .agent-icon[data-agent=opencode] { color: var(--opencode); }
+    .session-name { min-width: 0; }
+    .session-name h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-name .meta { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+    .metric { min-width: 0; }
+    .metric-label { display: block; color: var(--faint); font-size: 11px; font-weight: 650; letter-spacing: .02em; text-transform: uppercase; }
+    .metric-value { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .toggle { color: var(--faint); transform: rotate(-90deg); transition: transform .14s ease; text-align: right; }
+    .session[open] .toggle { transform: rotate(0deg); }
+    .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; background: var(--chip); padding: 2px 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
     .running { color: var(--good); }
+    .warn { color: var(--warn); }
     .ended, .error { color: var(--bad); }
+    .session-body { padding: 14px; }
+    .body-grid { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.35fr); gap: 12px; margin-bottom: 12px; }
+    .panel { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); padding: 12px; }
+    .panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; }
+    .kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .kv div { min-width: 0; }
+    .bar { height: 8px; overflow: hidden; border-radius: 999px; background: var(--chip); display: flex; margin: 8px 0 10px; }
+    .bar span:first-child { background: var(--good); }
+    .bar span:last-child { background: var(--warn); }
+    .preview { margin: 0; max-height: 118px; overflow: auto; white-space: pre-wrap; color: var(--muted); }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { border-top: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; }
-    .request-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; max-height: 4.5em; }
+    .request-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; max-height: 3.1em; color: var(--muted); }
+    .trace-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .trace-table { min-width: 1180px; background: var(--panel); }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; padding: 28px; text-align: center; color: var(--muted); }
-    @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { align-items: start; flex-direction: column; } }
+    @media (max-width: 980px) { .session summary { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(84px, .4fr)) 26px; } .hide-md { display: none; } .body-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { align-items: start; flex-direction: column; } .session summary { grid-template-columns: 1fr 26px; } .hide-sm { display: none; } .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   </style>
 </head>
 <body>
@@ -417,6 +451,12 @@ function writeDashboardHtml(res: ServerResponse): void {
   <script>
     const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
     const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 4 });
+    const bytes = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+    const agentMeta = {
+      claude: { label: 'Claude Code', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4.7 15.8 9.4 13l.2-.4-.2-.3h-.3l-2.7-.1-2.4-.1-2.3-.1-.5-.1-.5-.7.1-.4.5-.3.7.1 3.8.3 3.7.4h.4l.1-.2-.2-.1-4.8-3.2-2.5-1.8-.7-.9-.1-1 .7-.7.9.1.2.1 4.4 3.4 2.7 2 .2-.1.1-.1-.2-.3-2.7-4.9-.7-1.1-.2-.7.1-1 .4-.2 1 .1.4.4 3 6.4.4.9h.2V6.7l.5-5 .4-.9.8-.5.6.3.5.7-.1.5-.8 5.2-.4 2h.2l.2-.2 3.5-4.5.8-.8.5-.4h1l.8 1.1-.3 1.2-2.3 3-1.2 1.7.1.1.2-.1 4.6-1 1.8-.3.8.4.1.4-.3.8-5.7 1.2h-.1l.1.1 1.5.1h1.6l3 .2.8.5.5.6-.1.5-1.2.6-1.6-.4-5.2-1.2h-.2v.1l3.6 3.3 2.5 2.3.1.6-.3.5-.3-.1-4.7-3.5h-.1v.2l2.8 4.2.1 1.1-.2.3-.6.2-.7-.1-2.8-4.1-1.3-2.3-.2.1-.7 7.1-.3.4-.8.1-.6-.5-.3-.7.7-3.4.4-2.1.2-.6h-.2L8.1 21l-1.7 1.8-.4.2-.7-.4.1-.7.4-.6 2.4-3 1.4-1.9h-.1l-6.3 2.8-1.1.1-.5-.4.1-.7.2-.2 2.8-1.7z"/></svg>' },
+      codex: { label: 'Codex', icon: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 7.5 12 3l7.5 4.5v9L12 21l-7.5-4.5v-9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m8.2 9.7-2.4 2.4 2.4 2.4M15.8 9.7l2.4 2.4-2.4 2.4M13.4 8.6l-2.8 6.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+      opencode: { label: 'OpenCode', icon: '<svg viewBox="0 0 24 30" aria-hidden="true"><path d="M18 24H6V12h12v12Z" fill="#cfcecd"/><path d="M18 6H6v18h12V6Zm6 24H0V0h24v30Z" fill="currentColor"/></svg>' },
+    };
     function age(ms) {
       const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
       if (seconds < 60) return seconds + 's ago';
@@ -430,6 +470,42 @@ function writeDashboardHtml(res: ServerResponse): void {
     function esc(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
     }
+    function formatBytes(value) {
+      if (!value) return '-';
+      if (value < 1024) return value + ' B';
+      if (value < 1024 * 1024) return bytes.format(value / 1024) + ' KB';
+      return bytes.format(value / 1024 / 1024) + ' MB';
+    }
+    function lastTrace(session) {
+      return session.traces && session.traces.length ? session.traces[0] : undefined;
+    }
+    function cachePercent(trace) {
+      return trace && trace.usage && trace.usage.promptTokens > 0 ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100) : undefined;
+    }
+    function prefixPercent(trace) {
+      const profile = trace && trace.promptProfile;
+      if (!profile || !profile.totalBytes) return undefined;
+      return Math.round((profile.stablePrefixBytes / profile.totalBytes) * 100);
+    }
+    function cleanPreview(preview) {
+      const lines = String(preview || '').split('\\n');
+      const dynamic = lines.filter(line => !/^(system|instructions|tools):/i.test(line.trim()));
+      const chosen = dynamic.length ? dynamic : lines;
+      return chosen.slice(-4).join('\\n').slice(0, 1400);
+    }
+    function traceTone(trace) {
+      if (!trace || !trace.promptProfile) return 'muted';
+      const profile = trace.promptProfile;
+      if (profile.dynamicBytes > profile.stablePrefixBytes * 2 && profile.dynamicBytes > 12000) return 'warn';
+      return 'running';
+    }
+    function agentIcon(agent) {
+      const meta = agentMeta[agent] || { label: agent || 'Session', icon: '<span>TL</span>' };
+      return '<span class="agent-icon" data-agent="' + esc(agent) + '" title="' + esc(meta.label) + '">' + meta.icon + '</span>';
+    }
+    function sessionKey(session) {
+      return [session.agent, session.modelLabel, session.startedAt, session.pid || ''].join(':');
+    }
     function traceRow(trace) {
       const usage = trace.usage ? fmt.format(trace.usage.promptTokens) + ' in / ' + fmt.format(trace.usage.completionTokens) + ' out / ' + money.format(trace.usage.costUsd) : '-';
       const elapsedMs = trace.durationMs ?? Math.max(0, Date.now() - trace.startedAt);
@@ -441,20 +517,36 @@ function writeDashboardHtml(res: ServerResponse): void {
       const cachedPercent = trace.usage && trace.usage.promptTokens > 0 ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100) + '%' : '-';
       const upstreamWait = trace.upstreamHeadersAt && trace.upstreamStartedAt ? ((trace.upstreamHeadersAt - trace.upstreamStartedAt) / 1000).toFixed(1) + 's' : '-';
       const firstByte = ttftMs !== undefined ? (ttftMs / 1000).toFixed(1) + 's' : '-';
-      const requestSize = trace.requestBytes ? Math.round(trace.requestBytes / 1024) + 'KB' : '-';
+      const profile = trace.promptProfile;
+      const requestSize = formatBytes(trace.requestBytes);
+      const promptMix = profile ? formatBytes(profile.stablePrefixBytes) + ' stable / ' + formatBytes(profile.dynamicBytes) + ' dynamic' : '-';
       const cacheKey = trace.cacheKey ? 'sys ' + (trace.cacheKey.systemHash || '-') + '\\ntools ' + (trace.cacheKey.toolsHash || '-') + '\\nmsgs ' + (trace.cacheKey.messagesHash || '-') + '\\nfull ' + (trace.cacheKey.fullHash || '-') : '';
       const hashCell = trace.cacheKey ? '<code title="' + esc(cacheKey) + '">' + esc((trace.cacheKey.fullHash || '-').slice(0, 8)) + '</code>' : '-';
-      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + firstByte + '</td><td>' + upstreamWait + '</td><td>' + outputPerSecond + '</td><td>' + cachedPercent + '</td><td>' + requestSize + '</td><td>' + hashCell + '</td><td>' + esc(trace.model || '-') + '</td><td><div class="request-preview" title="' + esc(trace.requestPreview || '') + '">' + esc(trace.requestPreview || '-') + '</div></td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
+      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + firstByte + '</td><td>' + upstreamWait + '</td><td>' + outputPerSecond + '</td><td>' + cachedPercent + '</td><td>' + promptMix + '</td><td>' + requestSize + '</td><td>' + hashCell + '</td><td>' + esc(trace.model || '-') + '</td><td><div class="request-preview" title="' + esc(trace.requestPreview || '') + '">' + esc(cleanPreview(trace.requestPreview) || '-') + '</div></td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
     }
-    function sessionCard(session) {
-      const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>total</th><th>TTFT</th><th>upstream</th><th>out/s</th><th>cache</th><th>size</th><th>hash</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';
-      return '<article class="session"><div class="session-head"><div><div class="title"><h2>' + esc(session.agent) + '</h2><span class="chip">' + esc(session.modelLabel) + '</span><span class="' + session.status + '">' + session.status + '</span></div><div class="muted">Started ' + age(session.startedAt) + (session.pid ? ' · pid ' + session.pid : '') + '</div></div><code>' + session.traceCount + ' trace' + (session.traceCount === 1 ? '' : 's') + '</code></div><p class="muted">' + esc(session.costSummary).replaceAll('\\n', '<br>') + '</p>' + traces + '</article>';
+    function sessionCard(session, openKeys) {
+      const trace = lastTrace(session);
+      const meta = agentMeta[session.agent] || { label: session.agent || 'Session' };
+      const cache = cachePercent(trace);
+      const prefix = prefixPercent(trace);
+      const profile = trace && trace.promptProfile;
+      const key = sessionKey(session);
+      const open = session.status === 'running' || openKeys.has(key) ? ' open' : '';
+      const started = 'Started ' + age(session.startedAt) + (session.pid ? ' - pid ' + session.pid : '');
+      const promptTone = traceTone(trace);
+      const stableWidth = profile && profile.totalBytes ? Math.max(4, Math.min(96, (profile.stablePrefixBytes / profile.totalBytes) * 100)) : 0;
+      const dynamicWidth = profile && profile.totalBytes ? Math.max(4, Math.min(96, (profile.dynamicBytes / profile.totalBytes) * 100)) : 0;
+      const traceSummary = session.traceCount + ' trace' + (session.traceCount === 1 ? '' : 's');
+      const latestPreview = trace ? cleanPreview(trace.requestPreview) : 'No proxied requests recorded yet.';
+      const traces = session.traces.length ? '<div class="trace-table-wrap"><table class="trace-table"><thead><tr><th>time</th><th>status</th><th>total</th><th>TTFT</th><th>upstream</th><th>out/s</th><th>cache</th><th>prompt mix</th><th>size</th><th>hash</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table></div>' : '<div class="empty">No proxied requests recorded yet. OpenCode sessions self-report cost at exit, so they may not have request traces.</div>';
+      return '<details class="session" data-key="' + esc(key) + '"' + open + '><summary><div class="session-title">' + agentIcon(session.agent) + '<div class="session-name"><h2>' + esc(meta.label) + ' - ' + esc(session.modelLabel) + '</h2><div class="meta">' + esc(started) + '</div></div></div><div class="metric hide-sm"><span class="metric-label">Status</span><span class="metric-value ' + session.status + '"><span class="dot"></span> ' + esc(session.status) + '</span></div><div class="metric hide-sm"><span class="metric-label">Requests</span><span class="metric-value">' + traceSummary + '</span></div><div class="metric hide-md"><span class="metric-label">Cache</span><span class="metric-value">' + (cache === undefined ? '-' : cache + '%') + '</span></div><div class="metric hide-md"><span class="metric-label">Stable prefix</span><span class="metric-value ' + promptTone + '">' + (prefix === undefined ? '-' : prefix + '%') + '</span></div><div class="metric hide-md"><span class="metric-label">Latest</span><span class="metric-value">' + (trace ? age(trace.startedAt) : '-') + '</span></div><div class="toggle">v</div></summary><div class="session-body"><div class="body-grid"><section class="panel"><h3>Session</h3><div class="kv"><div><span class="metric-label">Agent</span><span class="metric-value">' + esc(meta.label) + '</span></div><div><span class="metric-label">Model</span><span class="metric-value">' + esc(session.modelLabel) + '</span></div><div><span class="metric-label">Cost</span><span class="metric-value">' + esc(session.costSummary.split('\\n')[0] || '-') + '</span></div><div><span class="metric-label">Messages</span><span class="metric-value">' + (trace && trace.messageCount !== undefined ? trace.messageCount : '-') + '</span></div><div><span class="metric-label">Tools</span><span class="metric-value">' + (trace && trace.toolCount !== undefined ? trace.toolCount : '-') + '</span></div><div><span class="metric-label">Native tools</span><span class="metric-value">' + (trace && trace.nativeToolCount !== undefined ? trace.nativeToolCount : '-') + '</span></div></div></section><section class="panel"><h3>Prompt Shape</h3><div class="bar" title="Stable prefix vs dynamic prompt bytes"><span style="width:' + stableWidth + '%"></span><span style="width:' + dynamicWidth + '%"></span></div><div class="kv"><div><span class="metric-label">Stable prefix</span><span class="metric-value">' + (profile ? formatBytes(profile.stablePrefixBytes) : '-') + '</span></div><div><span class="metric-label">Dynamic</span><span class="metric-value ' + promptTone + '">' + (profile ? formatBytes(profile.dynamicBytes) : '-') + '</span></div><div><span class="metric-label">Total</span><span class="metric-value">' + (profile ? formatBytes(profile.totalBytes) : '-') + '</span></div></div></section></div><section class="panel"><h3>Latest Dynamic Preview</h3><pre class="preview">' + esc(latestPreview) + '</pre></section>' + traces + '</div></details>';
     }
     async function load() {
+      const openKeys = new Set(Array.from(document.querySelectorAll('.session[open]')).map(el => el.getAttribute('data-key')).filter(Boolean));
       const data = await fetch('/internal/dashboard', { cache: 'no-store' }).then(r => r.json());
       document.getElementById('subtitle').textContent = 'Updated ' + new Date(data.generatedAt).toLocaleTimeString();
       document.getElementById('stats').innerHTML = stat('Active sessions', data.totals.active) + stat('Recent sessions', data.totals.recent) + stat('Total sessions', data.totals.all) + stat('Recorded traces', data.totals.traces);
-      document.getElementById('sessions').innerHTML = data.sessions.length ? data.sessions.map(sessionCard).join('') : '<div class="empty">No sessions yet. Run togetherlink claude or togetherlink codex to start one.</div>';
+      document.getElementById('sessions').innerHTML = data.sessions.length ? data.sessions.map(session => sessionCard(session, openKeys)).join('') : '<div class="empty">No sessions yet. Run togetherlink claude, togetherlink codex, or togetherlink opencode to start one.</div>';
     }
     load().catch(err => { document.getElementById('sessions').innerHTML = '<div class="empty">Could not load dashboard: ' + err.message + '</div>'; });
     setInterval(load, 2000);

@@ -4,6 +4,7 @@ export type ProxyTraceEvent = {
   method: string;
   model?: string;
   stream?: boolean;
+  upstreamMode?: "buffered" | "stream";
   requestBytes?: number;
   requestPreview?: string;
   cacheKey?: {
@@ -11,6 +12,14 @@ export type ProxyTraceEvent = {
     toolsHash?: string;
     messagesHash?: string;
     fullHash?: string;
+  };
+  promptProfile?: {
+    stablePrefixBytes: number;
+    dynamicBytes: number;
+    totalBytes: number;
+    systemBytes: number;
+    toolsBytes: number;
+    messagesBytes: number;
   };
   messageCount?: number;
   toolCount?: number;

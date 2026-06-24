@@ -7,7 +7,7 @@ import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
 import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
-import { stableHash } from "../stable-hash.js";
+import { stableHash, stableStringify } from "../stable-hash.js";
 
 type ResponsesContentPart = {
   type?: string;
@@ -167,6 +167,7 @@ export async function handleCodexProxyRequest(
   const body = (await readJsonBody(req)) as ResponsesRequest;
   const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
   const translatedPayload = toChatPayload(body, options, Boolean(body.stream));
+  const tracePayload = tracePayloadForCodexPayload(translatedPayload);
   const traceBase = {
     id: randomUUID(),
     route: path,
@@ -175,7 +176,8 @@ export async function handleCodexProxyRequest(
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
     requestPreview: summarizeResponsesRequestContent(body),
-    cacheKey: cacheKeyForCodexPayload(translatedPayload),
+    cacheKey: tracePayload.cacheKey,
+    promptProfile: tracePayload.promptProfile,
     messageCount: Array.isArray(body.input) ? body.input.length : typeof body.input === "string" ? 1 : 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount,
@@ -397,15 +399,38 @@ function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, strea
   };
 }
 
-function cacheKeyForCodexPayload(payload: Record<string, unknown>): NonNullable<ProxyTraceEvent["cacheKey"]> {
+function tracePayloadForCodexPayload(payload: Record<string, unknown>): {
+  cacheKey: NonNullable<ProxyTraceEvent["cacheKey"]>;
+  promptProfile: NonNullable<ProxyTraceEvent["promptProfile"]>;
+} {
   const messages = Array.isArray(payload.messages) ? (payload.messages as ChatMessage[]) : [];
   const systemMessages = messages.filter((message) => message.role === "system");
+  const nonSystemMessages = messages.filter((message) => message.role !== "system");
+  const tools = payload.tools ?? [];
+  const systemBytes = byteLength(systemMessages);
+  const toolsBytes = byteLength(tools);
+  const messagesBytes = byteLength(messages);
+  const dynamicBytes = byteLength(nonSystemMessages);
   return {
-    systemHash: stableHash(systemMessages),
-    toolsHash: stableHash(payload.tools ?? []),
-    messagesHash: stableHash(messages),
-    fullHash: stableHash(payload),
+    cacheKey: {
+      systemHash: stableHash(systemMessages),
+      toolsHash: stableHash(tools),
+      messagesHash: stableHash(messages),
+      fullHash: stableHash(payload),
+    },
+    promptProfile: {
+      stablePrefixBytes: systemBytes + toolsBytes,
+      dynamicBytes,
+      totalBytes: byteLength(payload),
+      systemBytes,
+      toolsBytes,
+      messagesBytes,
+    },
   };
+}
+
+function byteLength(value: unknown): number {
+  return Buffer.byteLength(stableStringify(value), "utf8");
 }
 
 function toChatMessages(body: ResponsesRequest, options: CodexProxyOptions): ChatMessage[] {
