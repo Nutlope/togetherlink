@@ -64,6 +64,13 @@ type ChatResponse = {
     completion_tokens?: number;
     total_tokens?: number;
     cached_tokens?: number;
+    reasoning_tokens?: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
+    completion_tokens_details?: {
+      reasoning_tokens?: number;
+    };
   };
 };
 
@@ -90,6 +97,16 @@ type PendingToolCall = {
   id: string;
   name: string;
   arguments: string;
+};
+
+type StreamOutputState = {
+  nextOutputIndex: number;
+  reasoningItemId?: string;
+  reasoningOutputIndex?: number;
+  reasoningText: string;
+  textItemId?: string;
+  textOutputIndex?: number;
+  text: string;
 };
 
 export type CodexProxyOptions = {
@@ -172,7 +189,7 @@ function toCodexModelCatalogEntry(model: { id: string; definition: ModelDefiniti
     priority: 50,
     upgrade: null,
     base_instructions: "",
-    supports_reasoning_summaries: false,
+    supports_reasoning_summaries: model.definition.reasoning,
     default_reasoning_summary: "none",
     support_verbosity: false,
     default_verbosity: "low",
@@ -212,6 +229,7 @@ async function callTogether(
 
 function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, stream: boolean): Record<string, unknown> {
   const messages = toChatMessages(body, options);
+  const translatedReasoningEffort = reasoningEffort(body, options);
   const tools = (body.tools ?? []).flatMap((tool) => {
     if (tool.type !== "function" || !tool.name) {
       return [];
@@ -234,7 +252,7 @@ function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, strea
     temperature: body.temperature,
     ...(tools.length > 0 ? { tools } : {}),
     tool_choice: toChatToolChoice(body.tool_choice),
-    ...(reasoningEffort(body) ? { reasoning_effort: reasoningEffort(body) } : {}),
+    ...(translatedReasoningEffort ? { reasoning_effort: translatedReasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
@@ -328,13 +346,19 @@ function toChatToolChoice(toolChoice: unknown): unknown {
   return undefined;
 }
 
-function reasoningEffort(body: ResponsesRequest): string | undefined {
+function reasoningEffort(body: ResponsesRequest, options: CodexProxyOptions): string | undefined {
   const effort = body.reasoning?.effort;
-  if (effort === "low" || effort === "medium" || effort === "high") {
+  if (options.targetModelId === "zai-org/GLM-5.2") {
+    if (effort === "high" || effort === "xhigh" || effort === "max") {
+      return "max";
+    }
+    return undefined;
+  }
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "max") {
     return effort;
   }
   if (effort === "xhigh") {
-    return "max";
+    return "high";
   }
   return undefined;
 }
@@ -419,8 +443,11 @@ async function streamResponseFromTogether(
     return;
   }
 
-  let textItemOpened = false;
-  let text = "";
+  const outputState: StreamOutputState = {
+    nextOutputIndex: 0,
+    reasoningText: "",
+    text: "",
+  };
   const toolCalls = new Map<number, PendingToolCall>();
   let usage: ChatResponse["usage"] | undefined;
 
@@ -441,16 +468,25 @@ async function streamResponseFromTogether(
     if (!delta) {
       continue;
     }
+    const reasoningDelta = delta.reasoning ?? delta.reasoning_content;
+    if (reasoningDelta) {
+      openReasoningOutputItem(res, outputState);
+      outputState.reasoningText += reasoningDelta;
+      writeResponsesSse(res, "response.reasoning_text.delta", {
+        type: "response.reasoning_text.delta",
+        item_id: outputState.reasoningItemId,
+        output_index: outputState.reasoningOutputIndex,
+        content_index: 0,
+        delta: reasoningDelta,
+      });
+    }
     if (delta.content) {
-      if (!textItemOpened) {
-        textItemOpened = true;
-        writeOutputTextStart(res);
-      }
-      text += delta.content;
+      openTextOutputItem(res, outputState);
+      outputState.text += delta.content;
       writeResponsesSse(res, "response.output_text.delta", {
         type: "response.output_text.delta",
-        item_id: "msg_0",
-        output_index: 0,
+        item_id: outputState.textItemId,
+        output_index: outputState.textOutputIndex,
         content_index: 0,
         delta: delta.content,
       });
@@ -475,22 +511,37 @@ async function streamResponseFromTogether(
     }
   }
 
-  if (textItemOpened) {
-    writeResponsesSse(res, "response.output_text.done", {
-      type: "response.output_text.done",
-      item_id: "msg_0",
-      output_index: 0,
+  if (outputState.reasoningItemId !== undefined) {
+    writeResponsesSse(res, "response.reasoning_text.done", {
+      type: "response.reasoning_text.done",
+      item_id: outputState.reasoningItemId,
+      output_index: outputState.reasoningOutputIndex,
       content_index: 0,
-      text,
+      text: outputState.reasoningText,
     });
     writeResponsesSse(res, "response.output_item.done", {
       type: "response.output_item.done",
-      output_index: 0,
-      item: messageOutputItem(text, "msg_0"),
+      output_index: outputState.reasoningOutputIndex,
+      item: reasoningOutputItem(outputState.reasoningText, outputState.reasoningItemId),
     });
   }
 
-  let outputIndex = textItemOpened ? 1 : 0;
+  if (outputState.textItemId !== undefined) {
+    writeResponsesSse(res, "response.output_text.done", {
+      type: "response.output_text.done",
+      item_id: outputState.textItemId,
+      output_index: outputState.textOutputIndex,
+      content_index: 0,
+      text: outputState.text,
+    });
+    writeResponsesSse(res, "response.output_item.done", {
+      type: "response.output_item.done",
+      output_index: outputState.textOutputIndex,
+      item: messageOutputItem(outputState.text, outputState.textItemId),
+    });
+  }
+
+  let outputIndex = outputState.nextOutputIndex;
   for (const toolCall of [...toolCalls.values()]) {
     const item = functionCallOutputItem(toolCall);
     writeResponsesSse(res, "response.output_item.added", {
@@ -518,7 +569,12 @@ async function streamResponseFromTogether(
       status: "completed",
       model: body.model ?? options.modelId,
       output: [
-        ...(textItemOpened ? [messageOutputItem(text, "msg_0")] : []),
+        ...(outputState.reasoningItemId !== undefined
+          ? [reasoningOutputItem(outputState.reasoningText, outputState.reasoningItemId)]
+          : []),
+        ...(outputState.textItemId !== undefined
+          ? [messageOutputItem(outputState.text, outputState.textItemId)]
+          : []),
         ...[...toolCalls.values()].map((toolCall) => functionCallOutputItem(toolCall)),
       ],
       usage: toResponsesUsage(usage),
@@ -527,20 +583,50 @@ async function streamResponseFromTogether(
   res.end();
 }
 
-function writeOutputTextStart(res: ServerResponse): void {
-  const item = { id: "msg_0", type: "message", role: "assistant", status: "in_progress", content: [] };
+function openReasoningOutputItem(res: ServerResponse, state: StreamOutputState): void {
+  if (state.reasoningItemId !== undefined) {
+    return;
+  }
+  state.reasoningItemId = `rs_${randomUUID().replaceAll("-", "")}`;
+  state.reasoningOutputIndex = state.nextOutputIndex;
+  state.nextOutputIndex += 1;
   writeResponsesSse(res, "response.output_item.added", {
     type: "response.output_item.added",
-    output_index: 0,
+    output_index: state.reasoningOutputIndex,
+    item: { id: state.reasoningItemId, type: "reasoning", status: "in_progress", summary: [], content: [] },
+  });
+}
+
+function openTextOutputItem(res: ServerResponse, state: StreamOutputState): void {
+  if (state.textItemId !== undefined) {
+    return;
+  }
+  state.textItemId = `msg_${randomUUID().replaceAll("-", "")}`;
+  state.textOutputIndex = state.nextOutputIndex;
+  state.nextOutputIndex += 1;
+  const item = { id: state.textItemId, type: "message", role: "assistant", status: "in_progress", content: [] };
+  writeResponsesSse(res, "response.output_item.added", {
+    type: "response.output_item.added",
+    output_index: state.textOutputIndex,
     item,
   });
   writeResponsesSse(res, "response.content_part.added", {
     type: "response.content_part.added",
-    item_id: "msg_0",
-    output_index: 0,
+    item_id: state.textItemId,
+    output_index: state.textOutputIndex,
     content_index: 0,
     part: { type: "output_text", text: "", annotations: [] },
   });
+}
+
+function reasoningOutputItem(text: string, id = `rs_${randomUUID().replaceAll("-", "")}`): Record<string, unknown> {
+  return {
+    id,
+    type: "reasoning",
+    status: "completed",
+    summary: [],
+    content: [{ type: "reasoning_text", text }],
+  };
 }
 
 function messageOutputItem(text: string, id = `msg_${randomUUID().replaceAll("-", "")}`): Record<string, unknown> {
@@ -594,10 +680,14 @@ function writeResponsesSse(res: ServerResponse, event: string, data: unknown): v
 function toResponsesUsage(usage: ChatResponse["usage"]): Record<string, unknown> {
   const inputTokens = usage?.prompt_tokens ?? 0;
   const outputTokens = usage?.completion_tokens ?? 0;
+  const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens ?? usage?.reasoning_tokens ?? 0;
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     total_tokens: usage?.total_tokens ?? inputTokens + outputTokens,
+    output_tokens_details: {
+      reasoning_tokens: reasoningTokens,
+    },
   };
 }
 
@@ -607,7 +697,7 @@ function recordUsage(usage: ChatResponse["usage"], options: CodexProxyOptions): 
   }
   options.costTracker?.addUsage(
     usage.prompt_tokens ?? 0,
-    usage.cached_tokens ?? 0,
+    usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0,
     usage.completion_tokens ?? 0,
     options.modelDefinition,
   );

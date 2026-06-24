@@ -54,7 +54,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     process.stderr.write(`[togetherlink codex] model: ${modelId}\n`);
   }
 
-  const child = spawn("codex", [...codexConfigArgs(proxyUrl, authToken, modelId), ...codexArgsWithoutModelOverrides(options.args ?? [])], {
+  const child = spawn("codex", [...codexArgsWithoutModelOverrides(options.args ?? []), ...codexConfigArgs(proxyUrl, authToken, modelId)], {
     env: buildCodexEnv(authToken),
     stdio: "inherit",
   });
