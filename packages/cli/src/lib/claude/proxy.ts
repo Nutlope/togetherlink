@@ -281,7 +281,7 @@ export async function handleProxyRequest(
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
     requestPreview: summarizeAnthropicRequestContent(body),
-    cacheKey: cacheKeyForClaudeRequest(body),
+    cacheKey: cacheKeyForClaudeUpstreamPayload(body, options),
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount: nativeTools.length,
@@ -438,19 +438,39 @@ function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): strin
   return redactTraceError(parts.join("\n")).slice(0, 2000);
 }
 
-function cacheKeyForClaudeRequest(body: AnthropicMessagesRequest): NonNullable<ProxyTraceEvent["cacheKey"]> {
+function cacheKeyForClaudeUpstreamPayload(
+  body: AnthropicMessagesRequest,
+  options: ClaudeProxyOptions,
+): NonNullable<ProxyTraceEvent["cacheKey"]> {
+  const targetModel = resolveTargetModel(body.model, options);
+  const nativeTools = nativeServerTools(body.tools);
+  const messages = toOpenAIMessages(body, targetModel.definition);
+  const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+  const tools = body.tools?.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description ?? "",
+      parameters: toOpenAIToolParameters(tool),
+    },
+  }));
+  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+  const upstreamPayload = {
+    model: targetModel.definition.id,
+    messages: upstreamMessages,
+    max_tokens: clampRequestedMaxTokens(body.max_tokens, targetModel.definition),
+    temperature: body.temperature,
+    tools,
+    tool_choice: toOpenAIToolChoice(body.tool_choice),
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    chat_template_kwargs: { clear_thinking: false },
+    stream: body.stream && nativeTools.length === 0 && preferUpstreamStreaming(),
+  };
   return {
-    systemHash: stableHash(body.system ?? null),
-    toolsHash: stableHash(body.tools ?? []),
-    messagesHash: stableHash(body.messages ?? []),
-    fullHash: stableHash({
-      model: body.model,
-      system: body.system ?? null,
-      messages: body.messages ?? [],
-      tools: body.tools ?? [],
-      tool_choice: body.tool_choice,
-      thinking: body.thinking,
-    }),
+    systemHash: stableHash(upstreamMessages.filter((message) => message.role === "system")),
+    toolsHash: stableHash(tools ?? []),
+    messagesHash: stableHash(upstreamMessages),
+    fullHash: stableHash(upstreamPayload),
   };
 }
 
