@@ -86,6 +86,36 @@ chmod +x "$BIN_DIR/tcodex"
 
 ok "Wrappers installed: togetherlink, tclaude, topencode, tcodex → $BIN_DIR"
 
+# Remove old togetherlink-owned wrappers that used the upstream agent names.
+# Current installs must never shadow `claude`, `codex`, or `opencode`; users
+# should get the real CLIs unless they explicitly run tclaude/tcodex/topencode.
+remove_legacy_shadow_wrapper() {
+  name="$1"
+  path="$BIN_DIR/$name"
+
+  [ -e "$path" ] || [ -L "$path" ] || return 0
+
+  if [ -L "$path" ]; then
+    target="$(readlink "$path" 2>/dev/null || true)"
+    case "$target" in
+      "$BIN_DIR/tclaude"|"$BIN_DIR/tcodex"|"$BIN_DIR/topencode"|"$BIN_DIR/togetherlink"|"$BIN_DIR/togetherlink.js")
+        rm -f "$path"
+        ok "Removed old togetherlink shadow command: $path"
+        ;;
+    esac
+    return 0
+  fi
+
+  if [ -f "$path" ] && grep -Fqs "$BIN_DIR/togetherlink.js" "$path"; then
+    rm -f "$path"
+    ok "Removed old togetherlink shadow command: $path"
+  fi
+}
+
+remove_legacy_shadow_wrapper claude
+remove_legacy_shadow_wrapper codex
+remove_legacy_shadow_wrapper opencode
+
 # --- 4. Link into the current PATH when possible -----------------------------
 find_writable_path_dir() {
   old_ifs="$IFS"
