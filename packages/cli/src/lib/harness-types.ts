@@ -19,11 +19,7 @@ export type HarnessResult = {
 export type Harness = {
   id: HarnessId;
   label: string;
-  mode?: "persistent" | "ephemeral";
-  resolveKey?: (ctx: HarnessContext) => Promise<string>;
-  run?: (ctx: HarnessContext) => Promise<HarnessResult>;
-  on?: (ctx: HarnessContext) => Promise<HarnessResult>;
-  off?: (ctx: HarnessContext) => Promise<HarnessResult>;
+  run: (ctx: HarnessContext) => Promise<HarnessResult>;
   status: (ctx: HarnessContext) => Promise<HarnessResult>;
 };
 
@@ -33,11 +29,11 @@ export type Harness = {
  * time.
  */
 export function defineHarness(impl: Harness): Harness {
+  if (typeof impl.run !== "function") {
+    throw new Error(`Harness "${impl.id}" is missing required method "run"`);
+  }
   if (typeof impl.status !== "function") {
     throw new Error(`Harness "${impl.id}" is missing required method "status"`);
-  }
-  if (!impl.run && !impl.on) {
-    throw new Error(`Harness "${impl.id}" must define either "run" or "on"`);
   }
   return impl;
 }

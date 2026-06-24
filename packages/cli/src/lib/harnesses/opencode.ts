@@ -6,10 +6,6 @@ import { defineHarness } from "../harness-types.js";
 import { HARNESS } from "../harness.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
 
-async function opencodeResolveKey(ctx: HarnessContext): Promise<string> {
-  return ctx.apiKey ?? process.env.TOGETHER_API_KEY?.trim() ?? "";
-}
-
 /**
  * Strips any `--model`/`-m`/`--model=` from passthrough args so a user can't
  * override the Together default. Parallel to Claude's
@@ -37,13 +33,10 @@ function opencodeArgsWithoutModelOverrides(args: string[]): string[] {
 export default defineHarness({
   id: HARNESS.OPENCODE,
   label: "OpenCode",
-  mode: "ephemeral",
-  resolveKey: opencodeResolveKey,
 
   async run(ctx: HarnessContext): Promise<HarnessResult> {
     const apiKey = await resolveTogetherApiKey({
       apiKey: ctx.apiKey,
-      resolveKey: () => opencodeResolveKey(ctx),
       home: ctx.home,
     });
     if (!apiKey) {
@@ -81,7 +74,6 @@ export default defineHarness({
     return {
       payload: {
         harness: HARNESS.OPENCODE,
-        mode: "ephemeral",
         provider: "together",
         currentModel: OPENCODE_DEFAULT_MODEL,
         targetModel: OPENCODE_DEFAULT_MODEL,

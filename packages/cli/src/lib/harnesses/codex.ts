@@ -4,20 +4,13 @@ import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
 import { resolveTogetherApiKey } from "../together-core.js";
 
-async function codexResolveKey(ctx: HarnessContext): Promise<string> {
-  return ctx.apiKey ?? process.env.TOGETHER_API_KEY?.trim() ?? "";
-}
-
 export default defineHarness({
   id: HARNESS.CODEX,
   label: "Codex",
-  mode: "ephemeral",
-  resolveKey: codexResolveKey,
 
   async run(ctx: HarnessContext): Promise<HarnessResult> {
     const apiKey = await resolveTogetherApiKey({
       apiKey: ctx.apiKey,
-      resolveKey: () => codexResolveKey(ctx),
       home: ctx.home,
     });
     if (!apiKey) {
@@ -40,7 +33,6 @@ export default defineHarness({
     return {
       payload: {
         harness: HARNESS.CODEX,
-        mode: "ephemeral",
         provider: "local-responses-to-together-proxy",
         currentModel: CODEX_DEFAULT_MODEL,
         targetModel: CODEX_DEFAULT_MODEL,

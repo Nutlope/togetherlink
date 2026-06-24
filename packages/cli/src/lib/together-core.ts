@@ -33,22 +33,16 @@ export async function writeJsonAtomic(filePath: string, value: unknown): Promise
 }
 
 /**
- * Key resolution order, documented in docs/cli-design.md: explicit flag >
- * harness-local stored key > global config > TOGETHER_API_KEY env var.
+ * Key resolution order: explicit flag > global config > TOGETHER_API_KEY env var.
  */
 type ResolveTogetherApiKeyOptions = {
   apiKey?: string | undefined;
   home?: string | undefined;
-  resolveKey?: () => Promise<string>;
 };
 
-export async function resolveTogetherApiKey({ apiKey, resolveKey, home }: ResolveTogetherApiKeyOptions): Promise<string> {
+export async function resolveTogetherApiKey({ apiKey, home }: ResolveTogetherApiKeyOptions): Promise<string> {
   if (apiKey?.trim()) {
     return apiKey.trim();
-  }
-  const harnessKey = await resolveKey?.();
-  if (harnessKey) {
-    return harnessKey;
   }
   if (home) {
     const { readGlobalConfig, resolveStoredApiKey } = await import("./global-config.js");

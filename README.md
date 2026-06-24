@@ -71,15 +71,13 @@ pnpm -F @togetherlink/cli test
 
 ## Testing OpenCode
 
-OpenCode is persistent: `on` writes OpenCode config and snapshots the original so `off` can restore it.
+OpenCode is ephemeral only: `togetherlink opencode` launches OpenCode with a Together config for that session — there's no `on`/`off` flow to remember.
 
 ```bash
 export TOGETHER_API_KEY="..."
 
 pnpm -F @togetherlink/cli exec togetherlink opencode status --json
-pnpm -F @togetherlink/cli exec togetherlink opencode on
-pnpm -F @togetherlink/cli exec togetherlink opencode status --json
-pnpm -F @togetherlink/cli exec togetherlink opencode off
+pnpm -F @togetherlink/cli exec togetherlink opencode
 ```
 
 ## Images and vision in OpenCode
