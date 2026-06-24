@@ -2,13 +2,17 @@ import { CostTracker } from "../claude/cost.js";
 import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyTraceEvent } from "../proxy-trace.js";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import {
+  createDashboardStore,
+  readLegacyActiveSessions,
+  type DashboardSnapshot,
+  type DashboardStore,
+  type SessionPersistInput,
+  type StoredSession,
+} from "./storage.js";
 
 const MAX_RECENT_SESSIONS = 50;
 const MAX_TRACES_PER_SESSION = 200;
-const SESSION_STORE_FILE = "daemon-sessions.json";
 
 /**
  * Which coding agent a session belongs to. The dashboard groups by this, and
@@ -57,6 +61,7 @@ export type SessionState = {
   modelDefinition: ModelDefinition;
   costTracker: CostTracker;
   debug?: boolean;
+  externalSummary?: string;
   /**
    * Only for proxied agents. The matching proxy handler is called with this.
    * Undefined for self-reporting agents.
@@ -101,10 +106,7 @@ export type RegisterSessionRequest = {
   debug?: boolean;
 };
 
-type PersistedSession = RegisterSessionRequest & {
-  startedAt: number;
-  pid?: number;
-};
+type PersistedSession = SessionPersistInput;
 
 export type RegisterSessionResult =
   | { ok: true; session: SessionPublicView }
@@ -122,10 +124,11 @@ export type UsageReportRequest = {
 class SessionRegistry {
   private readonly map = new Map<string, SessionState>();
   private readonly recent: SessionState[] = [];
+  private store: DashboardStore | undefined;
 
   register(state: SessionState): void {
     this.map.set(state.token, state);
-    this.persistActive();
+    this.persistSession(state);
   }
 
   get(token: string): SessionState | undefined {
@@ -141,7 +144,7 @@ class SessionRegistry {
     state.endedAt = Date.now();
     this.recent.unshift(state);
     this.recent.length = Math.min(this.recent.length, MAX_RECENT_SESSIONS);
-    this.persistActive();
+    this.store?.markSessionEnded(state.token, state.endedAt, state.costTracker.summarize(), state.costTracker.totals);
     return true;
   }
 
@@ -157,6 +160,33 @@ class SessionRegistry {
     return [...this.recent];
   }
 
+  dashboardSnapshot(): DashboardSnapshot {
+    const active = this.list().map(toPublicSessionView);
+    const activeTokens = new Set(this.map.keys());
+    const inMemoryRecent = this.listRecent().map(toPublicSessionView);
+    const storedRecent = this.store?.recentSessions(activeTokens, MAX_RECENT_SESSIONS) ?? [];
+    const seen = new Set<string>();
+    const recent = [...inMemoryRecent, ...storedRecent].filter((session) => {
+      const key = `${session.agent}:${session.modelLabel}:${session.startedAt}:${session.pid ?? ""}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    }).slice(0, MAX_RECENT_SESSIONS);
+    const all = [...active, ...recent];
+    return {
+      generatedAt: Date.now(),
+      totals: {
+        active: active.length,
+        recent: recent.length,
+        all: all.length,
+        traces: all.reduce((sum, session) => sum + session.traceCount, 0),
+      },
+      sessions: all,
+    };
+  }
+
   recordTrace(token: string, trace: ProxyTraceEvent): void {
     const state = this.map.get(token);
     if (!state) {
@@ -169,6 +199,8 @@ class SessionRegistry {
       state.traces.unshift(trace);
     }
     state.traces.length = Math.min(state.traces.length, MAX_TRACES_PER_SESSION);
+    this.store?.upsertTrace(token, trace);
+    this.store?.updateSessionUsage(token, state.costTracker.summarize(), state.costTracker.totals, state.externalSummary);
   }
 
   updatePid(token: string, pid: number): boolean {
@@ -177,34 +209,48 @@ class SessionRegistry {
       return false;
     }
     state.pid = pid;
-    this.persistActive();
+    this.store?.updateSessionPid(token, pid);
     return true;
   }
 
   async restorePersisted(): Promise<number> {
-    let persisted: PersistedSession[];
-    try {
-      persisted = JSON.parse(await readFile(sessionStorePath(), "utf8")) as PersistedSession[];
-    } catch {
-      return 0;
+    this.store = await createDashboardStore();
+    const legacy = await readLegacyActiveSessions();
+    for (const session of legacy) {
+      this.store.upsertSession(storedSessionToPersistInput(session));
     }
-    if (!Array.isArray(persisted)) {
-      return 0;
-    }
+    const persisted = this.store.restoreActiveSessions();
     let restored = 0;
     for (const session of persisted) {
-      if (!isPersistedSession(session)) {
-        continue;
-      }
       if (session.pid !== undefined && !isAlive(session.pid)) {
+        this.store.markSessionEnded(
+          session.token,
+          Date.now(),
+          "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
+          { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 },
+        );
         continue;
       }
       const state = buildSession(session);
       state.startedAt = session.startedAt;
+      if (session.traces?.length) {
+        state.traces = session.traces;
+      }
+      if (session.externalSummary !== undefined) {
+        state.externalSummary = session.externalSummary;
+      }
+      state.costTracker.hydrateUsage(
+        {
+          promptTokens: session.promptTokens ?? 0,
+          cachedTokens: session.cachedTokens ?? 0,
+          completionTokens: session.completionTokens ?? 0,
+          costUsd: session.costUsd ?? 0,
+        },
+        session.externalSummary,
+      );
       this.map.set(state.token, state);
       restored += 1;
     }
-    this.persistActive();
     return restored;
   }
 
@@ -231,9 +277,24 @@ class SessionRegistry {
     return removed;
   }
 
-  private persistActive(): void {
-    const active = [...this.map.values()].map(toPersistedSession);
-    void writeSessionStore(active).catch(() => {});
+  updateUsage(token: string, externalSummary?: string): void {
+    const state = this.map.get(token);
+    if (!state) {
+      return;
+    }
+    if (externalSummary) {
+      state.externalSummary = externalSummary;
+    }
+    this.store?.updateSessionUsage(token, state.costTracker.summarize(), state.costTracker.totals, state.externalSummary);
+  }
+
+  closeStore(): void {
+    this.store?.close();
+    this.store = undefined;
+  }
+
+  private persistSession(state: SessionState): void {
+    this.store?.upsertSession(toPersistedSession(state));
   }
 }
 
@@ -317,7 +378,11 @@ function toPersistedSession(state: SessionState): PersistedSession {
     modelLabel: state.modelLabel,
     modelDefinition: state.modelDefinition,
     startedAt: state.startedAt,
+    costSummary: state.costTracker.summarize(),
+    costTotals: state.costTracker.totals,
     ...(state.pid !== undefined ? { pid: state.pid } : {}),
+    ...(state.endedAt !== undefined ? { endedAt: state.endedAt } : {}),
+    ...(state.externalSummary !== undefined ? { externalSummary: state.externalSummary } : {}),
     ...(state.debug !== undefined ? { debug: state.debug } : {}),
   };
   if (state.options !== undefined) {
@@ -328,32 +393,15 @@ function toPersistedSession(state: SessionState): PersistedSession {
   return base;
 }
 
-function isPersistedSession(value: unknown): value is PersistedSession {
-  const session = value as PersistedSession;
-  return (
-    typeof session?.token === "string" &&
-    session.token.length > 0 &&
-    typeof session.apiKey === "string" &&
-    session.apiKey.length > 0 &&
-    typeof session.modelLabel === "string" &&
-    typeof session.startedAt === "number" &&
-    typeof session.modelDefinition === "object" &&
-    session.modelDefinition !== null
-  );
-}
-
-function resolveTogetherlinkHome(): string {
-  return process.env.TOGETHERLINK_HOME || path.join(os.homedir(), ".togetherlink");
-}
-
-function sessionStorePath(): string {
-  return path.join(resolveTogetherlinkHome(), SESSION_STORE_FILE);
-}
-
-async function writeSessionStore(active: PersistedSession[]): Promise<void> {
-  const file = sessionStorePath();
-  await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(active, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(tmp, file);
+function storedSessionToPersistInput(session: StoredSession): SessionPersistInput {
+  return {
+    ...session,
+    costSummary: session.externalSummary ?? "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
+    costTotals: {
+      promptTokens: session.promptTokens ?? 0,
+      cachedTokens: session.cachedTokens ?? 0,
+      completionTokens: session.completionTokens ?? 0,
+      costUsd: session.costUsd ?? 0,
+    },
+  };
 }

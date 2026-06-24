@@ -126,6 +126,15 @@ export class CostTracker {
     this.externalSummary = summary;
   }
 
+  hydrateUsage(totals: Partial<TokenUsage>, externalSummary?: string): void {
+    this.promptTokens = totals.promptTokens ?? 0;
+    this.cachedTokens = Math.max(0, Math.min(totals.cachedTokens ?? 0, this.promptTokens));
+    this.completionTokens = totals.completionTokens ?? 0;
+    this.costUsd = totals.costUsd ?? 0;
+    this.externalSummary = externalSummary;
+    this.beginRequest();
+  }
+
   get totals(): TokenUsage {
     return {
       promptTokens: this.promptTokens,

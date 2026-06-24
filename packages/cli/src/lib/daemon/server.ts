@@ -149,6 +149,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
     if (debug) {
       process.stderr.write(`[togetherlink daemon] ${signal} — shutting down.\n`);
     }
+    sessions.closeStore();
     server.close();
     try {
       await unlink(daemonPidPath());
@@ -195,24 +196,23 @@ async function handleDaemonRequest(
     return;
   }
 
+  if (req.method === "GET" && path_ === "/dashboard.js") {
+    writeDashboardScript(res);
+    return;
+  }
+
   if (req.method === "GET" && path_ === "/favicon.ico") {
     writeFavicon(res);
     return;
   }
 
   if (req.method === "GET" && path_ === "/internal/dashboard") {
-    const active = sessions.list().map(toPublicSessionView);
-    const recent = sessions.listRecent().map(toPublicSessionView);
+    const snapshot = sessions.dashboardSnapshot();
     writeJson(res, 200, {
-      generatedAt: Date.now(),
+      generatedAt: snapshot.generatedAt,
       daemon: { port: resolveDaemonPort(), url: daemonUrl() },
-      totals: {
-        active: active.length,
-        recent: recent.length,
-        all: active.length + recent.length,
-        traces: [...active, ...recent].reduce((sum, session) => sum + session.traceCount, 0),
-      },
-      sessions: [...active, ...recent],
+      totals: snapshot.totals,
+      sessions: snapshot.sessions,
     });
     return;
   }
@@ -275,6 +275,7 @@ async function handleDaemonRequest(
     if (typeof body?.summary === "string" && body.summary) {
       state.costTracker.setExternalSummary(body.summary);
     }
+    sessions.updateUsage(state.token, typeof body?.summary === "string" && body.summary ? body.summary : undefined);
     writeJson(res, 200, { ok: true });
     return;
   }
@@ -395,6 +396,8 @@ function writeDashboardHtml(res: ServerResponse): void {
     .session summary { display: grid; grid-template-columns: minmax(260px, 1.45fr) repeat(5, minmax(92px, .6fr)) 26px; gap: 12px; align-items: center; padding: 13px 14px; cursor: pointer; list-style: none; }
     .session summary::-webkit-details-marker { display: none; }
     .session[open] summary { border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+    .session-summary { width: 100%; display: grid; grid-template-columns: minmax(260px, 1.45fr) repeat(5, minmax(92px, .6fr)) 26px; gap: 12px; align-items: center; padding: 13px 14px; cursor: pointer; border: 0; background: transparent; color: inherit; text-align: left; }
+    .session[data-open=true] .session-summary { border-bottom: 1px solid var(--line); background: var(--panel-soft); }
     .session-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
     .agent-icon { display: inline-flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); }
     .agent-icon svg { width: 20px; height: 20px; display: block; }
@@ -409,6 +412,7 @@ function writeDashboardHtml(res: ServerResponse): void {
     .metric-value { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; font-variant-numeric: tabular-nums; }
     .toggle { color: var(--faint); transform: rotate(-90deg); transition: transform .14s ease; text-align: right; }
     .session[open] .toggle { transform: rotate(0deg); }
+    .session[data-open=true] .toggle { transform: rotate(0deg); }
     .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; background: var(--chip); padding: 2px 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
     .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
     .running { color: var(--good); }
@@ -432,127 +436,318 @@ function writeDashboardHtml(res: ServerResponse): void {
     .trace-table { min-width: 1180px; background: var(--panel); }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; padding: 28px; text-align: center; color: var(--muted); }
+    .loading { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; color: var(--muted); }
     @media (max-width: 980px) { .session summary { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(84px, .4fr)) 26px; } .hide-md { display: none; } .body-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 980px) { .session-summary { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(84px, .4fr)) 26px; } }
     @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { align-items: start; flex-direction: column; } .session summary { grid-template-columns: 1fr 26px; } .hide-sm { display: none; } .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 760px) { .session-summary { grid-template-columns: 1fr 26px; } }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>togetherlink Dashboard</h1>
-        <div class="muted" id="subtitle">Loading local sessions...</div>
-      </div>
-      <div class="muted"><code>http://127.0.0.1:${resolveDaemonPort()}</code></div>
-    </header>
-    <section class="grid" id="stats"></section>
-    <section class="sessions" id="sessions"></section>
-  </main>
-  <script>
-    const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
-    const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 4 });
-    const bytes = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-    const agentMeta = {
-      claude: { label: 'Claude Code', icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4.7 15.8 9.4 13l.2-.4-.2-.3h-.3l-2.7-.1-2.4-.1-2.3-.1-.5-.1-.5-.7.1-.4.5-.3.7.1 3.8.3 3.7.4h.4l.1-.2-.2-.1-4.8-3.2-2.5-1.8-.7-.9-.1-1 .7-.7.9.1.2.1 4.4 3.4 2.7 2 .2-.1.1-.1-.2-.3-2.7-4.9-.7-1.1-.2-.7.1-1 .4-.2 1 .1.4.4 3 6.4.4.9h.2V6.7l.5-5 .4-.9.8-.5.6.3.5.7-.1.5-.8 5.2-.4 2h.2l.2-.2 3.5-4.5.8-.8.5-.4h1l.8 1.1-.3 1.2-2.3 3-1.2 1.7.1.1.2-.1 4.6-1 1.8-.3.8.4.1.4-.3.8-5.7 1.2h-.1l.1.1 1.5.1h1.6l3 .2.8.5.5.6-.1.5-1.2.6-1.6-.4-5.2-1.2h-.2v.1l3.6 3.3 2.5 2.3.1.6-.3.5-.3-.1-4.7-3.5h-.1v.2l2.8 4.2.1 1.1-.2.3-.6.2-.7-.1-2.8-4.1-1.3-2.3-.2.1-.7 7.1-.3.4-.8.1-.6-.5-.3-.7.7-3.4.4-2.1.2-.6h-.2L8.1 21l-1.7 1.8-.4.2-.7-.4.1-.7.4-.6 2.4-3 1.4-1.9h-.1l-6.3 2.8-1.1.1-.5-.4.1-.7.2-.2 2.8-1.7z"/></svg>' },
-      codex: { label: 'Codex', icon: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 7.5 12 3l7.5 4.5v9L12 21l-7.5-4.5v-9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m8.2 9.7-2.4 2.4 2.4 2.4M15.8 9.7l2.4 2.4-2.4 2.4M13.4 8.6l-2.8 6.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
-      opencode: { label: 'OpenCode', icon: '<svg viewBox="0 0 24 30" aria-hidden="true"><path d="M18 24H6V12h12v12Z" fill="#cfcecd"/><path d="M18 6H6v18h12V6Zm6 24H0V0h24v30Z" fill="currentColor"/></svg>' },
-    };
-    function age(ms) {
-      const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
-      if (seconds < 60) return seconds + 's ago';
-      const minutes = Math.round(seconds / 60);
-      if (minutes < 60) return minutes + 'm ago';
-      return Math.round(minutes / 60) + 'h ago';
-    }
-    function stat(label, value) {
-      return '<div class="stat"><span class="muted">' + label + '</span><b>' + value + '</b></div>';
-    }
-    function esc(value) {
-      return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
-    }
-    function formatBytes(value) {
-      if (!value) return '-';
-      if (value < 1024) return value + ' B';
-      if (value < 1024 * 1024) return bytes.format(value / 1024) + ' KB';
-      return bytes.format(value / 1024 / 1024) + ' MB';
-    }
-    function lastTrace(session) {
-      return session.traces && session.traces.length ? session.traces[0] : undefined;
-    }
-    function cachePercent(trace) {
-      return trace && trace.usage && trace.usage.promptTokens > 0 ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100) : undefined;
-    }
-    function prefixPercent(trace) {
-      const profile = trace && trace.promptProfile;
-      if (!profile || !profile.totalBytes) return undefined;
-      return Math.round((profile.stablePrefixBytes / profile.totalBytes) * 100);
-    }
-    function cleanPreview(preview) {
-      const lines = String(preview || '').split('\\n');
-      const dynamic = lines.filter(line => !/^(system|instructions|tools):/i.test(line.trim()));
-      const chosen = dynamic.length ? dynamic : lines;
-      return chosen.slice(-4).join('\\n').slice(0, 1400);
-    }
-    function traceTone(trace) {
-      if (!trace || !trace.promptProfile) return 'muted';
-      const profile = trace.promptProfile;
-      if (profile.dynamicBytes > profile.stablePrefixBytes * 2 && profile.dynamicBytes > 12000) return 'warn';
-      return 'running';
-    }
-    function agentIcon(agent) {
-      const meta = agentMeta[agent] || { label: agent || 'Session', icon: '<span>TL</span>' };
-      return '<span class="agent-icon" data-agent="' + esc(agent) + '" title="' + esc(meta.label) + '">' + meta.icon + '</span>';
-    }
-    function sessionKey(session) {
-      return [session.agent, session.modelLabel, session.startedAt, session.pid || ''].join(':');
-    }
-    function traceRow(trace) {
-      const usage = trace.usage ? fmt.format(trace.usage.promptTokens) + ' in / ' + fmt.format(trace.usage.completionTokens) + ' out / ' + money.format(trace.usage.costUsd) : '-';
-      const elapsedMs = trace.durationMs ?? Math.max(0, Date.now() - trace.startedAt);
-      const seconds = elapsedMs / 1000;
-      const status = trace.ok === undefined ? '<span class="chip">pending</span>' : trace.ok ? '<span class="running">ok</span>' : '<span class="error">error</span>';
-      const ttftMs = trace.firstByteAt ? trace.firstByteAt - trace.startedAt : trace.upstreamHeadersAt ? trace.upstreamHeadersAt - trace.startedAt : undefined;
-      const decodeMs = trace.firstByteAt && (trace.completedAt || trace.durationMs) ? Math.max(1, (trace.completedAt ?? (trace.startedAt + trace.durationMs)) - trace.firstByteAt) : undefined;
-      const outputPerSecond = trace.usage && decodeMs ? fmt.format(trace.usage.completionTokens / (decodeMs / 1000)) + '/s' : '-';
-      const cachedPercent = trace.usage && trace.usage.promptTokens > 0 ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100) + '%' : '-';
-      const upstreamWait = trace.upstreamHeadersAt && trace.upstreamStartedAt ? ((trace.upstreamHeadersAt - trace.upstreamStartedAt) / 1000).toFixed(1) + 's' : '-';
-      const firstByte = ttftMs !== undefined ? (ttftMs / 1000).toFixed(1) + 's' : '-';
-      const profile = trace.promptProfile;
-      const requestSize = formatBytes(trace.requestBytes);
-      const promptMix = profile ? formatBytes(profile.stablePrefixBytes) + ' stable / ' + formatBytes(profile.dynamicBytes) + ' dynamic' : '-';
-      const cacheKey = trace.cacheKey ? 'sys ' + (trace.cacheKey.systemHash || '-') + '\\ntools ' + (trace.cacheKey.toolsHash || '-') + '\\nmsgs ' + (trace.cacheKey.messagesHash || '-') + '\\nfull ' + (trace.cacheKey.fullHash || '-') : '';
-      const hashCell = trace.cacheKey ? '<code title="' + esc(cacheKey) + '">' + esc((trace.cacheKey.fullHash || '-').slice(0, 8)) + '</code>' : '-';
-      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + firstByte + '</td><td>' + upstreamWait + '</td><td>' + outputPerSecond + '</td><td>' + cachedPercent + '</td><td>' + promptMix + '</td><td>' + requestSize + '</td><td>' + hashCell + '</td><td>' + esc(trace.model || '-') + '</td><td><div class="request-preview" title="' + esc(trace.requestPreview || '') + '">' + esc(cleanPreview(trace.requestPreview) || '-') + '</div></td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
-    }
-    function sessionCard(session, openKeys) {
-      const trace = lastTrace(session);
-      const meta = agentMeta[session.agent] || { label: session.agent || 'Session' };
-      const cache = cachePercent(trace);
-      const prefix = prefixPercent(trace);
-      const profile = trace && trace.promptProfile;
-      const key = sessionKey(session);
-      const open = session.status === 'running' || openKeys.has(key) ? ' open' : '';
-      const started = 'Started ' + age(session.startedAt) + (session.pid ? ' - pid ' + session.pid : '');
-      const promptTone = traceTone(trace);
-      const stableWidth = profile && profile.totalBytes ? Math.max(4, Math.min(96, (profile.stablePrefixBytes / profile.totalBytes) * 100)) : 0;
-      const dynamicWidth = profile && profile.totalBytes ? Math.max(4, Math.min(96, (profile.dynamicBytes / profile.totalBytes) * 100)) : 0;
-      const traceSummary = session.traceCount + ' trace' + (session.traceCount === 1 ? '' : 's');
-      const latestPreview = trace ? cleanPreview(trace.requestPreview) : 'No proxied requests recorded yet.';
-      const traces = session.traces.length ? '<div class="trace-table-wrap"><table class="trace-table"><thead><tr><th>time</th><th>status</th><th>total</th><th>TTFT</th><th>upstream</th><th>out/s</th><th>cache</th><th>prompt mix</th><th>size</th><th>hash</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table></div>' : '<div class="empty">No proxied requests recorded yet. OpenCode sessions self-report cost at exit, so they may not have request traces.</div>';
-      return '<details class="session" data-key="' + esc(key) + '"' + open + '><summary><div class="session-title">' + agentIcon(session.agent) + '<div class="session-name"><h2>' + esc(meta.label) + ' - ' + esc(session.modelLabel) + '</h2><div class="meta">' + esc(started) + '</div></div></div><div class="metric hide-sm"><span class="metric-label">Status</span><span class="metric-value ' + session.status + '"><span class="dot"></span> ' + esc(session.status) + '</span></div><div class="metric hide-sm"><span class="metric-label">Requests</span><span class="metric-value">' + traceSummary + '</span></div><div class="metric hide-md"><span class="metric-label">Cache</span><span class="metric-value">' + (cache === undefined ? '-' : cache + '%') + '</span></div><div class="metric hide-md"><span class="metric-label">Stable prefix</span><span class="metric-value ' + promptTone + '">' + (prefix === undefined ? '-' : prefix + '%') + '</span></div><div class="metric hide-md"><span class="metric-label">Latest</span><span class="metric-value">' + (trace ? age(trace.startedAt) : '-') + '</span></div><div class="toggle">v</div></summary><div class="session-body"><div class="body-grid"><section class="panel"><h3>Session</h3><div class="kv"><div><span class="metric-label">Agent</span><span class="metric-value">' + esc(meta.label) + '</span></div><div><span class="metric-label">Model</span><span class="metric-value">' + esc(session.modelLabel) + '</span></div><div><span class="metric-label">Cost</span><span class="metric-value">' + esc(session.costSummary.split('\\n')[0] || '-') + '</span></div><div><span class="metric-label">Messages</span><span class="metric-value">' + (trace && trace.messageCount !== undefined ? trace.messageCount : '-') + '</span></div><div><span class="metric-label">Tools</span><span class="metric-value">' + (trace && trace.toolCount !== undefined ? trace.toolCount : '-') + '</span></div><div><span class="metric-label">Native tools</span><span class="metric-value">' + (trace && trace.nativeToolCount !== undefined ? trace.nativeToolCount : '-') + '</span></div></div></section><section class="panel"><h3>Prompt Shape</h3><div class="bar" title="Stable prefix vs dynamic prompt bytes"><span style="width:' + stableWidth + '%"></span><span style="width:' + dynamicWidth + '%"></span></div><div class="kv"><div><span class="metric-label">Stable prefix</span><span class="metric-value">' + (profile ? formatBytes(profile.stablePrefixBytes) : '-') + '</span></div><div><span class="metric-label">Dynamic</span><span class="metric-value ' + promptTone + '">' + (profile ? formatBytes(profile.dynamicBytes) : '-') + '</span></div><div><span class="metric-label">Total</span><span class="metric-value">' + (profile ? formatBytes(profile.totalBytes) : '-') + '</span></div></div></section></div><section class="panel"><h3>Latest Dynamic Preview</h3><pre class="preview">' + esc(latestPreview) + '</pre></section>' + traces + '</div></details>';
-    }
-    async function load() {
-      const openKeys = new Set(Array.from(document.querySelectorAll('.session[open]')).map(el => el.getAttribute('data-key')).filter(Boolean));
-      const data = await fetch('/internal/dashboard', { cache: 'no-store' }).then(r => r.json());
-      document.getElementById('subtitle').textContent = 'Updated ' + new Date(data.generatedAt).toLocaleTimeString();
-      document.getElementById('stats').innerHTML = stat('Active sessions', data.totals.active) + stat('Recent sessions', data.totals.recent) + stat('Total sessions', data.totals.all) + stat('Recorded traces', data.totals.traces);
-      document.getElementById('sessions').innerHTML = data.sessions.length ? data.sessions.map(session => sessionCard(session, openKeys)).join('') : '<div class="empty">No sessions yet. Run togetherlink claude, togetherlink codex, or togetherlink opencode to start one.</div>';
-    }
-    load().catch(err => { document.getElementById('sessions').innerHTML = '<div class="empty">Could not load dashboard: ' + err.message + '</div>'; });
-    setInterval(load, 2000);
-  </script>
+  <div id="dashboard-root"><main><div class="loading">Loading local sessions...</div></main></div>
+  <script type="module" src="/dashboard.js"></script>
 </body>
 </html>`);
+}
+
+function writeDashboardScript(res: ServerResponse): void {
+  res.writeHead(200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(`import React, { useEffect, useState } from "https://esm.sh/react@19.2.3";
+import { createRoot } from "https://esm.sh/react-dom@19.2.3/client";
+
+const e = React.createElement;
+const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
+const bytes = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const agentLabel = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+function age(ms) {
+  const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (seconds < 60) return seconds + "s ago";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return minutes + "m ago";
+  return Math.round(minutes / 60) + "h ago";
+}
+
+function formatBytes(value) {
+  if (!value) return "-";
+  if (value < 1024) return value + " B";
+  if (value < 1024 * 1024) return bytes.format(value / 1024) + " KB";
+  return bytes.format(value / 1024 / 1024) + " MB";
+}
+
+function sessionKey(session) {
+  return [session.agent, session.modelLabel, session.startedAt, session.pid || ""].join(":");
+}
+
+function lastTrace(session) {
+  return session.traces && session.traces.length ? session.traces[0] : undefined;
+}
+
+function lastTraceWithUsage(session) {
+  return session.traces ? session.traces.find((trace) => trace.usage && trace.usage.promptTokens > 0) : undefined;
+}
+
+function cachePercent(trace) {
+  return trace && trace.usage && trace.usage.promptTokens > 0
+    ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100)
+    : undefined;
+}
+
+function prefixPercent(trace) {
+  const profile = trace && trace.promptProfile;
+  if (!profile || !profile.totalBytes) return undefined;
+  return Math.round((profile.stablePrefixBytes / profile.totalBytes) * 100);
+}
+
+function cleanPreview(preview) {
+  const lines = String(preview || "").split("\\n");
+  const dynamic = lines.filter((line) => !/^(system|instructions|tools):/i.test(line.trim()));
+  const chosen = dynamic.length ? dynamic : lines;
+  return chosen.slice(-4).join("\\n").slice(0, 1400);
+}
+
+function traceTone(trace) {
+  if (!trace || !trace.promptProfile) return "muted";
+  const profile = trace.promptProfile;
+  if (profile.dynamicBytes > profile.stablePrefixBytes * 2 && profile.dynamicBytes > 12000) return "warn";
+  return "running";
+}
+
+function App() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [openByKey, setOpenByKey] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/internal/dashboard", { cache: "no-store" });
+        if (!response.ok) throw new Error("Dashboard request failed: " + response.status);
+        const next = await response.json();
+        if (!cancelled) {
+          setData(next);
+          setError("");
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+    load();
+    const timer = window.setInterval(load, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const subtitle = data ? "Updated " + new Date(data.generatedAt).toLocaleTimeString() : "Loading local sessions...";
+  return e("main", null,
+    e("header", null,
+      e("div", null,
+        e("h1", null, "togetherlink Dashboard"),
+        e("div", { className: "muted" }, subtitle)
+      ),
+      e("div", { className: "muted" }, e("code", null, data ? data.daemon.url : window.location.origin))
+    ),
+    error ? e("div", { className: "empty" }, "Could not load dashboard: " + error) : null,
+    data ? e(Stats, { totals: data.totals }) : e("div", { className: "loading" }, "Loading local sessions..."),
+    data ? e(SessionList, {
+      sessions: data.sessions,
+      openByKey,
+      setOpenByKey,
+    }) : null
+  );
+}
+
+function Stats({ totals }) {
+  return e("section", { className: "grid" },
+    e(Stat, { label: "Active sessions", value: totals.active }),
+    e(Stat, { label: "Recent sessions", value: totals.recent }),
+    e(Stat, { label: "Total sessions", value: totals.all }),
+    e(Stat, { label: "Recorded traces", value: totals.traces })
+  );
+}
+
+function Stat({ label, value }) {
+  return e("div", { className: "stat" }, e("span", { className: "muted" }, label), e("b", null, value));
+}
+
+function SessionList({ sessions, openByKey, setOpenByKey }) {
+  if (!sessions.length) {
+    return e("section", { className: "sessions" },
+      e("div", { className: "empty" }, "No sessions yet. Run togetherlink claude, togetherlink codex, or togetherlink opencode to start one.")
+    );
+  }
+  return e("section", { className: "sessions" }, sessions.map((session) =>
+    e(SessionCard, {
+      key: sessionKey(session),
+      session,
+      openByKey,
+      setOpenByKey,
+    })
+  ));
+}
+
+function SessionCard({ session, openByKey, setOpenByKey }) {
+  const key = sessionKey(session);
+  const trace = lastTrace(session);
+  const usageTrace = lastTraceWithUsage(session);
+  const explicitOpen = Object.prototype.hasOwnProperty.call(openByKey, key) ? openByKey[key] : undefined;
+  const isOpen = explicitOpen === undefined ? session.status === "running" : explicitOpen;
+  const metaLabel = agentLabel[session.agent] || session.agent || "Session";
+  const cache = cachePercent(usageTrace);
+  const prefix = prefixPercent(trace);
+  const profile = trace && trace.promptProfile;
+  const promptTone = traceTone(trace);
+  const stableWidth = profile && profile.totalBytes ? Math.max(4, Math.min(96, (profile.stablePrefixBytes / profile.totalBytes) * 100)) : 0;
+  const dynamicWidth = profile && profile.totalBytes ? Math.max(4, Math.min(96, (profile.dynamicBytes / profile.totalBytes) * 100)) : 0;
+  const started = "Started " + age(session.startedAt) + (session.pid ? " - pid " + session.pid : "");
+  const traceSummary = session.traceCount + " trace" + (session.traceCount === 1 ? "" : "s");
+  const latestPreview = trace ? cleanPreview(trace.requestPreview) : "No proxied requests recorded yet.";
+
+  function toggle() {
+    setOpenByKey((current) => ({ ...current, [key]: !isOpen }));
+  }
+
+  return e("article", { className: "session", "data-open": String(isOpen) },
+    e("button", { type: "button", className: "session-summary", onClick: toggle, "aria-expanded": isOpen },
+      e("div", { className: "session-title" },
+        e(AgentIcon, { agent: session.agent }),
+        e("div", { className: "session-name" },
+          e("h2", null, metaLabel + " - " + session.modelLabel),
+          e("div", { className: "meta" }, started)
+        )
+      ),
+      e(Metric, { className: "hide-sm", label: "Status", valueClassName: session.status, value: e(React.Fragment, null, e("span", { className: "dot" }), " ", session.status) }),
+      e(Metric, { className: "hide-sm", label: "Requests", value: traceSummary }),
+      e(Metric, { className: "hide-md", label: "Cache", value: cache === undefined ? "-" : cache + "%" }),
+      e(Metric, { className: "hide-md", label: "Stable prefix", valueClassName: promptTone, value: prefix === undefined ? "-" : prefix + "%" }),
+      e(Metric, { className: "hide-md", label: "Latest", value: trace ? age(trace.startedAt) : "-" }),
+      e("div", { className: "toggle" }, "v")
+    ),
+    isOpen ? e("div", { className: "session-body" },
+      e("div", { className: "body-grid" },
+        e("section", { className: "panel" },
+          e("h3", null, "Session"),
+          e("div", { className: "kv" },
+            e(KeyValue, { label: "Agent", value: metaLabel }),
+            e(KeyValue, { label: "Model", value: session.modelLabel }),
+            e(KeyValue, { label: "Cost", value: (session.costSummary || "-").split("\\n")[0] || "-" }),
+            e(KeyValue, { label: "Messages", value: trace && trace.messageCount !== undefined ? trace.messageCount : "-" }),
+            e(KeyValue, { label: "Tools", value: trace && trace.toolCount !== undefined ? trace.toolCount : "-" }),
+            e(KeyValue, { label: "Native tools", value: trace && trace.nativeToolCount !== undefined ? trace.nativeToolCount : "-" })
+          )
+        ),
+        e("section", { className: "panel" },
+          e("h3", null, "Prompt Shape"),
+          e("div", { className: "bar", title: "Stable prefix vs dynamic prompt bytes" },
+            e("span", { style: { width: stableWidth + "%" } }),
+            e("span", { style: { width: dynamicWidth + "%" } })
+          ),
+          e("div", { className: "kv" },
+            e(KeyValue, { label: "Stable prefix", value: profile ? formatBytes(profile.stablePrefixBytes) : "-" }),
+            e(KeyValue, { label: "Dynamic", valueClassName: promptTone, value: profile ? formatBytes(profile.dynamicBytes) : "-" }),
+            e(KeyValue, { label: "Total", value: profile ? formatBytes(profile.totalBytes) : "-" })
+          )
+        )
+      ),
+      e("section", { className: "panel" },
+        e("h3", null, "Latest Dynamic Preview"),
+        e("pre", { className: "preview" }, latestPreview)
+      ),
+      session.traces.length ? e(TraceTable, { traces: session.traces }) : e("div", { className: "empty" }, "No proxied requests recorded yet. OpenCode sessions self-report cost at exit, so they may not have request traces.")
+    ) : null
+  );
+}
+
+function Metric({ className, label, value, valueClassName }) {
+  return e("div", { className: ["metric", className].filter(Boolean).join(" ") },
+    e("span", { className: "metric-label" }, label),
+    e("span", { className: ["metric-value", valueClassName].filter(Boolean).join(" ") }, value)
+  );
+}
+
+function KeyValue({ label, value, valueClassName }) {
+  return e("div", null,
+    e("span", { className: "metric-label" }, label),
+    e("span", { className: ["metric-value", valueClassName].filter(Boolean).join(" ") }, value)
+  );
+}
+
+function TraceTable({ traces }) {
+  return e("div", { className: "trace-table-wrap" },
+    e("table", { className: "trace-table" },
+      e("thead", null, e("tr", null,
+        ["time", "status", "total", "TTFT", "upstream", "out/s", "cache", "prompt mix", "size", "hash", "model", "request", "usage", "error"].map((heading) => e("th", { key: heading }, heading))
+      )),
+      e("tbody", null, traces.map((trace) => e(TraceRow, { key: trace.id, trace })))
+    )
+  );
+}
+
+function TraceRow({ trace }) {
+  const usage = trace.usage ? fmt.format(trace.usage.promptTokens) + " in / " + fmt.format(trace.usage.completionTokens) + " out / " + money.format(trace.usage.costUsd) : "-";
+  const elapsedMs = trace.durationMs ?? Math.max(0, Date.now() - trace.startedAt);
+  const status = trace.ok === undefined ? e("span", { className: "chip" }, "pending") : trace.ok ? e("span", { className: "running" }, "ok") : e("span", { className: "error" }, "error");
+  const ttftMs = trace.firstByteAt ? trace.firstByteAt - trace.startedAt : trace.upstreamHeadersAt ? trace.upstreamHeadersAt - trace.startedAt : undefined;
+  const decodeMs = trace.firstByteAt && (trace.completedAt || trace.durationMs) ? Math.max(1, (trace.completedAt ?? (trace.startedAt + trace.durationMs)) - trace.firstByteAt) : undefined;
+  const outputPerSecond = trace.usage && decodeMs ? fmt.format(trace.usage.completionTokens / (decodeMs / 1000)) + "/s" : "-";
+  const cachedPercent = trace.usage && trace.usage.promptTokens > 0 ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100) + "%" : "-";
+  const upstreamWait = trace.upstreamHeadersAt && trace.upstreamStartedAt ? ((trace.upstreamHeadersAt - trace.upstreamStartedAt) / 1000).toFixed(1) + "s" : "-";
+  const firstByte = ttftMs !== undefined ? (ttftMs / 1000).toFixed(1) + "s" : "-";
+  const profile = trace.promptProfile;
+  const promptMix = profile ? formatBytes(profile.stablePrefixBytes) + " stable / " + formatBytes(profile.dynamicBytes) + " dynamic" : "-";
+  const cacheKey = trace.cacheKey ? ["sys " + (trace.cacheKey.systemHash || "-"), "tools " + (trace.cacheKey.toolsHash || "-"), "msgs " + (trace.cacheKey.messagesHash || "-"), "full " + (trace.cacheKey.fullHash || "-")].join("\\n") : "";
+  const hashCell = trace.cacheKey ? e("code", { title: cacheKey }, (trace.cacheKey.fullHash || "-").slice(0, 8)) : "-";
+  return e("tr", null,
+    e("td", null, e("code", null, new Date(trace.startedAt).toLocaleTimeString())),
+    e("td", null, status),
+    e("td", null, (elapsedMs / 1000).toFixed(1) + "s"),
+    e("td", null, firstByte),
+    e("td", null, upstreamWait),
+    e("td", null, outputPerSecond),
+    e("td", null, cachedPercent),
+    e("td", null, promptMix),
+    e("td", null, formatBytes(trace.requestBytes)),
+    e("td", null, hashCell),
+    e("td", null, trace.model || "-"),
+    e("td", null, e("div", { className: "request-preview", title: trace.requestPreview || "" }, cleanPreview(trace.requestPreview) || "-")),
+    e("td", null, usage),
+    e("td", null, trace.error || "-")
+  );
+}
+
+function AgentIcon({ agent }) {
+  if (agent === "claude") {
+    return e("span", { className: "agent-icon", "data-agent": agent, title: agentLabel[agent] },
+      e("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" },
+        e("path", { fill: "currentColor", d: "M4.7 15.8 9.4 13l.2-.4-.2-.3h-.3l-2.7-.1-2.4-.1-2.3-.1-.5-.1-.5-.7.1-.4.5-.3.7.1 3.8.3 3.7.4h.4l.1-.2-.2-.1-4.8-3.2-2.5-1.8-.7-.9-.1-1 .7-.7.9.1.2.1 4.4 3.4 2.7 2 .2-.1.1-.1-.2-.3-2.7-4.9-.7-1.1-.2-.7.1-1 .4-.2 1 .1.4.4 3 6.4.4.9h.2V6.7l.5-5 .4-.9.8-.5.6.3.5.7-.1.5-.8 5.2-.4 2h.2l.2-.2 3.5-4.5.8-.8.5-.4h1l.8 1.1-.3 1.2-2.3 3-1.2 1.7.1.1.2-.1 4.6-1 1.8-.3.8.4.1.4-.3.8-5.7 1.2h-.1l.1.1 1.5.1h1.6l3 .2.8.5.5.6-.1.5-1.2.6-1.6-.4-5.2-1.2h-.2v.1l3.6 3.3 2.5 2.3.1.6-.3.5-.3-.1-4.7-3.5h-.1v.2l2.8 4.2.1 1.1-.2.3-.6.2-.7-.1-2.8-4.1-1.3-2.3-.2.1-.7 7.1-.3.4-.8.1-.6-.5-.3-.7.7-3.4.4-2.1.2-.6h-.2L8.1 21l-1.7 1.8-.4.2-.7-.4.1-.7.4-.6 2.4-3 1.4-1.9h-.1l-6.3 2.8-1.1.1-.5-.4.1-.7.2-.2 2.8-1.7z" })
+      )
+    );
+  }
+  if (agent === "codex") {
+    return e("span", { className: "agent-icon", "data-agent": agent, title: agentLabel[agent] },
+      e("svg", { viewBox: "0 0 24 24", fill: "none", "aria-hidden": "true" },
+        e("path", { d: "M4.5 7.5 12 3l7.5 4.5v9L12 21l-7.5-4.5v-9Z", stroke: "currentColor", strokeWidth: "1.7", strokeLinejoin: "round" }),
+        e("path", { d: "m8.2 9.7-2.4 2.4 2.4 2.4M15.8 9.7l2.4 2.4-2.4 2.4M13.4 8.6l-2.8 6.8", stroke: "currentColor", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round" })
+      )
+    );
+  }
+  return e("span", { className: "agent-icon", "data-agent": agent || "opencode", title: agentLabel[agent] || "Session" },
+    e("svg", { viewBox: "0 0 24 30", "aria-hidden": "true" },
+      e("path", { d: "M18 24H6V12h12v12Z", fill: "#cfcecd" }),
+      e("path", { d: "M18 6H6v18h12V6Zm6 24H0V0h24v30Z", fill: "currentColor" })
+    )
+  );
+}
+
+createRoot(document.getElementById("dashboard-root")).render(e(App));
+`);
 }
 
 function writeFavicon(res: ServerResponse): void {
