@@ -7,6 +7,7 @@ import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
 import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
+import { stableHash } from "../stable-hash.js";
 
 type ResponsesContentPart = {
   type?: string;
@@ -165,6 +166,7 @@ export async function handleCodexProxyRequest(
 
   const body = (await readJsonBody(req)) as ResponsesRequest;
   const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
+  const translatedPayload = toChatPayload(body, options, Boolean(body.stream));
   const traceBase = {
     id: randomUUID(),
     route: path,
@@ -173,6 +175,7 @@ export async function handleCodexProxyRequest(
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
     requestPreview: summarizeResponsesRequestContent(body),
+    cacheKey: cacheKeyForCodexPayload(translatedPayload),
     messageCount: Array.isArray(body.input) ? body.input.length : typeof body.input === "string" ? 1 : 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount,
@@ -226,12 +229,12 @@ export async function handleCodexProxyRequest(
 
   try {
     if (body.stream) {
-      await streamResponseFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
+      await streamResponseFromTogether(res, body, options, translatedPayload, upstreamAbort.signal, timingHooks);
       finalizeTrace(true, res.statusCode);
       return;
     }
 
-    const chatResponse = await callTogether(body, options, false, upstreamAbort.signal, timingHooks);
+    const chatResponse = await callTogether(translatedPayload, options, upstreamAbort.signal, timingHooks);
     recordUsage(chatResponse.usage, options);
     writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
     finalizeTrace(true, res.statusCode);
@@ -302,13 +305,12 @@ function summarizeResponsesContent(content: string | ResponsesContentPart[] | un
 }
 
 async function callTogether(
-  body: ResponsesRequest,
+  payload: Record<string, unknown>,
   options: CodexProxyOptions,
-  stream: boolean,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<ChatResponse> {
-  const result = await fetchTogetherChat(toChatPayload(body, options, stream), options, signal, hooks);
+  const result = await fetchTogetherChat(payload, options, signal, hooks);
   if (!result.ok) {
     throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
   }
@@ -392,6 +394,17 @@ function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, strea
     chat_template_kwargs: { clear_thinking: false },
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
+  };
+}
+
+function cacheKeyForCodexPayload(payload: Record<string, unknown>): NonNullable<ProxyTraceEvent["cacheKey"]> {
+  const messages = Array.isArray(payload.messages) ? (payload.messages as ChatMessage[]) : [];
+  const systemMessages = messages.filter((message) => message.role === "system");
+  return {
+    systemHash: stableHash(systemMessages),
+    toolsHash: stableHash(payload.tools ?? []),
+    messagesHash: stableHash(messages),
+    fullHash: stableHash(payload),
   };
 }
 
@@ -541,6 +554,7 @@ async function streamResponseFromTogether(
   res: ServerResponse,
   body: ResponsesRequest,
   options: CodexProxyOptions,
+  payload: Record<string, unknown>,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<void> {
@@ -562,7 +576,7 @@ async function streamResponseFromTogether(
     },
   });
 
-  const upstreamResult = await fetchTogetherChat(toChatPayload(body, options, true), options, signal, hooks);
+  const upstreamResult = await fetchTogetherChat(payload, options, signal, hooks);
   if (!upstreamResult.ok) {
     writeResponsesSse(res, "response.failed", {
       type: "response.failed",

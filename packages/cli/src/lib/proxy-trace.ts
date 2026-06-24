@@ -6,6 +6,12 @@ export type ProxyTraceEvent = {
   stream?: boolean;
   requestBytes?: number;
   requestPreview?: string;
+  cacheKey?: {
+    systemHash?: string;
+    toolsHash?: string;
+    messagesHash?: string;
+    fullHash?: string;
+  };
   messageCount?: number;
   toolCount?: number;
   nativeToolCount?: number;

@@ -7,6 +7,7 @@ import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
+import { stableHash } from "../stable-hash.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -280,6 +281,7 @@ export async function handleProxyRequest(
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
     requestPreview: summarizeAnthropicRequestContent(body),
+    cacheKey: cacheKeyForClaudeRequest(body),
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount: nativeTools.length,
@@ -337,21 +339,12 @@ export async function handleProxyRequest(
     // GLM-5.2 can't see images: describe each image/url block with a vision model
     // and replace it with a text block, so GLM reasons over the description.
     await resolveImageBlocks(body, options);
-    // When the inbound request is streaming AND there are no native server-side
-    // tools (web_search), stream Together's response directly to Claude Code as
-    // Anthropic SSE — reasoning, text, and tool_use deltas land as they're
-    // generated, so the user sees first tokens (and the live thinking trace) while
-    // GLM is still working, instead of one burst at the very end. For GLM-5.2,
-    // thinking stays on and Claude's requested effort is mapped to Together's
-    // supported high/max levels; for Kimi, we omit the undocumented effort
-    // parameter. When native web_search tools ARE present, a single
-    // /v1/messages request can span several upstream turns (model calls web_search
-    // → we run Exa → feed result back); those intermediate turns must stay buffered
-    // (their output never reaches the client), so we fall back to the fully buffered
-    // loop for correctness. The common coding path declares no web_search tool, so
-    // it streams. See the OpenCode ephemeral harness memory for why high reasoning
-    // is the intended config, not something to dial down.
-    if (body.stream && nativeTools.length === 0) {
+    // Cache is the default for Claude Code: Together currently reports/reuses
+    // prompt cache on non-streaming chat completions, so we buffer upstream and
+    // emit Anthropic SSE locally when Claude requested streaming. Set
+    // TOGETHERLINK_UPSTREAM_STREAM=1 to trade cacheability for true token-by-token
+    // upstream streaming. Native web_search turns stay buffered for correctness.
+    if (body.stream && nativeTools.length === 0 && preferUpstreamStreaming()) {
       await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
       finalizeTrace(true, res.statusCode);
       if (options.debug) {
@@ -398,6 +391,10 @@ export async function handleProxyRequest(
   }
 }
 
+function preferUpstreamStreaming(): boolean {
+  return process.env.TOGETHERLINK_UPSTREAM_STREAM === "1";
+}
+
 function recordProxyTrace(
   options: ClaudeProxyOptions,
   base: Omit<ProxyTraceEvent, "durationMs" | "completedAt" | "ok" | "status" | "error" | "usage">,
@@ -439,6 +436,22 @@ function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): strin
     parts.push(`tools: ${toolNames.join(", ")}`);
   }
   return redactTraceError(parts.join("\n")).slice(0, 2000);
+}
+
+function cacheKeyForClaudeRequest(body: AnthropicMessagesRequest): NonNullable<ProxyTraceEvent["cacheKey"]> {
+  return {
+    systemHash: stableHash(body.system ?? null),
+    toolsHash: stableHash(body.tools ?? []),
+    messagesHash: stableHash(body.messages ?? []),
+    fullHash: stableHash({
+      model: body.model,
+      system: body.system ?? null,
+      messages: body.messages ?? [],
+      tools: body.tools ?? [],
+      tool_choice: body.tool_choice,
+      thinking: body.thinking,
+    }),
+  };
 }
 
 function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | undefined): string {
