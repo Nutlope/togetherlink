@@ -137,11 +137,7 @@ const RETRYABLE_STATUSES = new Set([429, 503]);
 const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 const MAX_RETRIES = 3;
 const CONTEXT_LENGTH_RETRY_FLOOR = 1;
-const TOGETHERLINK_IDENTITY_PROMPT =
-  "You are running inside Claude Code through togetherlink's local Anthropic-to-Together proxy. " +
-  "The upstream model is a Together AI model, not an Anthropic Claude model. " +
-  "If asked what model you are, identify yourself as the selected Together AI backend routed by togetherlink, " +
-  "and do not claim to be Claude, Claude Fable, Opus, Sonnet, or Haiku.";
+const TOGETHERLINK_IDENTITY_PROMPT = "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 
 function clampRequestedMaxTokens(maxTokens: number | undefined, model: ModelDefinition): number | undefined {
   if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens)) {
@@ -1155,7 +1151,7 @@ function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDef
     {
       role: "system",
       content: targetModel
-        ? `${TOGETHERLINK_IDENTITY_PROMPT}\nSelected Together backend: ${targetModel.name} (${targetModel.id}).`
+        ? `${TOGETHERLINK_IDENTITY_PROMPT} Backend: ${targetModel.name} (${targetModel.id}).`
         : TOGETHERLINK_IDENTITY_PROMPT,
     },
   ];
