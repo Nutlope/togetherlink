@@ -1,8 +1,6 @@
 import {
   GLM_5_2,
   SELECTABLE_MODELS,
-  findModelById,
-  isVisionModel,
   VISION_PRIMARY,
   VISION_PROMPT,
   type ModelDefinition,
@@ -88,20 +86,6 @@ export const OPENCODE_VISION_MODEL_SELECTOR = `${OPENCODE_PROVIDER_ID}/${OPENCOD
 
 /** Shared image-description prompt (re-exported for the subagent's system prompt). */
 export { VISION_PROMPT as OPENCODE_VISION_PROMPT };
-
-/**
- * Resolve a selected model id to its ModelDefinition, defaulting to GLM-5.2 if
- * unknown. Used to pick the build-agent system prompt based on whether the
- * active model is vision-capable.
- */
-export function resolveOpencodeModel(modelId: string): ModelDefinition {
-  return findModelById(modelId) ?? GLM_5_2;
-}
-
-/** Whether a given Together model id (in our curated set) accepts images. */
-export function isOpencodeVisionModel(modelId: string): boolean {
-  return isVisionModel(resolveOpencodeModel(modelId));
-}
 
 /**
  * Neutral system prompt for the primary `build` agent. Replaces OpenCode's

@@ -1,7 +1,8 @@
 import {
   GLM_5_2,
   GLM_5_2_ANTHROPIC_CAPABILITIES,
-  KIMI_K2_7_CODE,
+  SELECTABLE_MODELS,
+  resolveModelByKeys,
   type ModelDefinition,
 } from "@togetherlink/models";
 
@@ -17,23 +18,28 @@ export type ClaudeModelSelection = {
   definition: ModelDefinition;
 };
 
-export const CLAUDE_SUPPORTED_MODELS: readonly ClaudeModelSelection[] = [GLM_5_2, KIMI_K2_7_CODE].map(
-  (definition) => ({
-    alias: definition.anthropicAlias ?? definition.id,
-    definition,
-  }),
-);
+/**
+ * Claude-routable models = the curated flagships that carry an Anthropic alias
+ * (only alias-bearing models can be selected as a Claude Code backend). Derived
+ * from the shared manifest so a new alias-bearing model appears here without a
+ * code edit.
+ */
+export const CLAUDE_SUPPORTED_MODELS: readonly ClaudeModelSelection[] = SELECTABLE_MODELS.filter(
+  (model) => model.anthropicAlias !== null,
+).map((definition) => ({
+  alias: definition.anthropicAlias ?? definition.id,
+  definition,
+}));
 
 export function resolveClaudeModel(value: string | undefined): ClaudeModelSelection {
-  const defaultModel = CLAUDE_SUPPORTED_MODELS[0];
-  if (!defaultModel) {
+  if (CLAUDE_SUPPORTED_MODELS.length === 0) {
     throw new Error("No Claude models are configured.");
   }
-  if (!value) {
-    return defaultModel;
-  }
-  const found = CLAUDE_SUPPORTED_MODELS.find(
-    (model) => model.alias === value || model.definition.id === value,
+  const found = resolveModelByKeys(
+    CLAUDE_SUPPORTED_MODELS.map((model) => model.definition),
+    value,
+    [(model) => model.anthropicAlias, (model) => model.id],
+    GLM_5_2.id,
   );
   if (!found) {
     const expected = CLAUDE_SUPPORTED_MODELS.map(
@@ -41,5 +47,5 @@ export function resolveClaudeModel(value: string | undefined): ClaudeModelSelect
     ).join(", ");
     throw new Error(`Unsupported Claude model "${value}". Expected one of: ${expected}.`);
   }
-  return found;
+  return { alias: found.anthropicAlias ?? found.id, definition: found };
 }
