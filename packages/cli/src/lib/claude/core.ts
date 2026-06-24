@@ -169,7 +169,11 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
 
   const child = spawn(
     "claude",
-    [...claudeArgsWithoutModelOverrides(options.args ?? []), ...claudeExtraSettingsArgs(options.args ?? [])],
+    [
+      ...claudeArgsWithoutModelOverrides(options.args ?? []),
+      ...claudeCacheFriendlyArgs(options.args ?? []),
+      ...claudeExtraSettingsArgs(options.args ?? []),
+    ],
     {
       env: buildClaudeEnv({ ...options, modelId, modelName, proxyUrl: agentProxyUrl, authToken }),
       stdio: "inherit",
@@ -260,6 +264,21 @@ function claudeArgsWithoutModelOverrides(args: string[]): string[] {
     sanitized.push(arg);
   }
   return sanitized;
+}
+
+function claudeCacheFriendlyArgs(args: string[]): string[] {
+  for (const arg of args) {
+    if (
+      arg === "--exclude-dynamic-system-prompt-sections" ||
+      arg === "--system-prompt" ||
+      arg.startsWith("--system-prompt=") ||
+      arg === "--system-prompt-file" ||
+      arg.startsWith("--system-prompt-file=")
+    ) {
+      return [];
+    }
+  }
+  return ["--exclude-dynamic-system-prompt-sections"];
 }
 
 // Extra settings.json keys togetherlink applies by default. These are

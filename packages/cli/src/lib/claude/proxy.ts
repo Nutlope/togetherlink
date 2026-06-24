@@ -81,6 +81,9 @@ type OpenAIChatResponse = {
     total_tokens?: number;
     cached_tokens?: number;
     reasoning_tokens?: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
   };
 };
 
@@ -574,7 +577,7 @@ async function callTogetherChatCompletions(
     const usage = json.usage;
     const promptTokens = usage?.prompt_tokens ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
-    const cachedTokens = usage?.cached_tokens ?? 0;
+    const cachedTokens = usage?.prompt_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? 0;
     const incrementalCost =
       options.costTracker?.addUsage(promptTokens, cachedTokens, completionTokens, targetModel.definition) ?? 0;
     debugLog(options, "together response", {
@@ -1332,7 +1335,7 @@ async function streamAnthropicFromTogether(
         if (event.usage) {
           inputTokens = event.usage.prompt_tokens ?? inputTokens;
           outputTokens = event.usage.completion_tokens ?? outputTokens;
-          cachedTokens = event.usage.cached_tokens ?? cachedTokens;
+          cachedTokens = event.usage.prompt_tokens_details?.cached_tokens ?? event.usage.cached_tokens ?? cachedTokens;
         }
         if (event.finish_reason) {
           stopReason = mapStopReason(event.finish_reason);
@@ -1392,6 +1395,9 @@ function parseStreamData(
     completion_tokens?: number;
     total_tokens?: number;
     cached_tokens?: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
   } | null;
   finish_reason?: string | null;
 } | null {
