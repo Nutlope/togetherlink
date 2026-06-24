@@ -1,0 +1,16 @@
+{
+  "name": "@togetherlink/tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "test:codex": "vitest run --config vitest.config.ts src/Codex.test.ts",
+    "test:claude": "vitest run --config vitest.config.ts src/Claude.test.ts",
+    "test:opencode": "vitest run --config vitest.config.ts src/OpenCode.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "vitest": "^4.0.15"
+  }
+}
