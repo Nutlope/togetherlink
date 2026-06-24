@@ -14,7 +14,14 @@ import {
   extractToken,
 } from "../claude/proxy.js";
 import { handleCodexProxyRequest } from "../codex/proxy.js";
-import { sessions, buildSession, type RegisterSessionRequest, type UsageReportRequest, isProxiedAgent } from "./state.js";
+import {
+  sessions,
+  buildSession,
+  toPublicSessionView,
+  type RegisterSessionRequest,
+  type UsageReportRequest,
+  isProxiedAgent,
+} from "./state.js";
 
 export const DEFAULT_DAEMON_PORT = 7878;
 
@@ -98,6 +105,7 @@ async function listenOrExitOnRace(server: Server, port: number): Promise<void> {
 export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   const port = resolveDaemonPort();
   const debug = options.debug ?? process.env.TOGETHERLINK_DEBUG === "1";
+  const restored = await sessions.restorePersisted();
 
   const server = http.createServer((req, res) => {
     handleDaemonRequest(req, res, { debug }).catch((err: unknown) => {
@@ -115,6 +123,9 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   await writeFile(daemonPidPath(), `${process.pid}\n`, { encoding: "utf8" });
   if (debug) {
     process.stderr.write(`[togetherlink daemon] listening: ${daemonUrl(port)} (pid ${process.pid})\n`);
+    if (restored > 0) {
+      process.stderr.write(`[togetherlink daemon] restored ${restored} active session(s).\n`);
+    }
   }
 
   let closing = false;
@@ -179,6 +190,33 @@ async function handleDaemonRequest(
     return;
   }
 
+  if (req.method === "GET" && path_ === "/") {
+    writeDashboardHtml(res);
+    return;
+  }
+
+  if (req.method === "GET" && path_ === "/favicon.ico") {
+    writeFavicon(res);
+    return;
+  }
+
+  if (req.method === "GET" && path_ === "/internal/dashboard") {
+    const active = sessions.list().map(toPublicSessionView);
+    const recent = sessions.listRecent().map(toPublicSessionView);
+    writeJson(res, 200, {
+      generatedAt: Date.now(),
+      daemon: { port: resolveDaemonPort(), url: daemonUrl() },
+      totals: {
+        active: active.length,
+        recent: recent.length,
+        all: active.length + recent.length,
+        traces: [...active, ...recent].reduce((sum, session) => sum + session.traceCount, 0),
+      },
+      sessions: [...active, ...recent],
+    });
+    return;
+  }
+
   // Internal session-management endpoints. Loopback binding is the boundary
   // (same trust model as today's single-session proxy, which has no internal
   // secret either). Used only by `togetherlink` itself.
@@ -198,12 +236,7 @@ async function handleDaemonRequest(
       // knows.
       writeJson(res, 200, {
         count: sessions.size,
-        sessions: sessions.list().map((s) => ({
-          agent: s.agent,
-          modelLabel: s.modelLabel,
-          ...(s.pid !== undefined ? { pid: s.pid } : {}),
-          startedAt: s.startedAt,
-        })),
+        sessions: sessions.list().map(toPublicSessionView),
       });
       return;
     }
@@ -256,7 +289,7 @@ async function handleDaemonRequest(
     }
     const body = (await readJsonBody(req)) as { pid?: number };
     if (typeof body?.pid === "number") {
-      state.pid = body.pid;
+      sessions.updatePid(token, body.pid);
     }
     writeJson(res, 200, { ok: true });
     return;
@@ -273,7 +306,8 @@ async function handleDaemonRequest(
   // session. Self-reporting agents (OpenCode) never send traffic here — they go
   // direct to Together — so a request carrying their token is a
   // misconfiguration; refuse it clearly.
-  const token = extractToken(req);
+  const sessionRoute = localSessionRoute(req, path_);
+  const token = sessionRoute?.token ?? extractToken(req);
   const session = token !== undefined ? sessions.get(token) : undefined;
   if (!session) {
     writeAnthropicError(res, 401, "authentication_error", "Unauthorized local proxy request.");
@@ -290,14 +324,142 @@ async function handleDaemonRequest(
   }
 
   if (session.agent === "codex") {
-    await handleCodexProxyRequest(req, res, session.options);
+    try {
+      await handleCodexProxyRequest(req, res, session.options);
+    } finally {
+      sessionRoute?.restore();
+    }
     return;
   }
 
   // Delegate to the Claude proxy request handler with this session's options
   // (its authToken + CostTracker + model fields), so every downstream function
   // keeps working unchanged.
-  await handleProxyRequest(req, res, session.options);
+  try {
+    await handleProxyRequest(req, res, session.options);
+  } finally {
+    sessionRoute?.restore();
+  }
+}
+
+function localSessionRoute(
+  req: IncomingMessage,
+  path_: string,
+): { token: string; restore: () => void } | undefined {
+  const match = path_.match(/^\/session\/([^/]+)(\/.*)$/);
+  if (!match) {
+    return undefined;
+  }
+  const originalUrl = req.url;
+  const url = new URL(req.url ?? path_, "http://127.0.0.1");
+  url.pathname = match[2] as string;
+  req.url = `${url.pathname}${url.search}`;
+  return {
+    token: decodeURIComponent(match[1] as string),
+    restore: () => {
+      req.url = originalUrl;
+    },
+  };
+}
+
+function writeDashboardHtml(res: ServerResponse): void {
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>togetherlink Dashboard</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <style>
+    :root { color-scheme: light dark; --bg: #f7f7f5; --panel: #ffffff; --text: #1f2328; --muted: #667085; --line: #d8d8d2; --good: #12715b; --bad: #b42318; --chip: #edf2f7; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111312; --panel: #191c1b; --text: #eef1ef; --muted: #a5aca8; --line: #303633; --chip: #242a27; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(1180px, calc(100vw - 32px)); margin: 28px auto 56px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+    h2 { margin: 0 0 12px; font-size: 15px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .stat, .session { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+    .stat b { display: block; font-size: 24px; margin-top: 2px; }
+    .sessions { display: grid; gap: 12px; }
+    .session-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .chip { border-radius: 999px; background: var(--chip); padding: 2px 8px; color: var(--muted); font-size: 12px; }
+    .running { color: var(--good); }
+    .ended, .error { color: var(--bad); }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border-top: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; padding: 28px; text-align: center; color: var(--muted); }
+    @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { align-items: start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>togetherlink Dashboard</h1>
+        <div class="muted" id="subtitle">Loading local sessions...</div>
+      </div>
+      <div class="muted"><code>http://127.0.0.1:${resolveDaemonPort()}</code></div>
+    </header>
+    <section class="grid" id="stats"></section>
+    <section class="sessions" id="sessions"></section>
+  </main>
+  <script>
+    const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+    const money = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 4 });
+    function age(ms) {
+      const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000));
+      if (seconds < 60) return seconds + 's ago';
+      const minutes = Math.round(seconds / 60);
+      if (minutes < 60) return minutes + 'm ago';
+      return Math.round(minutes / 60) + 'h ago';
+    }
+    function stat(label, value) {
+      return '<div class="stat"><span class="muted">' + label + '</span><b>' + value + '</b></div>';
+    }
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+    }
+    function traceRow(trace) {
+      const usage = trace.usage ? fmt.format(trace.usage.promptTokens) + ' in / ' + fmt.format(trace.usage.completionTokens) + ' out / ' + money.format(trace.usage.costUsd) : '-';
+      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + (trace.ok ? '<span class="running">ok</span>' : '<span class="error">error</span>') + '</td><td>' + trace.durationMs + 'ms</td><td>' + esc(trace.model || '-') + '</td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
+    }
+    function sessionCard(session) {
+      const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>latency</th><th>model</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';
+      return '<article class="session"><div class="session-head"><div><div class="title"><h2>' + esc(session.agent) + '</h2><span class="chip">' + esc(session.modelLabel) + '</span><span class="' + session.status + '">' + session.status + '</span></div><div class="muted">Started ' + age(session.startedAt) + (session.pid ? ' · pid ' + session.pid : '') + '</div></div><code>' + session.traceCount + ' trace' + (session.traceCount === 1 ? '' : 's') + '</code></div><p class="muted">' + esc(session.costSummary).replaceAll('\\n', '<br>') + '</p>' + traces + '</article>';
+    }
+    async function load() {
+      const data = await fetch('/internal/dashboard', { cache: 'no-store' }).then(r => r.json());
+      document.getElementById('subtitle').textContent = 'Updated ' + new Date(data.generatedAt).toLocaleTimeString();
+      document.getElementById('stats').innerHTML = stat('Active sessions', data.totals.active) + stat('Recent sessions', data.totals.recent) + stat('Total sessions', data.totals.all) + stat('Recorded traces', data.totals.traces);
+      document.getElementById('sessions').innerHTML = data.sessions.length ? data.sessions.map(sessionCard).join('') : '<div class="empty">No sessions yet. Run togetherlink claude or togetherlink codex to start one.</div>';
+    }
+    load().catch(err => { document.getElementById('sessions').innerHTML = '<div class="empty">Could not load dashboard: ' + err.message + '</div>'; });
+    setInterval(load, 2000);
+  </script>
+</body>
+</html>`);
+}
+
+function writeFavicon(res: ServerResponse): void {
+  res.writeHead(200, {
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "public, max-age=86400",
+  });
+  res.end(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#111312"/>
+  <path d="M18 20h28v6H35v20h-6V26H18z" fill="#f7f7f5"/>
+  <path d="M42 34h8v6h-8zM14 34h8v6h-8z" fill="#3dd6b4"/>
+</svg>`);
 }
 
 async function registerSession(req: IncomingMessage, res: ServerResponse): Promise<void> {

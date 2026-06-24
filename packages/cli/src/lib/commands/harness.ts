@@ -1,6 +1,7 @@
 import os from "node:os";
 import { ALL_HARNESSES, HARNESS_LABEL, type HarnessId } from "../harness.js";
 import { loadHarness, isHarnessImplemented } from "../harness-registry.js";
+import { detectInstalledHarness, missingHarnessMessage } from "../detect.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
 
 const VALID_VERBS = new Set(["run", "on", "off", "status"]);
@@ -28,6 +29,9 @@ export async function dispatchHarnessCommand(
   if (!handler) {
     const supported = (["run", "on", "off", "status"] as const).filter((candidate) => Boolean(harnessModule[candidate]));
     throw new Error(`"${harnessName} ${resolvedVerb}" is not supported. Expected: ${supported.join(", ")}.`);
+  }
+  if (resolvedVerb !== "status" && !detectInstalledHarness(harnessName).installed) {
+    throw new Error(missingHarnessMessage(harnessName));
   }
 
   const ctx = { home: os.homedir(), ...flags };

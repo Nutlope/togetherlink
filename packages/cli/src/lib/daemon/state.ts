@@ -1,6 +1,14 @@
 import { CostTracker } from "../claude/cost.js";
 import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
+import type { ProxyTraceEvent } from "../proxy-trace.js";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+const MAX_RECENT_SESSIONS = 50;
+const MAX_TRACES_PER_SESSION = 200;
+const SESSION_STORE_FILE = "daemon-sessions.json";
 
 /**
  * Which coding agent a session belongs to. The dashboard groups by this, and
@@ -40,6 +48,7 @@ export type SessionState = {
   /** agent child pid, if the launcher supplied it at register time. */
   pid?: number;
   startedAt: number;
+  endedAt?: number;
   /** Display label for the dashboard, e.g. "GLM 5.2". */
   modelLabel: string;
   /** Real Together API key the daemon uses upstream (proxied) or that the
@@ -53,6 +62,7 @@ export type SessionState = {
    * Undefined for self-reporting agents.
    */
   options?: ClaudeProxyOptions | CodexProxyOptions;
+  traces: ProxyTraceEvent[];
 };
 
 export type SessionPublicView = {
@@ -60,6 +70,11 @@ export type SessionPublicView = {
   modelLabel: string;
   pid?: number;
   startedAt: number;
+  endedAt?: number;
+  status: "running" | "ended";
+  costSummary: string;
+  traceCount: number;
+  traces: ProxyTraceEvent[];
 };
 
 /**
@@ -69,7 +84,10 @@ export type SessionPublicView = {
  * `modelName`) are only required for proxied agents and feed `ClaudeProxyOptions`.
  */
 export type RegisterSessionRequest = {
+  /** Session routing id. In older builds this also doubled as the auth token. */
   token: string;
+  /** Stable local proxy auth token. Defaults to `token` for old launchers. */
+  authToken?: string;
   agent?: AgentId;
   pid?: number;
   apiKey: string;
@@ -81,6 +99,11 @@ export type RegisterSessionRequest = {
   /** Included for proxy options. Defaults to modelLabel. */
   modelName?: string;
   debug?: boolean;
+};
+
+type PersistedSession = RegisterSessionRequest & {
+  startedAt: number;
+  pid?: number;
 };
 
 export type RegisterSessionResult =
@@ -98,9 +121,11 @@ export type UsageReportRequest = {
 
 class SessionRegistry {
   private readonly map = new Map<string, SessionState>();
+  private readonly recent: SessionState[] = [];
 
   register(state: SessionState): void {
     this.map.set(state.token, state);
+    this.persistActive();
   }
 
   get(token: string): SessionState | undefined {
@@ -108,7 +133,16 @@ class SessionRegistry {
   }
 
   delete(token: string): boolean {
-    return this.map.delete(token);
+    const state = this.map.get(token);
+    if (!state) {
+      return false;
+    }
+    this.map.delete(token);
+    state.endedAt = Date.now();
+    this.recent.unshift(state);
+    this.recent.length = Math.min(this.recent.length, MAX_RECENT_SESSIONS);
+    this.persistActive();
+    return true;
   }
 
   get size(): number {
@@ -117,6 +151,56 @@ class SessionRegistry {
 
   list(): SessionState[] {
     return [...this.map.values()];
+  }
+
+  listRecent(): SessionState[] {
+    return [...this.recent];
+  }
+
+  recordTrace(token: string, trace: ProxyTraceEvent): void {
+    const state = this.map.get(token);
+    if (!state) {
+      return;
+    }
+    state.traces.unshift(trace);
+    state.traces.length = Math.min(state.traces.length, MAX_TRACES_PER_SESSION);
+  }
+
+  updatePid(token: string, pid: number): boolean {
+    const state = this.map.get(token);
+    if (!state) {
+      return false;
+    }
+    state.pid = pid;
+    this.persistActive();
+    return true;
+  }
+
+  async restorePersisted(): Promise<number> {
+    let persisted: PersistedSession[];
+    try {
+      persisted = JSON.parse(await readFile(sessionStorePath(), "utf8")) as PersistedSession[];
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(persisted)) {
+      return 0;
+    }
+    let restored = 0;
+    for (const session of persisted) {
+      if (!isPersistedSession(session)) {
+        continue;
+      }
+      if (session.pid !== undefined && !isAlive(session.pid)) {
+        continue;
+      }
+      const state = buildSession(session);
+      state.startedAt = session.startedAt;
+      this.map.set(state.token, state);
+      restored += 1;
+    }
+    this.persistActive();
+    return restored;
   }
 
   /**
@@ -135,11 +219,16 @@ class SessionRegistry {
         continue;
       }
       if (!isAlive(state.pid)) {
-        this.map.delete(state.token);
+        this.delete(state.token);
         removed += 1;
       }
     }
     return removed;
+  }
+
+  private persistActive(): void {
+    const active = [...this.map.values()].map(toPersistedSession);
+    void writeSessionStore(active).catch(() => {});
   }
 }
 
@@ -180,6 +269,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
     apiKey: req.apiKey,
     modelDefinition: req.modelDefinition,
     costTracker,
+    traces: [],
     ...(typeof req.pid === "number" ? { pid: req.pid } : {}),
     ...(req.debug !== undefined ? { debug: req.debug } : {}),
   };
@@ -190,10 +280,75 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       targetModelId: req.targetModelId ?? req.modelDefinition.id,
       modelName: req.modelName ?? req.modelLabel,
       modelDefinition: req.modelDefinition,
-      authToken: req.token,
+      authToken: req.authToken ?? req.token,
       ...(req.debug !== undefined ? { debug: req.debug } : {}),
       costTracker,
+      recordTrace: (trace) => sessions.recordTrace(req.token, trace),
     };
   }
   return state;
+}
+
+export function toPublicSessionView(state: SessionState): SessionPublicView {
+  return {
+    agent: state.agent,
+    modelLabel: state.modelLabel,
+    ...(state.pid !== undefined ? { pid: state.pid } : {}),
+    startedAt: state.startedAt,
+    ...(state.endedAt !== undefined ? { endedAt: state.endedAt } : {}),
+    status: state.endedAt === undefined ? "running" : "ended",
+    costSummary: state.costTracker.summarize(),
+    traceCount: state.traces.length,
+    traces: state.traces,
+  };
+}
+
+function toPersistedSession(state: SessionState): PersistedSession {
+  const base: PersistedSession = {
+    token: state.token,
+    agent: state.agent,
+    apiKey: state.apiKey,
+    ...(state.options?.authToken !== undefined && state.options.authToken !== state.token ? { authToken: state.options.authToken } : {}),
+    modelLabel: state.modelLabel,
+    modelDefinition: state.modelDefinition,
+    startedAt: state.startedAt,
+    ...(state.pid !== undefined ? { pid: state.pid } : {}),
+    ...(state.debug !== undefined ? { debug: state.debug } : {}),
+  };
+  if (state.options !== undefined) {
+    base.modelId = state.options.modelId;
+    base.targetModelId = state.options.targetModelId;
+    base.modelName = state.options.modelName;
+  }
+  return base;
+}
+
+function isPersistedSession(value: unknown): value is PersistedSession {
+  const session = value as PersistedSession;
+  return (
+    typeof session?.token === "string" &&
+    session.token.length > 0 &&
+    typeof session.apiKey === "string" &&
+    session.apiKey.length > 0 &&
+    typeof session.modelLabel === "string" &&
+    typeof session.startedAt === "number" &&
+    typeof session.modelDefinition === "object" &&
+    session.modelDefinition !== null
+  );
+}
+
+function resolveTogetherlinkHome(): string {
+  return process.env.TOGETHERLINK_HOME || path.join(os.homedir(), ".togetherlink");
+}
+
+function sessionStorePath(): string {
+  return path.join(resolveTogetherlinkHome(), SESSION_STORE_FILE);
+}
+
+async function writeSessionStore(active: PersistedSession[]): Promise<void> {
+  const file = sessionStorePath();
+  await mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(active, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(tmp, file);
 }

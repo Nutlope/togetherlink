@@ -20,6 +20,8 @@ tcodex               # Codex through a local Responses proxy
 
 On first launch, togetherlink asks once for your Together API key (press Enter to skip — the key is optional and can be added later with `togetherlink configure` or `TOGETHER_API_KEY`). The binary keeps itself up to date automatically from `togetherlink.vercel.app`.
 
+If the underlying agent CLI is missing, togetherlink does not install it automatically. It prints the official install command and docs link for the selected tool, then exits.
+
 ## Local Development
 
 Install dependencies from the repo root:

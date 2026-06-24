@@ -6,7 +6,15 @@ import {
   resolveClaudeModel,
   type ClaudeModelSelection,
 } from "./defaults.js";
-import { ensureDaemon, daemonFetch } from "../daemon/launch.js";
+import {
+  ensureDaemon,
+  daemonFetch,
+  registerDaemonSession,
+  updateDaemonSessionPid,
+  startDaemonSessionKeepalive,
+  localProxyAuthToken,
+  daemonSessionUrl,
+} from "../daemon/launch.js";
 
 const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -116,38 +124,34 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   const targetModelId = selectedModel.definition.id;
   const modelName = selectedModel.definition.name;
   const debug = process.env.TOGETHERLINK_DEBUG === "1";
-  const authToken = randomLocalProxyToken();
+  const sessionId = randomLocalProxyToken();
+  const authToken = await localProxyAuthToken();
 
   // Ensure the shared daemon is up (spawn-once/reuse by healthz probe). The
   // daemon outlives this launcher, so N `togetherlink claude` sessions share one
   // proxy process instead of each running its own in-process proxy.
   const { url: proxyUrl } = await ensureDaemon();
+  const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
 
   // Register this session: the daemon builds a per-session CostTracker keyed by
   // our auth token. Sessions bring their own apiKey + model, so the daemon needs
   // no daemon-wide credentials. A failure here means claude's first /v1/messages
   // would get an opaque 401, so surface the registration error explicitly on
   // stderr instead of letting the user chase a phantom "bad key" error.
+  const registration = {
+    token: sessionId,
+    authToken,
+    agent: "claude" as const,
+    apiKey: options.apiKey,
+    modelLabel: modelName,
+    modelId,
+    targetModelId,
+    modelName,
+    modelDefinition: selectedModel.definition,
+    ...(debug ? { debug: true } : {}),
+  };
   try {
-    const response = await daemonFetch(`${proxyUrl}/internal/sessions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        token: authToken,
-        agent: "claude",
-        apiKey: options.apiKey,
-        modelLabel: modelName,
-        modelId,
-        targetModelId,
-        modelName,
-        modelDefinition: selectedModel.definition,
-        ...(debug ? { debug: true } : {}),
-      }),
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`daemon registration failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`);
-    }
+    await registerDaemonSession(proxyUrl, registration);
   } catch (err) {
     throw new Error(`Could not register this Claude session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -159,6 +163,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   process.stderr.write(`togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`);
   if (debug) {
     process.stderr.write(`[togetherlink proxy] daemon: ${proxyUrl}\n`);
+    process.stderr.write(`[togetherlink proxy] session: ${agentProxyUrl}\n`);
     process.stderr.write(`[togetherlink claude] custom model: ${modelId}\n`);
   }
 
@@ -166,7 +171,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     "claude",
     [...claudeArgsWithoutModelOverrides(options.args ?? []), ...claudeExtraSettingsArgs(options.args ?? [])],
     {
-      env: buildClaudeEnv({ ...options, modelId, modelName, proxyUrl, authToken }),
+      env: buildClaudeEnv({ ...options, modelId, modelName, proxyUrl: agentProxyUrl, authToken }),
       stdio: "inherit",
     },
   );
@@ -177,15 +182,16 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   // the normal exit path still deregisters explicitly below.
   if (typeof child.pid === "number") {
     try {
-      await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/pid`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pid: child.pid }),
-      });
+      await updateDaemonSessionPid(proxyUrl, sessionId, child.pid);
     } catch {
       // best-effort
     }
   }
+  const keepalive = startDaemonSessionKeepalive(registration, {
+    ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
+    debug,
+    label: "Claude session",
+  });
 
   // Await the child, but capture the result even on a spawn error so the cost
   // line + deregister always run (the old code guaranteed these in a finally
@@ -204,12 +210,13 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   // The daemon owns the tracker (keyed by our token); fetch its summary. Goes to
   // stderr so it never corrupts claude's stdout. Best-effort: a dead/unreachable
   // daemon (or a timeout) just means no cost line, never a broken command.
-  await printSessionCost(proxyUrl, authToken);
+  await printSessionCost(proxyUrl, sessionId);
+  keepalive.stop();
   // Deregister so the daemon doesn't keep a finished session's tracker around.
   // (A kill -9 of this launcher skips this; the daemon reaps orphaned sessions
   // on a timer — see daemon/state.ts.)
   try {
-    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}`, { method: "DELETE" });
+    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
   } catch {
     // best-effort
   }

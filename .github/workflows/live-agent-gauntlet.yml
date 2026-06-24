@@ -1,0 +1,118 @@
+name: Live Agent Gauntlet
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness:
+        description: "Harness test file to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - claude
+          - codex
+          - opencode
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/live-agent-gauntlet.yml"
+      - "packages/cli/**"
+      - "packages/models/**"
+      - "packages/tests/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+
+concurrency:
+  group: live-agent-gauntlet-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: Real inference harness tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+      TOGETHERLINK_DEBUG: "1"
+      HARNESS: ${{ github.event.inputs.harness || 'all' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: "11.8.0"
+
+      - name: Verify Together secret
+        run: |
+          if [ -z "$TOGETHER_API_KEY" ]; then
+            echo "TOGETHER_API_KEY repository secret is required for live inference tests." >&2
+            exit 1
+          fi
+
+      - name: Approve required dependency build scripts
+        run: pnpm approve-builds esbuild
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile --config.confirmModulesPurge=false
+
+      - name: Install coding-agent CLIs
+        run: |
+          npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai
+          claude --version
+          codex --version
+          opencode --version
+
+      - name: Build togetherlink CLI
+        run: |
+          node_modules/.bin/tsc -p packages/cli/tsconfig.json
+          chmod +x packages/cli/dist/bin/togetherlink.js
+
+      - name: Typecheck live tests
+        run: node_modules/.bin/tsc -p packages/tests/tsconfig.json --noEmit
+
+      - name: Run live agent gauntlet
+        run: |
+          case "$HARNESS" in
+            all)
+              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts
+              ;;
+            claude)
+              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts
+              ;;
+            codex)
+              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
+              ;;
+            opencode)
+              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
+              ;;
+            *)
+              echo "Unknown harness: $HARNESS" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Stop togetherlink daemon
+        if: always()
+        run: node packages/cli/dist/bin/togetherlink.js daemon stop || true
+
+      - name: Upload live test artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: live-agent-gauntlet-artifacts
+          path: packages/tests/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

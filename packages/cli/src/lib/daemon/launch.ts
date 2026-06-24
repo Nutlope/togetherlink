@@ -1,15 +1,20 @@
 import { spawn } from "node:child_process";
-import { readFile, unlink } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
 import { probeHealthz, resolveDaemonPort, daemonUrl, daemonPidPath } from "./server.js";
+import type { RegisterSessionRequest } from "./state.js";
 
 const HEALTH_POLL_INTERVAL_MS = 200;
 const HEALTH_POLL_TIMEOUT_MS = 5000;
 
 /** Timeout for the launcher's internal daemon calls (register/cost/deregister). */
 const DAEMON_CALL_TIMEOUT_MS = 3000;
+const SESSION_KEEPALIVE_INTERVAL_MS = 500;
+const LOCAL_PROXY_TOKEN_FILE = "local-proxy-token";
 
 /**
  * Ensure the shared proxy daemon is running on the fixed port and return its
@@ -145,4 +150,115 @@ export async function daemonFetch(url: string, init?: RequestInit): Promise<Resp
   }
 }
 
+export async function registerDaemonSession(proxyUrl: string, registration: RegisterSessionRequest): Promise<void> {
+  const response = await daemonFetch(`${proxyUrl}/internal/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(registration),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`daemon registration failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+  }
+}
+
+export async function updateDaemonSessionPid(proxyUrl: string, token: string, pid: number): Promise<void> {
+  await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(token)}/pid`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pid }),
+  });
+}
+
+export async function localProxyAuthToken(): Promise<string> {
+  const file = path.join(resolveTogetherlinkHome(), LOCAL_PROXY_TOKEN_FILE);
+  try {
+    const token = (await readFile(file, "utf8")).trim();
+    if (token) {
+      return token;
+    }
+  } catch {
+    // Create below.
+  }
+  const token = `togetherlink-local-${randomBytes(32).toString("base64url")}`;
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, `${token}\n`, { encoding: "utf8", mode: 0o600 });
+  return token;
+}
+
+export function daemonSessionUrl(proxyUrl: string, sessionId: string): string {
+  return `${proxyUrl}/session/${encodeURIComponent(sessionId)}`;
+}
+
+export function startDaemonSessionKeepalive(
+  registration: RegisterSessionRequest,
+  options: { pid?: number; debug?: boolean; label?: string } = {},
+): { stop: () => void } {
+  let stopped = false;
+  let inFlight = false;
+  let lastRecoveredAt = 0;
+
+  const recover = async (reason: string) => {
+    const now = Date.now();
+    if (now - lastRecoveredAt < SESSION_KEEPALIVE_INTERVAL_MS) {
+      return;
+    }
+    lastRecoveredAt = now;
+    const { url } = await ensureDaemon();
+    await registerDaemonSession(url, { ...registration, ...(options.pid !== undefined ? { pid: options.pid } : {}) });
+    if (options.debug) {
+      process.stderr.write(`[togetherlink daemon] restored ${options.label ?? registration.agent ?? "session"} after ${reason}.\n`);
+    }
+  };
+
+  const safeRecover = async (reason: string) => {
+    try {
+      await recover(reason);
+    } catch (err) {
+      if (options.debug) {
+        process.stderr.write(
+          `[togetherlink daemon] could not restore ${options.label ?? registration.agent ?? "session"}: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+      }
+    }
+  };
+
+  const tick = () => {
+    if (stopped || inFlight) {
+      return;
+    }
+    inFlight = true;
+    void (async () => {
+      const port = resolveDaemonPort();
+      const url = daemonUrl(port);
+      try {
+        const response = await daemonFetch(`${url}/internal/sessions/${encodeURIComponent(registration.token)}/cost`);
+        if (response.status === 404 || response.status === 401) {
+          await safeRecover(`missing session (${response.status})`);
+        }
+      } catch (err) {
+        await safeRecover(err instanceof Error ? err.message : "daemon unreachable");
+      } finally {
+        inFlight = false;
+      }
+    })();
+  };
+
+  const timer = setInterval(tick, SESSION_KEEPALIVE_INTERVAL_MS);
+  timer.unref();
+  tick();
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
+
 export { CLAUDE_LOCAL_PROXY_HOST };
+
+function resolveTogetherlinkHome(): string {
+  return process.env.TOGETHERLINK_HOME || path.join(os.homedir(), ".togetherlink");
+}

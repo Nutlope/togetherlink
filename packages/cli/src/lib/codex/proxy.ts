@@ -1,10 +1,12 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { type ModelDefinition } from "@togetherlink/models";
-import { CODEX_SUPPORTED_MODELS } from "./defaults.js";
+import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
+import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
 
 type ResponsesContentPart = {
   type?: string;
@@ -122,6 +124,7 @@ export type CodexProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  recordTrace?: ((trace: ProxyTraceEvent) => void) | undefined;
 };
 
 const CODEX_IDENTITY_PROMPT =
@@ -144,7 +147,7 @@ export async function handleCodexProxyRequest(
   }
 
   if (req.method === "GET" && path === "/v1/models") {
-    writeJson(res, 200, { models: CODEX_SUPPORTED_MODELS.map(toCodexModelCatalogEntry) });
+    writeJson(res, 200, codexModelCatalog());
     return;
   }
 
@@ -154,62 +157,60 @@ export async function handleCodexProxyRequest(
   }
 
   const body = (await readJsonBody(req)) as ResponsesRequest;
+  const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
+  const traceBase = {
+    route: path,
+    method: req.method ?? "POST",
+    model: body.model ?? options.modelId,
+    stream: Boolean(body.stream),
+    requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+    messageCount: Array.isArray(body.input) ? body.input.length : typeof body.input === "string" ? 1 : 0,
+    toolCount: body.tools?.length ?? 0,
+    nativeToolCount,
+    startedAt: Date.now(),
+  };
   options.costTracker?.beginRequest();
   debugLog(options, "responses request", {
     model: body.model,
     stream: body.stream,
     inputItems: Array.isArray(body.input) ? body.input.length : typeof body.input,
     toolCount: body.tools?.length ?? 0,
-    nativeToolCount: (body.tools ?? []).filter((tool) => tool.type !== "function").length,
+    nativeToolCount,
+    tools: summarizeResponsesTools(body.tools),
   });
 
-  if (body.stream) {
-    await streamResponseFromTogether(res, body, options);
-    return;
-  }
+  try {
+    if (body.stream) {
+      await streamResponseFromTogether(res, body, options);
+      recordProxyTrace(options, traceBase, true, res.statusCode);
+      return;
+    }
 
-  const chatResponse = await callTogether(body, options, false);
-  recordUsage(chatResponse.usage, options);
-  writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
+    const chatResponse = await callTogether(body, options, false);
+    recordUsage(chatResponse.usage, options);
+    writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
+    recordProxyTrace(options, traceBase, true, res.statusCode);
+  } catch (err) {
+    recordProxyTrace(options, traceBase, false, res.statusCode >= 400 ? res.statusCode : 500, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
 }
 
-function toCodexModelCatalogEntry(model: { id: string; definition: ModelDefinition }): Record<string, unknown> {
-  const reasoningLevels = model.definition.reasoning
-    ? [
-        { effort: "low", description: "Fast responses with lighter reasoning" },
-        { effort: "medium", description: "Balances speed and reasoning depth" },
-        { effort: "high", description: "Greater reasoning depth for complex tasks" },
-      ]
-    : [];
-  return {
-    slug: model.id,
-    display_name: model.definition.name,
-    description: `Together AI model via togetherlink (${model.definition.id})`,
-    default_reasoning_level: model.definition.reasoning ? "medium" : "none",
-    supported_reasoning_levels: reasoningLevels,
-    shell_type: "shell_command",
-    visibility: "list",
-    supported_in_api: true,
-    priority: 50,
-    upgrade: null,
-    base_instructions: "",
-    supports_reasoning_summaries: model.definition.reasoning,
-    default_reasoning_summary: "none",
-    support_verbosity: false,
-    default_verbosity: "low",
-    apply_patch_tool_type: "freeform",
-    web_search_tool_type: "text_and_image",
-    truncation_policy: { mode: "tokens", limit: model.definition.limit.context },
-    supports_parallel_tool_calls: model.definition.tool_call,
-    supports_image_detail_original: model.definition.attachment,
-    context_window: model.definition.limit.context,
-    max_context_window: model.definition.limit.context,
-    effective_context_window_percent: 95,
-    experimental_supported_tools: [],
-    input_modalities: model.definition.modalities.input,
-    supports_search_tool: false,
-    use_responses_lite: false,
-  };
+function recordProxyTrace(
+  options: CodexProxyOptions,
+  base: Omit<ProxyTraceEvent, "durationMs" | "ok" | "status" | "error" | "usage">,
+  ok: boolean,
+  status?: number,
+  error?: string,
+): void {
+  options.recordTrace?.({
+    ...base,
+    durationMs: Date.now() - base.startedAt,
+    ok,
+    ...(status !== undefined ? { status } : {}),
+    ...(error ? { error: redactTraceError(error) } : {}),
+    ...(options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
+  });
 }
 
 async function callTogether(
@@ -773,6 +774,22 @@ function parseTokenCount(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function summarizeResponsesTools(tools: ResponsesTool[] | undefined): Array<Record<string, unknown>> | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+  return tools.map((tool) => ({
+    name: tool.name,
+    type: tool.type,
+    parameterKeys: objectKeys(tool.parameters),
+    rawKeys: Object.keys(tool),
+  }));
+}
+
+function objectKeys(value: unknown): string[] | undefined {
+  return typeof value === "object" && value !== null ? Object.keys(value) : undefined;
+}
+
 function writeOpenAIError(res: ServerResponse, status: number, type: string, message: string): void {
   writeJson(res, status, { error: { type, message } });
 }
@@ -795,5 +812,9 @@ function debugLog(options: CodexProxyOptions, label: string, payload: unknown): 
   if (!options.debug) {
     return;
   }
-  process.stderr.write(`[togetherlink codex proxy] ${label}: ${JSON.stringify(payload)}\n`);
+  const line = `[togetherlink codex proxy] ${label}: ${JSON.stringify(payload)}\n`;
+  process.stderr.write(line);
+  if (process.env.TOGETHERLINK_DEBUG_LOG) {
+    appendFileSync(process.env.TOGETHERLINK_DEBUG_LOG, line);
+  }
 }

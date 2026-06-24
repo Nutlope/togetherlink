@@ -92,7 +92,7 @@ How it works now (in `proxy.ts` + `vision.ts`):
 
 Known limitation / future work:
 
-- The vision sub-call's own token cost is not yet folded into the proxy's `CostTracker`. The `CostTracker` only records the GLM-5.2 chat calls today, so the session cost summary under-reports by the (small) vision spend.
+- The vision sub-call's own token cost is now folded into the proxy's `CostTracker` at the selected vision model's rates.
 
 ### `code_execution_*`
 

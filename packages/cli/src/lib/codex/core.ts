@@ -1,7 +1,19 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { codexModelCatalogJson } from "./catalog.js";
 import { CODEX_AUTH_ENV, CODEX_PROVIDER_ID, resolveCodexModel } from "./defaults.js";
-import { ensureDaemon, daemonFetch } from "../daemon/launch.js";
+import {
+  ensureDaemon,
+  daemonFetch,
+  registerDaemonSession,
+  updateDaemonSessionPid,
+  startDaemonSessionKeepalive,
+  localProxyAuthToken,
+  daemonSessionUrl,
+} from "../daemon/launch.js";
 
 export type CodexLaunchOptions = {
   apiKey: string;
@@ -21,29 +33,25 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const modelId = selectedModel.definition.id;
   const modelName = selectedModel.definition.name;
   const debug = process.env.TOGETHERLINK_DEBUG === "1";
-  const authToken = randomLocalProxyToken();
+  const sessionId = randomLocalProxyToken();
+  const authToken = await localProxyAuthToken();
   const { url: proxyUrl } = await ensureDaemon();
+  const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
+  const registration = {
+    token: sessionId,
+    authToken,
+    agent: "codex" as const,
+    apiKey: options.apiKey,
+    modelLabel: modelName,
+    modelId,
+    targetModelId: modelId,
+    modelName,
+    modelDefinition: selectedModel.definition,
+    ...(debug ? { debug: true } : {}),
+  };
 
   try {
-    const response = await daemonFetch(`${proxyUrl}/internal/sessions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        token: authToken,
-        agent: "codex",
-        apiKey: options.apiKey,
-        modelLabel: modelName,
-        modelId,
-        targetModelId: modelId,
-        modelName,
-        modelDefinition: selectedModel.definition,
-        ...(debug ? { debug: true } : {}),
-      }),
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`daemon registration failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`);
-    }
+    await registerDaemonSession(proxyUrl, registration);
   } catch (err) {
     throw new Error(`Could not register this Codex session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -51,25 +59,28 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   process.stderr.write(`togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`);
   if (debug) {
     process.stderr.write(`[togetherlink proxy] daemon: ${proxyUrl}\n`);
+    process.stderr.write(`[togetherlink proxy] session: ${agentProxyUrl}\n`);
     process.stderr.write(`[togetherlink codex] model: ${modelId}\n`);
   }
 
-  const child = spawn("codex", [...codexArgsWithoutModelOverrides(options.args ?? []), ...codexConfigArgs(proxyUrl, authToken, modelId)], {
+  const catalog = writeCodexModelCatalog();
+  const child = spawn("codex", [...codexArgsWithoutModelOverrides(options.args ?? []), ...codexConfigArgs(agentProxyUrl, authToken, modelId, catalog.path)], {
     env: buildCodexEnv(authToken),
     stdio: "inherit",
   });
 
   if (typeof child.pid === "number") {
     try {
-      await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/pid`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pid: child.pid }),
-      });
+      await updateDaemonSessionPid(proxyUrl, sessionId, child.pid);
     } catch {
       // best-effort
     }
   }
+  const keepalive = startDaemonSessionKeepalive(registration, {
+    ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
+    debug,
+    label: "Codex session",
+  });
 
   const result = await new Promise<CodexLaunchResult>((resolve) => {
     child.on("error", (err) => {
@@ -79,12 +90,14 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     child.on("exit", (status, signal) => resolve({ status, signal }));
   });
 
-  await printSessionCost(proxyUrl, authToken);
+  await printSessionCost(proxyUrl, sessionId);
+  keepalive.stop();
   try {
-    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}`, { method: "DELETE" });
+    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
   } catch {
     // best-effort
   }
+  catalog.cleanup();
 
   return result;
 }
@@ -96,13 +109,15 @@ function buildCodexEnv(authToken: string): NodeJS.ProcessEnv {
   };
 }
 
-function codexConfigArgs(proxyUrl: string, authToken: string, modelId: string): string[] {
+function codexConfigArgs(proxyUrl: string, authToken: string, modelId: string, catalogPath: string): string[] {
   void authToken;
   return [
     "-c",
     `model_provider="${CODEX_PROVIDER_ID}"`,
     "-c",
     `model="${modelId}"`,
+    "-c",
+    `model_catalog_json="${catalogPath}"`,
     "-c",
     `model_providers.${CODEX_PROVIDER_ID}.name="Togetherlink"`,
     "-c",
@@ -112,6 +127,22 @@ function codexConfigArgs(proxyUrl: string, authToken: string, modelId: string): 
     "-c",
     `model_providers.${CODEX_PROVIDER_ID}.env_key="${CODEX_AUTH_ENV}"`,
   ];
+}
+
+function writeCodexModelCatalog(): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "togetherlink-codex-catalog-"));
+  const path = join(dir, "models.json");
+  writeFileSync(path, codexModelCatalogJson(), "utf8");
+  return {
+    path,
+    cleanup: () => {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    },
+  };
 }
 
 function codexArgsWithoutModelOverrides(args: string[]): string[] {

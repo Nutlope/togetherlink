@@ -1,10 +1,12 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
+import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -196,6 +198,7 @@ export type ClaudeProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  recordTrace?: ((trace: ProxyTraceEvent) => void) | undefined;
 };
 
 /**
@@ -258,6 +261,18 @@ export async function handleProxyRequest(
   }
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
+  const nativeTools = nativeServerTools(body.tools);
+  const traceBase = {
+    route: path,
+    method: req.method ?? "POST",
+    model: body.model ?? options.modelId,
+    stream: Boolean(body.stream),
+    requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+    messageCount: body.messages?.length ?? 0,
+    toolCount: body.tools?.length ?? 0,
+    nativeToolCount: nativeTools.length,
+    startedAt: Date.now(),
+  };
   options.costTracker?.beginRequest();
   debugLog(options, "anthropic request", {
     model: body.model,
@@ -270,62 +285,86 @@ export async function handleProxyRequest(
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
-  // GLM-5.2 can't see images: describe each image/url block with a vision model
-  // and replace it with a text block, so GLM reasons over the description.
-  await resolveImageBlocks(body, options);
-  // When the inbound request is streaming AND there are no native server-side
-  // tools (web_search), stream Together's response directly to Claude Code as
-  // Anthropic SSE — reasoning, text, and tool_use deltas land as they're
-  // generated, so the user sees first tokens (and the live thinking trace) while
-  // GLM is still working, instead of one burst at the very end. For GLM-5.2,
-  // thinking stays on and Claude's requested effort is mapped to Together's
-  // supported high/max levels; for Kimi, we omit the undocumented effort
-  // parameter. When native web_search tools ARE present, a single
-  // /v1/messages request can span several upstream turns (model calls web_search
-  // → we run Exa → feed result back); those intermediate turns must stay buffered
-  // (their output never reaches the client), so we fall back to the fully buffered
-  // loop for correctness. The common coding path declares no web_search tool, so
-  // it streams. See the OpenCode ephemeral harness memory for why high reasoning
-  // is the intended config, not something to dial down.
-  const nativeTools = nativeServerTools(body.tools);
-  if (body.stream && nativeTools.length === 0) {
-    await streamAnthropicFromTogether(res, body, options);
-    if (options.debug) {
-      const delta = options.costTracker?.requestDelta;
-      const totals = options.costTracker?.totals;
-      if (delta && totals) {
-        debugLog(options, "request cost", {
-          requestCostUsd: Number(delta.costUsd.toFixed(6)),
-          requestInputTokens: delta.promptTokens,
-          requestCachedTokens: delta.cachedTokens,
-          requestOutputTokens: delta.completionTokens,
-          sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
-        });
+  try {
+    // GLM-5.2 can't see images: describe each image/url block with a vision model
+    // and replace it with a text block, so GLM reasons over the description.
+    await resolveImageBlocks(body, options);
+    // When the inbound request is streaming AND there are no native server-side
+    // tools (web_search), stream Together's response directly to Claude Code as
+    // Anthropic SSE — reasoning, text, and tool_use deltas land as they're
+    // generated, so the user sees first tokens (and the live thinking trace) while
+    // GLM is still working, instead of one burst at the very end. For GLM-5.2,
+    // thinking stays on and Claude's requested effort is mapped to Together's
+    // supported high/max levels; for Kimi, we omit the undocumented effort
+    // parameter. When native web_search tools ARE present, a single
+    // /v1/messages request can span several upstream turns (model calls web_search
+    // → we run Exa → feed result back); those intermediate turns must stay buffered
+    // (their output never reaches the client), so we fall back to the fully buffered
+    // loop for correctness. The common coding path declares no web_search tool, so
+    // it streams. See the OpenCode ephemeral harness memory for why high reasoning
+    // is the intended config, not something to dial down.
+    if (body.stream && nativeTools.length === 0) {
+      await streamAnthropicFromTogether(res, body, options);
+      recordProxyTrace(options, traceBase, true, res.statusCode);
+      if (options.debug) {
+        const delta = options.costTracker?.requestDelta;
+        const totals = options.costTracker?.totals;
+        if (delta && totals) {
+          debugLog(options, "request cost", {
+            requestCostUsd: Number(delta.costUsd.toFixed(6)),
+            requestInputTokens: delta.promptTokens,
+            requestCachedTokens: delta.cachedTokens,
+            requestOutputTokens: delta.completionTokens,
+            sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+          });
+        }
       }
+      return;
     }
-    return;
-  }
 
-  const openAiResponse = await callTogetherChatCompletions(body, options);
-  const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
+    const openAiResponse = await callTogetherChatCompletions(body, options);
+    const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
-  const delta = options.costTracker?.requestDelta;
-  const totals = options.costTracker?.totals;
-  if (options.debug && delta && totals) {
-    debugLog(options, "request cost", {
-      requestCostUsd: Number(delta.costUsd.toFixed(6)),
-      requestInputTokens: delta.promptTokens,
-      requestCachedTokens: delta.cachedTokens,
-      requestOutputTokens: delta.completionTokens,
-      sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
-    });
-  }
+    const delta = options.costTracker?.requestDelta;
+    const totals = options.costTracker?.totals;
+    if (options.debug && delta && totals) {
+      debugLog(options, "request cost", {
+        requestCostUsd: Number(delta.costUsd.toFixed(6)),
+        requestInputTokens: delta.promptTokens,
+        requestCachedTokens: delta.cachedTokens,
+        requestOutputTokens: delta.completionTokens,
+        sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+      });
+    }
 
-  if (body.stream) {
-    writeAnthropicStream(res, anthropicMessage);
-  } else {
-    writeJson(res, 200, anthropicMessage);
+    if (body.stream) {
+      writeAnthropicStream(res, anthropicMessage);
+    } else {
+      writeJson(res, 200, anthropicMessage);
+    }
+    recordProxyTrace(options, traceBase, true, res.statusCode);
+  } catch (err) {
+    const status = isTogetherApiError(err) ? err.anthropicStatus : res.statusCode >= 400 ? res.statusCode : 500;
+    recordProxyTrace(options, traceBase, false, status, err instanceof Error ? err.message : String(err));
+    throw err;
   }
+}
+
+function recordProxyTrace(
+  options: ClaudeProxyOptions,
+  base: Omit<ProxyTraceEvent, "durationMs" | "ok" | "status" | "error" | "usage">,
+  ok: boolean,
+  status?: number,
+  error?: string,
+): void {
+  options.recordTrace?.({
+    ...base,
+    durationMs: Date.now() - base.startedAt,
+    ok,
+    ...(status !== undefined ? { status } : {}),
+    ...(error ? { error: redactTraceError(error) } : {}),
+    ...(options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
+  });
 }
 
 /**
@@ -1522,7 +1561,11 @@ function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): v
   if (!options.debug) {
     return;
   }
-  process.stderr.write(`[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`);
+  const line = `[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`;
+  process.stderr.write(line);
+  if (process.env.TOGETHERLINK_DEBUG_LOG) {
+    appendFileSync(process.env.TOGETHERLINK_DEBUG_LOG, line);
+  }
 }
 
 export function requestPath(req: IncomingMessage): string {
@@ -1754,9 +1797,10 @@ function summarizeAnthropicTools(tools: AnthropicTool[] | undefined): Array<Reco
   if (!tools || tools.length === 0) {
     return undefined;
   }
-  return tools.slice(0, 5).map((tool) => ({
+  return tools.map((tool) => ({
     name: tool.name,
     type: tool.type,
+    maxUses: tool.max_uses,
     inputSchemaKeys: objectKeys(tool.input_schema),
     rawKeys: Object.keys(tool),
   }));
