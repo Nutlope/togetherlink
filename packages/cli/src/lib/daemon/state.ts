@@ -162,7 +162,12 @@ class SessionRegistry {
     if (!state) {
       return;
     }
-    state.traces.unshift(trace);
+    const existing = state.traces.findIndex((candidate) => candidate.id === trace.id);
+    if (existing >= 0) {
+      state.traces[existing] = trace;
+    } else {
+      state.traces.unshift(trace);
+    }
     state.traces.length = Math.min(state.traces.length, MAX_TRACES_PER_SESSION);
   }
 

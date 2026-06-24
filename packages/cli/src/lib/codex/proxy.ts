@@ -159,16 +159,34 @@ export async function handleCodexProxyRequest(
   const body = (await readJsonBody(req)) as ResponsesRequest;
   const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
   const traceBase = {
+    id: randomUUID(),
     route: path,
     method: req.method ?? "POST",
     model: body.model ?? options.modelId,
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+    requestPreview: summarizeResponsesRequestContent(body),
     messageCount: Array.isArray(body.input) ? body.input.length : typeof body.input === "string" ? 1 : 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount,
     startedAt: Date.now(),
   };
+  recordProxyTrace(options, traceBase);
+  let traceFinalized = false;
+  const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
+    if (traceFinalized) {
+      return;
+    }
+    traceFinalized = true;
+    recordProxyTrace(options, traceBase, ok, status, error);
+  };
+  const markClientDisconnected = () => finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
+  req.once("aborted", markClientDisconnected);
+  res.once("close", () => {
+    if (!res.writableEnded) {
+      markClientDisconnected();
+    }
+  });
   options.costTracker?.beginRequest();
   debugLog(options, "responses request", {
     model: body.model,
@@ -182,35 +200,78 @@ export async function handleCodexProxyRequest(
   try {
     if (body.stream) {
       await streamResponseFromTogether(res, body, options);
-      recordProxyTrace(options, traceBase, true, res.statusCode);
+      finalizeTrace(true, res.statusCode);
       return;
     }
 
     const chatResponse = await callTogether(body, options, false);
     recordUsage(chatResponse.usage, options);
     writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
-    recordProxyTrace(options, traceBase, true, res.statusCode);
+    finalizeTrace(true, res.statusCode);
   } catch (err) {
-    recordProxyTrace(options, traceBase, false, res.statusCode >= 400 ? res.statusCode : 500, err instanceof Error ? err.message : String(err));
+    finalizeTrace(false, res.statusCode >= 400 ? res.statusCode : 500, err instanceof Error ? err.message : String(err));
     throw err;
   }
 }
 
 function recordProxyTrace(
   options: CodexProxyOptions,
-  base: Omit<ProxyTraceEvent, "durationMs" | "ok" | "status" | "error" | "usage">,
-  ok: boolean,
+  base: Omit<ProxyTraceEvent, "durationMs" | "completedAt" | "ok" | "status" | "error" | "usage">,
+  ok?: boolean,
   status?: number,
   error?: string,
 ): void {
+  const completedAt = ok === undefined ? undefined : Date.now();
   options.recordTrace?.({
     ...base,
-    durationMs: Date.now() - base.startedAt,
-    ok,
+    ...(completedAt !== undefined && ok !== undefined ? { completedAt, durationMs: completedAt - base.startedAt, ok } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(error ? { error: redactTraceError(error) } : {}),
-    ...(options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
+    ...(ok !== undefined && options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
   });
+}
+
+function summarizeResponsesRequestContent(body: ResponsesRequest): string {
+  const parts: string[] = [];
+  if (body.instructions?.trim()) {
+    parts.push(`instructions: ${body.instructions}`);
+  }
+  if (typeof body.input === "string") {
+    parts.push(`input: ${body.input}`);
+  } else if (Array.isArray(body.input)) {
+    for (const item of body.input) {
+      const label = item.role ?? item.type ?? "item";
+      const content = summarizeResponsesContent(item.content);
+      if (content) {
+        parts.push(`${label}: ${content}`);
+      } else if (item.name) {
+        parts.push(`${label}: [tool ${item.name}]`);
+      }
+    }
+  }
+  const toolNames = body.tools?.map((tool) => tool.name ?? tool.type).filter(Boolean);
+  if (toolNames?.length) {
+    parts.push(`tools: ${toolNames.join(", ")}`);
+  }
+  return redactTraceError(parts.join("\n")).slice(0, 2000);
+}
+
+function summarizeResponsesContent(content: string | ResponsesContentPart[] | undefined): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) => {
+      if (typeof part.text === "string") {
+        return part.text;
+      }
+      return part.type ? `[${part.type}]` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
 }
 
 async function callTogether(

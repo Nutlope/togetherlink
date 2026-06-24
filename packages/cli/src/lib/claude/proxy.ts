@@ -263,16 +263,34 @@ export async function handleProxyRequest(
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
   const nativeTools = nativeServerTools(body.tools);
   const traceBase = {
+    id: randomUUID(),
     route: path,
     method: req.method ?? "POST",
     model: body.model ?? options.modelId,
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+    requestPreview: summarizeAnthropicRequestContent(body),
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount: nativeTools.length,
     startedAt: Date.now(),
   };
+  recordProxyTrace(options, traceBase);
+  let traceFinalized = false;
+  const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
+    if (traceFinalized) {
+      return;
+    }
+    traceFinalized = true;
+    recordProxyTrace(options, traceBase, ok, status, error);
+  };
+  const markClientDisconnected = () => finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
+  req.once("aborted", markClientDisconnected);
+  res.once("close", () => {
+    if (!res.writableEnded) {
+      markClientDisconnected();
+    }
+  });
   options.costTracker?.beginRequest();
   debugLog(options, "anthropic request", {
     model: body.model,
@@ -305,7 +323,7 @@ export async function handleProxyRequest(
     // is the intended config, not something to dial down.
     if (body.stream && nativeTools.length === 0) {
       await streamAnthropicFromTogether(res, body, options);
-      recordProxyTrace(options, traceBase, true, res.statusCode);
+      finalizeTrace(true, res.statusCode);
       if (options.debug) {
         const delta = options.costTracker?.requestDelta;
         const totals = options.costTracker?.totals;
@@ -342,29 +360,85 @@ export async function handleProxyRequest(
     } else {
       writeJson(res, 200, anthropicMessage);
     }
-    recordProxyTrace(options, traceBase, true, res.statusCode);
+    finalizeTrace(true, res.statusCode);
   } catch (err) {
     const status = isTogetherApiError(err) ? err.anthropicStatus : res.statusCode >= 400 ? res.statusCode : 500;
-    recordProxyTrace(options, traceBase, false, status, err instanceof Error ? err.message : String(err));
+    finalizeTrace(false, status, err instanceof Error ? err.message : String(err));
     throw err;
   }
 }
 
 function recordProxyTrace(
   options: ClaudeProxyOptions,
-  base: Omit<ProxyTraceEvent, "durationMs" | "ok" | "status" | "error" | "usage">,
-  ok: boolean,
+  base: Omit<ProxyTraceEvent, "durationMs" | "completedAt" | "ok" | "status" | "error" | "usage">,
+  ok?: boolean,
   status?: number,
   error?: string,
 ): void {
+  const completedAt = ok === undefined ? undefined : Date.now();
   options.recordTrace?.({
     ...base,
-    durationMs: Date.now() - base.startedAt,
-    ok,
+    ...(completedAt !== undefined && ok !== undefined ? { completedAt, durationMs: completedAt - base.startedAt, ok } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(error ? { error: redactTraceError(error) } : {}),
-    ...(options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
+    ...(ok !== undefined && options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
   });
+}
+
+function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): string {
+  const parts: string[] = [];
+  if (typeof body.system === "string" && body.system.trim()) {
+    parts.push(`system: ${body.system}`);
+  } else if (Array.isArray(body.system)) {
+    const systemText = body.system
+      .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
+      .filter(Boolean)
+      .join(" ");
+    if (systemText.trim()) {
+      parts.push(`system: ${systemText}`);
+    }
+  }
+  for (const message of body.messages ?? []) {
+    const content = summarizeAnthropicContent(message.content);
+    if (content) {
+      parts.push(`${message.role}: ${content}`);
+    }
+  }
+  const toolNames = body.tools?.map((tool) => tool.name).filter(Boolean);
+  if (toolNames?.length) {
+    parts.push(`tools: ${toolNames.join(", ")}`);
+  }
+  return redactTraceError(parts.join("\n")).slice(0, 2000);
+}
+
+function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | undefined): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((block) => {
+      if (block.type === "text") {
+        return block.text;
+      }
+      if (block.type === "tool_use") {
+        return `[tool_use ${block.name}]`;
+      }
+      if (block.type === "tool_result") {
+        return `[tool_result ${block.tool_use_id}]`;
+      }
+      if (block.type === "image") {
+        return "[image]";
+      }
+      if (block.type === "url") {
+        return `[url ${block.url}]`;
+      }
+      return `[${block.type}]`;
+    })
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**

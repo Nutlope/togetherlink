@@ -1,15 +1,18 @@
 export type ProxyTraceEvent = {
+  id: string;
   route: string;
   method: string;
   model?: string;
   stream?: boolean;
   requestBytes?: number;
+  requestPreview?: string;
   messageCount?: number;
   toolCount?: number;
   nativeToolCount?: number;
   startedAt: number;
-  durationMs: number;
-  ok: boolean;
+  durationMs?: number;
+  completedAt?: number;
+  ok?: boolean;
   status?: number;
   error?: string;
   usage?: {

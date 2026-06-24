@@ -431,10 +431,14 @@ function writeDashboardHtml(res: ServerResponse): void {
     }
     function traceRow(trace) {
       const usage = trace.usage ? fmt.format(trace.usage.promptTokens) + ' in / ' + fmt.format(trace.usage.completionTokens) + ' out / ' + money.format(trace.usage.costUsd) : '-';
-      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + (trace.ok ? '<span class="running">ok</span>' : '<span class="error">error</span>') + '</td><td>' + trace.durationMs + 'ms</td><td>' + esc(trace.model || '-') + '</td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
+      const elapsedMs = trace.durationMs ?? Math.max(0, Date.now() - trace.startedAt);
+      const seconds = elapsedMs / 1000;
+      const status = trace.ok === undefined ? '<span class="chip">pending</span>' : trace.ok ? '<span class="running">ok</span>' : '<span class="error">error</span>';
+      const outputPerSecond = trace.usage && seconds > 0 ? fmt.format(trace.usage.completionTokens / seconds) + '/s' : '-';
+      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + outputPerSecond + '</td><td>' + esc(trace.model || '-') + '</td><td>' + esc(trace.requestPreview || '-') + '</td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
     }
     function sessionCard(session) {
-      const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>latency</th><th>model</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';
+      const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>latency</th><th>tok/sec</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';
       return '<article class="session"><div class="session-head"><div><div class="title"><h2>' + esc(session.agent) + '</h2><span class="chip">' + esc(session.modelLabel) + '</span><span class="' + session.status + '">' + session.status + '</span></div><div class="muted">Started ' + age(session.startedAt) + (session.pid ? ' · pid ' + session.pid : '') + '</div></div><code>' + session.traceCount + ' trace' + (session.traceCount === 1 ? '' : 's') + '</code></div><p class="muted">' + esc(session.costSummary).replaceAll('\\n', '<br>') + '</p>' + traces + '</article>';
     }
     async function load() {
