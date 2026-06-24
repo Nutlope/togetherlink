@@ -13,6 +13,7 @@ import {
   isTogetherApiError,
   extractToken,
 } from "../claude/proxy.js";
+import { handleCodexProxyRequest } from "../codex/proxy.js";
 import { sessions, buildSession, type RegisterSessionRequest, type UsageReportRequest, isProxiedAgent } from "./state.js";
 
 export const DEFAULT_DAEMON_PORT = 7878;
@@ -268,10 +269,10 @@ async function handleDaemonRequest(
     return;
   }
 
-  // Everything below is a proxied-agent-facing request (Claude Anthropic shape)
-  // that must belong to a session. Self-reporting agents (OpenCode) never send
-  // traffic here — they go direct to Together — so a request carrying their
-  // token is a misconfiguration; refuse it clearly.
+  // Everything below is a proxied-agent-facing request that must belong to a
+  // session. Self-reporting agents (OpenCode) never send traffic here — they go
+  // direct to Together — so a request carrying their token is a
+  // misconfiguration; refuse it clearly.
   const token = extractToken(req);
   const session = token !== undefined ? sessions.get(token) : undefined;
   if (!session) {
@@ -288,7 +289,12 @@ async function handleDaemonRequest(
     return;
   }
 
-  // Delegate to the existing proxy request handler with this session's options
+  if (session.agent === "codex") {
+    await handleCodexProxyRequest(req, res, session.options);
+    return;
+  }
+
+  // Delegate to the Claude proxy request handler with this session's options
   // (its authToken + CostTracker + model fields), so every downstream function
   // keeps working unchanged.
   await handleProxyRequest(req, res, session.options);

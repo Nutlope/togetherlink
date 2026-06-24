@@ -3,8 +3,8 @@ import type { Harness } from "./harness-types.js";
 
 const LOADERS: Partial<Record<HarnessId, () => Promise<{ default: Harness }>>> = {
   [HARNESS.CLAUDE]: () => import("./harnesses/claude.js"),
+  [HARNESS.CODEX]: () => import("./harnesses/codex.js"),
   [HARNESS.OPENCODE]: () => import("./harnesses/opencode.js"),
-  // claude/codex land in Phase 2/3 once the local translation proxy exists.
 };
 
 export async function loadHarness(harness: HarnessId): Promise<Harness> {

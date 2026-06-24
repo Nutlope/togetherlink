@@ -1,5 +1,6 @@
 import { CostTracker } from "../claude/cost.js";
 import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
+import type { CodexProxyOptions } from "../codex/proxy.js";
 
 /**
  * Which coding agent a session belongs to. The dashboard groups by this, and
@@ -11,9 +12,8 @@ import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
  *   togetherai` adapter knows Together's URL, and OpenCode handles images
  *   natively). The daemon only holds a `CostTracker` the launcher self-reports
  *   into at exit (via `opencode stats`), so the dashboard can show it.
- * - `codex`: reserved (future). Codex speaks the OpenAI Responses API, which
- *   Together's `/v1` doesn't implement, so it'll need a translation proxy like
- *   Claude's. Not wired yet.
+ * - `codex`: the daemon PROXIES OpenAI Responses-shaped Codex traffic and
+ *   translates it to Together chat completions.
  */
 export type AgentId = "claude" | "opencode" | "codex";
 
@@ -27,10 +27,9 @@ export type AgentId = "claude" | "opencode" | "codex";
  * Agent-neutral core fields (`apiKey`, `modelDefinition`, `costTracker`,
  * `modelLabel`) live on the state directly so both proxied and self-reporting
  * agents share one cost/dashboard path. `options` is the fully-formed
- * `ClaudeProxyOptions` the proxy handler needs — only meaningful for proxied
- * agents; for self-reporting agents it's a best-effort shell (the proxy
- * handler is never called for them, since their traffic never reaches the
- * daemon).
+ * proxy options the handler needs — only meaningful for proxied agents; for
+ * self-reporting agents it's undefined (the proxy handler is never called for
+ * them, since their traffic never reaches the daemon).
  *
  * This registry is the seam the local dashboard reads — keep it a clean, typed
  * singleton.
@@ -50,10 +49,10 @@ export type SessionState = {
   costTracker: CostTracker;
   debug?: boolean;
   /**
-   * Only for proxied agents (claude). The proxy handler is
-   * called with this. Undefined for self-reporting agents.
+   * Only for proxied agents. The matching proxy handler is called with this.
+   * Undefined for self-reporting agents.
    */
-  options?: ClaudeProxyOptions;
+  options?: ClaudeProxyOptions | CodexProxyOptions;
 };
 
 export type SessionPublicView = {
@@ -76,10 +75,10 @@ export type RegisterSessionRequest = {
   apiKey: string;
   modelLabel: string;
   modelDefinition: ModelDefinition;
-  /** Claude-only: the alias/target for the proxy's model menu + routing. */
+  /** Proxied-agent model alias/target for proxy routing. */
   modelId?: string;
   targetModelId?: string;
-  /** Claude-only: included for `ClaudeProxyOptions.modelName`. Defaults to modelLabel. */
+  /** Included for proxy options. Defaults to modelLabel. */
   modelName?: string;
   debug?: boolean;
 };
@@ -159,16 +158,16 @@ function isAlive(pid: number): boolean {
 export const sessions = new SessionRegistry();
 
 /** Agents whose traffic the daemon proxies (vs. self-reporting cost). */
-const PROXIED_AGENTS = new Set<AgentId>(["claude"]);
+const PROXIED_AGENTS = new Set<AgentId>(["claude", "codex"]);
 
 export function isProxiedAgent(agent: AgentId): boolean {
   return PROXIED_AGENTS.has(agent);
 }
 
 /**
- * Build a per-session `SessionState` from a register body. Proxied agents get a
- * fully-formed `ClaudeProxyOptions`; self-reporting agents get a state with
- * `options` undefined (the proxy handler is never called for them).
+ * Build a per-session `SessionState` from a register body. Proxied agents get
+ * fully-formed proxy options; self-reporting agents get `options` undefined
+ * (the proxy handler is never called for them).
  */
 export function buildSession(req: RegisterSessionRequest): SessionState {
   const agent: AgentId = req.agent ?? "claude";

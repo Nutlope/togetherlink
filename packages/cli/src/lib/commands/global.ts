@@ -21,7 +21,8 @@ Usage:
   togetherlink opencode [run] [-- ...]  Launch OpenCode with Together GLM 5.2 (ephemeral)
   topencode [-- ...]                    Alias for: togetherlink opencode
   togetherlink opencode status          Show OpenCode ephemeral defaults
-  togetherlink codex ...                Coming soon (needs a local translation proxy)
+  togetherlink codex [run] [-- ...]     Launch Codex through a local Responses proxy (ephemeral)
+  togetherlink codex -- exec "Say hi"   Run Codex headlessly through Together
   togetherlink daemon status            Show the shared proxy daemon status
   togetherlink daemon stop              Stop the shared proxy daemon
   togetherlink --version                Show the CLI version
