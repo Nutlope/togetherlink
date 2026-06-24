@@ -112,6 +112,13 @@ type TogetherFetchResult =
   | { ok: true; json: OpenAIChatResponse; error?: undefined }
   | { ok: false; error: TogetherApiError; json?: undefined };
 
+type UpstreamTimings = Pick<ProxyTraceEvent, "upstreamStartedAt" | "upstreamHeadersAt" | "firstByteAt">;
+type UpstreamTimingHooks = {
+  onStart?: () => void;
+  onHeaders?: () => void;
+  onFirstByte?: () => void;
+};
+
 // Transient upstream faults worth retrying with backoff. 429 = rate limited;
 // 503/overloaded = server-side temporary capacity. Everything else (401, 400,
 // 402, 404, 5xx other than 503) is non-retryable — retrying a bad key or a
@@ -276,6 +283,22 @@ export async function handleProxyRequest(
     startedAt: Date.now(),
   };
   recordProxyTrace(options, traceBase);
+  const upstreamTimings: Partial<UpstreamTimings> = {};
+  const emitPendingTrace = () => options.recordTrace?.({ ...traceBase, ...upstreamTimings });
+  const timingHooks: UpstreamTimingHooks = {
+    onStart: () => {
+      upstreamTimings.upstreamStartedAt ??= Date.now();
+      emitPendingTrace();
+    },
+    onHeaders: () => {
+      upstreamTimings.upstreamHeadersAt ??= Date.now();
+      emitPendingTrace();
+    },
+    onFirstByte: () => {
+      upstreamTimings.firstByteAt ??= Date.now();
+      emitPendingTrace();
+    },
+  };
   const upstreamAbort = new AbortController();
   let traceFinalized = false;
   const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
@@ -283,7 +306,7 @@ export async function handleProxyRequest(
       return;
     }
     traceFinalized = true;
-    recordProxyTrace(options, traceBase, ok, status, error);
+    recordProxyTrace(options, { ...traceBase, ...upstreamTimings }, ok, status, error);
   };
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -326,7 +349,7 @@ export async function handleProxyRequest(
     // it streams. See the OpenCode ephemeral harness memory for why high reasoning
     // is the intended config, not something to dial down.
     if (body.stream && nativeTools.length === 0) {
-      await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal);
+      await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
       finalizeTrace(true, res.statusCode);
       if (options.debug) {
         const delta = options.costTracker?.requestDelta;
@@ -344,7 +367,7 @@ export async function handleProxyRequest(
       return;
     }
 
-    const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal);
+    const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal, timingHooks);
     const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
     const delta = options.costTracker?.requestDelta;
@@ -484,6 +507,7 @@ async function callTogetherChatCompletions(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<OpenAIChatResponse> {
   const targetModel = resolveTargetModel(body.model, options);
   const nativeTools = nativeServerTools(body.tools);
@@ -523,7 +547,7 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    let response = await fetchTogether(payload, options, signal);
+    let response = await fetchTogether(payload, options, signal, hooks);
     if (!response.ok) {
       const initialError = response.error;
       const retryMaxTokens = maxTokensForContextLengthRetry(initialError, targetModel.definition, maxTokens);
@@ -536,7 +560,7 @@ async function callTogetherChatCompletions(
           originalError: initialError.message,
           turn,
         });
-        response = await fetchTogether(payload, options, signal);
+        response = await fetchTogether(payload, options, signal, hooks);
       }
     }
 
@@ -679,10 +703,12 @@ async function fetchTogether(
   payload: Record<string, unknown>,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<TogetherFetchResult> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let response: Response;
     try {
+      hooks?.onStart?.();
       response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -692,6 +718,7 @@ async function fetchTogether(
         body: JSON.stringify(payload),
         ...(signal ? { signal } : {}),
       });
+      hooks?.onHeaders?.();
     } catch (err) {
       // Network-level failure (DNS, connection reset, timeout). Treat as
       // retryable transient — the request never reached Together, so it's
@@ -1133,6 +1160,7 @@ async function streamAnthropicFromTogether(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<void> {
   const targetModel = resolveTargetModel(body.model, options);
   const messages = toOpenAIMessages(body, targetModel.definition);
@@ -1172,6 +1200,7 @@ async function streamAnthropicFromTogether(
 
   let response: Response;
   try {
+    hooks?.onStart?.();
     response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -1181,6 +1210,7 @@ async function streamAnthropicFromTogether(
       body: JSON.stringify(payload),
       ...(signal ? { signal } : {}),
     });
+    hooks?.onHeaders?.();
   } catch (err) {
     writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
     return;
@@ -1198,6 +1228,7 @@ async function streamAnthropicFromTogether(
         originalError: error.message,
       });
       try {
+        hooks?.onStart?.();
         response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
@@ -1207,6 +1238,7 @@ async function streamAnthropicFromTogether(
           body: JSON.stringify(payload),
           ...(signal ? { signal } : {}),
         });
+        hooks?.onHeaders?.();
       } catch (err) {
         writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
         return;
@@ -1272,6 +1304,7 @@ async function streamAnthropicFromTogether(
       if (done) {
         break;
       }
+      hooks?.onFirstByte?.();
       buffer += decoder.decode(value, { stream: true });
       buffer = consumeSseLines(buffer, (data) => {
         if (!data) {

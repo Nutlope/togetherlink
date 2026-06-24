@@ -105,6 +105,13 @@ type TogetherChatResult =
   | { ok: true; response: Response; error?: undefined }
   | { ok: false; status: number; text: string; error?: undefined };
 
+type UpstreamTimings = Pick<ProxyTraceEvent, "upstreamStartedAt" | "upstreamHeadersAt" | "firstByteAt">;
+type UpstreamTimingHooks = {
+  onStart?: () => void;
+  onHeaders?: () => void;
+  onFirstByte?: () => void;
+};
+
 type StreamOutputState = {
   nextOutputIndex: number;
   reasoningItemId?: string;
@@ -172,6 +179,22 @@ export async function handleCodexProxyRequest(
     startedAt: Date.now(),
   };
   recordProxyTrace(options, traceBase);
+  const upstreamTimings: Partial<UpstreamTimings> = {};
+  const emitPendingTrace = () => options.recordTrace?.({ ...traceBase, ...upstreamTimings });
+  const timingHooks: UpstreamTimingHooks = {
+    onStart: () => {
+      upstreamTimings.upstreamStartedAt ??= Date.now();
+      emitPendingTrace();
+    },
+    onHeaders: () => {
+      upstreamTimings.upstreamHeadersAt ??= Date.now();
+      emitPendingTrace();
+    },
+    onFirstByte: () => {
+      upstreamTimings.firstByteAt ??= Date.now();
+      emitPendingTrace();
+    },
+  };
   const upstreamAbort = new AbortController();
   let traceFinalized = false;
   const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
@@ -179,7 +202,7 @@ export async function handleCodexProxyRequest(
       return;
     }
     traceFinalized = true;
-    recordProxyTrace(options, traceBase, ok, status, error);
+    recordProxyTrace(options, { ...traceBase, ...upstreamTimings }, ok, status, error);
   };
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -203,12 +226,12 @@ export async function handleCodexProxyRequest(
 
   try {
     if (body.stream) {
-      await streamResponseFromTogether(res, body, options, upstreamAbort.signal);
+      await streamResponseFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
       finalizeTrace(true, res.statusCode);
       return;
     }
 
-    const chatResponse = await callTogether(body, options, false, upstreamAbort.signal);
+    const chatResponse = await callTogether(body, options, false, upstreamAbort.signal, timingHooks);
     recordUsage(chatResponse.usage, options);
     writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
     finalizeTrace(true, res.statusCode);
@@ -283,16 +306,22 @@ async function callTogether(
   options: CodexProxyOptions,
   stream: boolean,
   signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<ChatResponse> {
-  const result = await fetchTogetherChat(toChatPayload(body, options, stream), options, signal);
+  const result = await fetchTogetherChat(toChatPayload(body, options, stream), options, signal, hooks);
   if (!result.ok) {
     throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
   }
   return (await result.response.json()) as ChatResponse;
 }
 
-async function fetchTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions, signal?: AbortSignal): Promise<TogetherChatResult> {
-  const first = await postTogetherChat(payload, options, signal);
+async function fetchTogetherChat(
+  payload: Record<string, unknown>,
+  options: CodexProxyOptions,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
+): Promise<TogetherChatResult> {
+  const first = await postTogetherChat(payload, options, signal, hooks);
   if (first.ok) {
     return { ok: true, response: first };
   }
@@ -307,15 +336,21 @@ async function fetchTogetherChat(payload: Record<string, unknown>, options: Code
     maxTokens: retryMaxTokens,
     originalError: text.slice(0, 1000),
   });
-  const retry = await postTogetherChat(retryPayload, options, signal);
+  const retry = await postTogetherChat(retryPayload, options, signal, hooks);
   if (retry.ok) {
     return { ok: true, response: retry };
   }
   return { ok: false, status: retry.status, text: await retry.text() };
 }
 
-async function postTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions, signal?: AbortSignal): Promise<Response> {
-  return await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+async function postTogetherChat(
+  payload: Record<string, unknown>,
+  options: CodexProxyOptions,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
+): Promise<Response> {
+  hooks?.onStart?.();
+  const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
@@ -324,6 +359,8 @@ async function postTogetherChat(payload: Record<string, unknown>, options: Codex
     body: JSON.stringify(payload),
     ...(signal ? { signal } : {}),
   });
+  hooks?.onHeaders?.();
+  return response;
 }
 
 function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, stream: boolean): Record<string, unknown> {
@@ -505,6 +542,7 @@ async function streamResponseFromTogether(
   body: ResponsesRequest,
   options: CodexProxyOptions,
   signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<void> {
   const responseId = `resp_${randomUUID().replaceAll("-", "")}`;
   res.writeHead(200, {
@@ -524,7 +562,7 @@ async function streamResponseFromTogether(
     },
   });
 
-  const upstreamResult = await fetchTogetherChat(toChatPayload(body, options, true), options, signal);
+  const upstreamResult = await fetchTogetherChat(toChatPayload(body, options, true), options, signal, hooks);
   if (!upstreamResult.ok) {
     writeResponsesSse(res, "response.failed", {
       type: "response.failed",
@@ -554,6 +592,7 @@ async function streamResponseFromTogether(
   let usage: ChatResponse["usage"] | undefined;
 
   for await (const chunk of parseSseChunks(upstream.body)) {
+    hooks?.onFirstByte?.();
     if (chunk === "[DONE]") {
       break;
     }

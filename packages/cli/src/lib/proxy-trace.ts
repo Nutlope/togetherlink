@@ -10,6 +10,9 @@ export type ProxyTraceEvent = {
   toolCount?: number;
   nativeToolCount?: number;
   startedAt: number;
+  upstreamStartedAt?: number;
+  upstreamHeadersAt?: number;
+  firstByteAt?: number;
   durationMs?: number;
   completedAt?: number;
   ok?: boolean;

@@ -435,11 +435,17 @@ function writeDashboardHtml(res: ServerResponse): void {
       const elapsedMs = trace.durationMs ?? Math.max(0, Date.now() - trace.startedAt);
       const seconds = elapsedMs / 1000;
       const status = trace.ok === undefined ? '<span class="chip">pending</span>' : trace.ok ? '<span class="running">ok</span>' : '<span class="error">error</span>';
-      const outputPerSecond = trace.usage && seconds > 0 ? fmt.format(trace.usage.completionTokens / seconds) + '/s' : '-';
-      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + outputPerSecond + '</td><td>' + esc(trace.model || '-') + '</td><td><div class="request-preview" title="' + esc(trace.requestPreview || '') + '">' + esc(trace.requestPreview || '-') + '</div></td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
+      const ttftMs = trace.firstByteAt ? trace.firstByteAt - trace.startedAt : trace.upstreamHeadersAt ? trace.upstreamHeadersAt - trace.startedAt : undefined;
+      const decodeMs = trace.firstByteAt && (trace.completedAt || trace.durationMs) ? Math.max(1, (trace.completedAt ?? (trace.startedAt + trace.durationMs)) - trace.firstByteAt) : undefined;
+      const outputPerSecond = trace.usage && decodeMs ? fmt.format(trace.usage.completionTokens / (decodeMs / 1000)) + '/s' : '-';
+      const cachedPercent = trace.usage && trace.usage.promptTokens > 0 ? Math.round((trace.usage.cachedTokens / trace.usage.promptTokens) * 100) + '%' : '-';
+      const upstreamWait = trace.upstreamHeadersAt && trace.upstreamStartedAt ? ((trace.upstreamHeadersAt - trace.upstreamStartedAt) / 1000).toFixed(1) + 's' : '-';
+      const firstByte = ttftMs !== undefined ? (ttftMs / 1000).toFixed(1) + 's' : '-';
+      const requestSize = trace.requestBytes ? Math.round(trace.requestBytes / 1024) + 'KB' : '-';
+      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + firstByte + '</td><td>' + upstreamWait + '</td><td>' + outputPerSecond + '</td><td>' + cachedPercent + '</td><td>' + requestSize + '</td><td>' + esc(trace.model || '-') + '</td><td><div class="request-preview" title="' + esc(trace.requestPreview || '') + '">' + esc(trace.requestPreview || '-') + '</div></td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
     }
     function sessionCard(session) {
-      const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>latency</th><th>tok/sec</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';
+      const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>total</th><th>TTFT</th><th>upstream</th><th>out/s</th><th>cache</th><th>size</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';
       return '<article class="session"><div class="session-head"><div><div class="title"><h2>' + esc(session.agent) + '</h2><span class="chip">' + esc(session.modelLabel) + '</span><span class="' + session.status + '">' + session.status + '</span></div><div class="muted">Started ' + age(session.startedAt) + (session.pid ? ' · pid ' + session.pid : '') + '</div></div><code>' + session.traceCount + ' trace' + (session.traceCount === 1 ? '' : 's') + '</code></div><p class="muted">' + esc(session.costSummary).replaceAll('\\n', '<br>') + '</p>' + traces + '</article>';
     }
     async function load() {
