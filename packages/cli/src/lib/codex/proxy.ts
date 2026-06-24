@@ -112,6 +112,7 @@ type UpstreamTimingHooks = {
   onHeaders?: () => void;
   onFirstByte?: () => void;
 };
+type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
 
 type StreamOutputState = {
   nextOutputIndex: number;
@@ -231,8 +232,8 @@ export async function handleCodexProxyRequest(
 
   try {
     if (body.stream) {
-      await streamResponseFromTogether(res, body, options, translatedPayload, upstreamAbort.signal, timingHooks);
-      finalizeTrace(true, res.statusCode);
+      const result = await streamResponseFromTogether(res, body, options, translatedPayload, upstreamAbort.signal, timingHooks);
+      finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
       return;
     }
 
@@ -582,7 +583,7 @@ async function streamResponseFromTogether(
   payload: Record<string, unknown>,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
-): Promise<void> {
+): Promise<StreamProxyResult> {
   const responseId = `resp_${randomUUID().replaceAll("-", "")}`;
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -603,23 +604,25 @@ async function streamResponseFromTogether(
 
   const upstreamResult = await fetchTogetherChat(payload, options, signal, hooks);
   if (!upstreamResult.ok) {
+    const message = `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}`;
     writeResponsesSse(res, "response.failed", {
       type: "response.failed",
       response: { id: responseId, status: "failed" },
-      error: { message: `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}` },
+      error: { message },
     });
     res.end();
-    return;
+    return { ok: false, status: upstreamResult.status, error: message };
   }
   const upstream = upstreamResult.response;
   if (!upstream.body) {
+    const message = "Together returned no stream body.";
     writeResponsesSse(res, "response.failed", {
       type: "response.failed",
       response: { id: responseId, status: "failed" },
-      error: { message: "Together returned no stream body." },
+      error: { message },
     });
     res.end();
-    return;
+    return { ok: false, status: 500, error: message };
   }
 
   const outputState: StreamOutputState = {
@@ -761,6 +764,7 @@ async function streamResponseFromTogether(
     },
   });
   res.end();
+  return { ok: true, status: res.statusCode };
 }
 
 function openReasoningOutputItem(res: ServerResponse, state: StreamOutputState): void {

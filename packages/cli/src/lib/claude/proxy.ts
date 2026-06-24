@@ -122,6 +122,7 @@ type UpstreamTimingHooks = {
   onHeaders?: () => void;
   onFirstByte?: () => void;
 };
+type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
 
 // Transient upstream faults worth retrying with backoff. 429 = rate limited;
 // 503/overloaded = server-side temporary capacity. Everything else (401, 400,
@@ -344,8 +345,8 @@ export async function handleProxyRequest(
     // and replace it with a text block, so GLM reasons over the description.
     await resolveImageBlocks(body, options);
     if (body.stream) {
-      await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
-      finalizeTrace(true, res.statusCode);
+      const result = await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
+      finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
       if (options.debug) {
         const delta = options.costTracker?.requestDelta;
         const totals = options.costTracker?.totals;
@@ -1211,7 +1212,7 @@ async function streamAnthropicFromTogether(
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
-): Promise<void> {
+): Promise<StreamProxyResult> {
   const targetModel = resolveTargetModel(body.model, options);
   const messages = toOpenAIMessages(body, targetModel.definition);
   const tools = body.tools?.map((tool) => ({
@@ -1262,8 +1263,9 @@ async function streamAnthropicFromTogether(
     });
     hooks?.onHeaders?.();
   } catch (err) {
-    writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
-    return;
+    const message = err instanceof Error ? err.message : String(err);
+    writeAnthropicError(res, 503, "overloaded_error", message);
+    return { ok: false, status: 503, error: message };
   }
 
   if (!response.ok) {
@@ -1290,8 +1292,9 @@ async function streamAnthropicFromTogether(
         });
         hooks?.onHeaders?.();
       } catch (err) {
-        writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
-        return;
+        const message = err instanceof Error ? err.message : String(err);
+        writeAnthropicError(res, 503, "overloaded_error", message);
+        return { ok: false, status: 503, error: message };
       }
       if (!response.ok) {
         error = await mapTogetherError(response);
@@ -1305,12 +1308,13 @@ async function streamAnthropicFromTogether(
         body: error.message.slice(0, 1000),
       });
       writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
-      return;
+      return { ok: false, status: error.anthropicStatus, error: error.message };
     }
   }
   if (!response.body) {
-    writeAnthropicError(res, 500, "api_error", "Together returned no stream body.");
-    return;
+    const message = "Together returned no stream body.";
+    writeAnthropicError(res, 500, "api_error", message);
+    return { ok: false, status: 500, error: message };
   }
 
   res.writeHead(200, {
@@ -1415,6 +1419,7 @@ async function streamAnthropicFromTogether(
   });
   writeSse(res, "message_stop", { type: "message_stop" });
   res.end();
+  return { ok: true, status: res.statusCode };
 }
 
 /**
