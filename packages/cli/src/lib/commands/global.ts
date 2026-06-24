@@ -9,7 +9,7 @@ import { UPDATE_ORIGIN } from "../autoupdate.js";
 import { VERSION } from "../version.js";
 
 export function printHelp() {
-  console.log(`togetherlink v${VERSION} — use Together AI models in OpenCode & Claude Code
+  console.log(`togetherlink v${VERSION} — use Together AI models in OpenCode, Claude Code & Codex
 
 Usage:
   togetherlink configure                Detect installed tools and set your Together API key
@@ -22,6 +22,7 @@ Usage:
   topencode [-- ...]                    Alias for: togetherlink opencode
   togetherlink opencode status          Show OpenCode ephemeral defaults
   togetherlink codex [run] [-- ...]     Launch Codex through a local Responses proxy (ephemeral)
+  tcodex [-- ...]                       Alias for: togetherlink codex
   togetherlink codex -- exec "Say hi"   Run Codex headlessly through Together
   togetherlink daemon status            Show the shared proxy daemon status
   togetherlink daemon stop              Stop the shared proxy daemon

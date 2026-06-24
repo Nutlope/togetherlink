@@ -4,7 +4,7 @@ Use Together AI models from local coding-agent CLIs.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, and `topencode` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, and `tcodex` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | sh
@@ -15,6 +15,7 @@ Then run your tool through Together models:
 ```bash
 topencode            # OpenCode with Together GLM 5.2 (officially supported)
 tclaude              # Claude Code through a local Together proxy
+tcodex               # Codex through a local Responses proxy
 ```
 
 On first launch, togetherlink asks once for your Together API key (press Enter to skip — the key is optional and can be added later with `togetherlink configure` or `TOGETHER_API_KEY`). The binary keeps itself up to date automatically from `togetherlink.vercel.app`.
@@ -47,6 +48,7 @@ Run the built CLI directly:
 node packages/cli/dist/bin/togetherlink.js help
 node packages/cli/dist/bin/togetherlink.js opencode status --json
 node packages/cli/dist/bin/togetherlink.js claude status --json
+node packages/cli/dist/bin/togetherlink.js codex status --json
 ```
 
 Run through the workspace bin, which is closest to how users will invoke it:
@@ -55,6 +57,7 @@ Run through the workspace bin, which is closest to how users will invoke it:
 pnpm -F @togetherlink/cli exec togetherlink help
 pnpm -F @togetherlink/cli exec togetherlink opencode status --json
 pnpm -F @togetherlink/cli exec togetherlink claude status --json
+pnpm -F @togetherlink/cli exec togetherlink codex status --json
 ```
 
 Typecheck/test:
@@ -181,4 +184,29 @@ Check the ephemeral defaults without launching Claude:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink claude status --json
+```
+
+## Testing Codex
+
+Codex is ephemeral only. `togetherlink` launches the terminal `codex` CLI with a local Responses-compatible proxy that translates Codex traffic to Together chat completions.
+
+Launch Codex through Together:
+
+```bash
+export TOGETHER_API_KEY="..."
+
+pnpm -F @togetherlink/cli exec togetherlink codex
+```
+
+Run Codex headlessly through Together:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink codex -- exec "Say hi"
+tcodex -- exec "Say hi"
+```
+
+Check the ephemeral defaults without launching Codex:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink codex status --json
 ```

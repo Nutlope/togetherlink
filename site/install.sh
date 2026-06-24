@@ -6,7 +6,7 @@
 # Installs the togetherlink CLI as a Bun-target JS bundle at
 # ~/.togetherlink/bin/togetherlink.js, with a `togetherlink` wrapper script on
 # PATH that runs it with `bun`. Installs Bun for the user if `bun` isn't on
-# PATH. Also installs `tclaude` and `topencode` convenience wrappers.
+# PATH. Also installs `tclaude`, `topencode`, and `tcodex` convenience wrappers.
 #
 # After install, the CLI prompts once for a Together API key on first use
 # (Enter skips — the key is optional). The CLI self-updates in the background.
@@ -65,7 +65,7 @@ exec bun "$BIN_DIR/togetherlink.js" "\$@"
 EOF
 chmod +x "$BIN_DIR/togetherlink"
 
-# Short aliases: tclaude / topencode
+# Short aliases: tclaude / topencode / tcodex
 cat > "$BIN_DIR/tclaude" <<EOF
 #!/usr/bin/env sh
 exec bun "$BIN_DIR/togetherlink.js" claude "\$@"
@@ -78,7 +78,13 @@ exec bun "$BIN_DIR/togetherlink.js" opencode "\$@"
 EOF
 chmod +x "$BIN_DIR/topencode"
 
-ok "Wrappers installed: togetherlink, tclaude, topencode → $BIN_DIR"
+cat > "$BIN_DIR/tcodex" <<EOF
+#!/usr/bin/env sh
+exec bun "$BIN_DIR/togetherlink.js" codex "\$@"
+EOF
+chmod +x "$BIN_DIR/tcodex"
+
+ok "Wrappers installed: togetherlink, tclaude, topencode, tcodex → $BIN_DIR"
 
 # --- 4. Link into the current PATH when possible -----------------------------
 find_writable_path_dir() {
@@ -133,6 +139,7 @@ if LINK_DIR="$(find_writable_path_dir)"; then
   install_link togetherlink "$BIN_DIR/togetherlink"
   install_link tclaude "$BIN_DIR/tclaude"
   install_link topencode "$BIN_DIR/topencode"
+  install_link tcodex "$BIN_DIR/tcodex"
   if [ "$links_changed" -gt 0 ]; then
     ok "Linked $links_changed command(s) into current PATH → $LINK_DIR"
   fi

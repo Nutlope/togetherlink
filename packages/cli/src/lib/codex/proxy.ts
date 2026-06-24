@@ -99,6 +99,10 @@ type PendingToolCall = {
   arguments: string;
 };
 
+type TogetherChatResult =
+  | { ok: true; response: Response; error?: undefined }
+  | { ok: false; status: number; text: string; error?: undefined };
+
 type StreamOutputState = {
   nextOutputIndex: number;
   reasoningItemId?: string;
@@ -213,18 +217,45 @@ async function callTogether(
   options: CodexProxyOptions,
   stream: boolean,
 ): Promise<ChatResponse> {
-  const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+  const result = await fetchTogetherChat(toChatPayload(body, options, stream), options);
+  if (!result.ok) {
+    throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
+  }
+  return (await result.response.json()) as ChatResponse;
+}
+
+async function fetchTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions): Promise<TogetherChatResult> {
+  const first = await postTogetherChat(payload, options);
+  if (first.ok) {
+    return { ok: true, response: first };
+  }
+  const text = await first.text();
+  const retryMaxTokens = maxTokensForContextLengthRetry(text, options, payload.max_tokens);
+  if (retryMaxTokens === undefined) {
+    return { ok: false, status: first.status, text };
+  }
+  const retryPayload: Record<string, unknown> = { ...payload, max_tokens: retryMaxTokens };
+  debugLog(options, "retrying together request with reduced max_tokens", {
+    model: retryPayload.model,
+    maxTokens: retryMaxTokens,
+    originalError: text.slice(0, 1000),
+  });
+  const retry = await postTogetherChat(retryPayload, options);
+  if (retry.ok) {
+    return { ok: true, response: retry };
+  }
+  return { ok: false, status: retry.status, text: await retry.text() };
+}
+
+async function postTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions): Promise<Response> {
+  return await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(toChatPayload(body, options, stream)),
+    body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    await writeTogetherErrorAsThrow(response);
-  }
-  return (await response.json()) as ChatResponse;
 }
 
 function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, stream: boolean): Record<string, unknown> {
@@ -424,20 +455,22 @@ async function streamResponseFromTogether(
     },
   });
 
-  const upstream = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${options.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(toChatPayload(body, options, true)),
-  });
-  if (!upstream.ok || !upstream.body) {
-    const errorText = await upstream.text().catch(() => "");
+  const upstreamResult = await fetchTogetherChat(toChatPayload(body, options, true), options);
+  if (!upstreamResult.ok) {
     writeResponsesSse(res, "response.failed", {
       type: "response.failed",
       response: { id: responseId, status: "failed" },
-      error: { message: `Together API returned ${upstream.status}: ${errorText.slice(0, 1000)}` },
+      error: { message: `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}` },
+    });
+    res.end();
+    return;
+  }
+  const upstream = upstreamResult.response;
+  if (!upstream.body) {
+    writeResponsesSse(res, "response.failed", {
+      type: "response.failed",
+      response: { id: responseId, status: "failed" },
+      error: { message: "Together returned no stream body." },
     });
     res.end();
     return;
@@ -703,9 +736,41 @@ function recordUsage(usage: ChatResponse["usage"], options: CodexProxyOptions): 
   );
 }
 
-async function writeTogetherErrorAsThrow(response: Response): Promise<never> {
-  const text = await response.text();
-  throw new Error(`Together API returned ${response.status}: ${text.slice(0, 1000)}`);
+function maxTokensForContextLengthRetry(
+  message: string,
+  options: CodexProxyOptions,
+  currentMaxTokens: unknown,
+): number | undefined {
+  const inputTokens = parseTogetherContextLengthInputTokens(message);
+  if (inputTokens === undefined) {
+    return undefined;
+  }
+  const availableOutputTokens = Math.min(options.modelDefinition.limit.context - inputTokens, options.modelDefinition.limit.output);
+  if (availableOutputTokens < 1) {
+    return undefined;
+  }
+  const retryMaxTokens = Math.floor(availableOutputTokens);
+  if (typeof currentMaxTokens === "number" && retryMaxTokens >= currentMaxTokens) {
+    return undefined;
+  }
+  return retryMaxTokens;
+}
+
+function parseTogetherContextLengthInputTokens(message: string): number | undefined {
+  const parentheticalMatch = message.match(/maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is);
+  if (parentheticalMatch) {
+    return parseTokenCount(parentheticalMatch[1]);
+  }
+  const resolvedInputMatch = message.match(/request resolved to\s+([\d,_]+)\s+input tokens\b/is);
+  return parseTokenCount(resolvedInputMatch?.[1]);
+}
+
+function parseTokenCount(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value.replaceAll(/[,_]/g, ""), 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function writeOpenAIError(res: ServerResponse, status: number, type: string, message: string): void {
