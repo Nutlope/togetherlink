@@ -41,6 +41,11 @@ type AnthropicMessagesRequest = {
   reasoning_effort?: unknown;
 };
 
+type AnthropicCountTokensRequest = Pick<
+  AnthropicMessagesRequest,
+  "model" | "system" | "messages" | "tools" | "tool_choice"
+>;
+
 type AnthropicTool = {
   name?: string;
   description?: string;
@@ -254,16 +259,37 @@ export async function handleProxyRequest(
     // context indicator shows the wrong "% used". Advertise the real limits so
     // compaction triggers at the right point.
     writeJson(res, 200, {
-      data: CLAUDE_SUPPORTED_MODELS.map((model) => ({
-        id: model.alias,
-        type: "model",
-        object: "model",
-        display_name: `Together ${model.definition.name}`,
-        max_input_tokens: model.definition.limit.context,
-        max_tokens: model.definition.limit.output,
-        created_at: "2026-06-16T00:00:00Z",
-      })),
+      data: CLAUDE_SUPPORTED_MODELS.map(claudeModelResponse),
     });
+    return;
+  }
+
+  if (req.method === "GET" && path.startsWith("/v1/models/")) {
+    const modelId = decodeURIComponent(path.slice("/v1/models/".length));
+    const model = findClaudeModel(modelId, options);
+    if (!model) {
+      writeAnthropicError(res, 404, "not_found_error", `Unknown model "${modelId}".`);
+      return;
+    }
+    writeJson(res, 200, claudeModelResponse(model));
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/messages/count_tokens") {
+    const body = (await readJsonBody(req)) as Partial<AnthropicCountTokensRequest>;
+    if (!body || typeof body !== "object") {
+      writeAnthropicError(res, 400, "invalid_request_error", "Request body must be an object.");
+      return;
+    }
+    if (!body.model) {
+      writeAnthropicError(res, 400, "invalid_request_error", "model is required.");
+      return;
+    }
+    if (!Array.isArray(body.messages)) {
+      writeAnthropicError(res, 400, "invalid_request_error", "messages must be an array.");
+      return;
+    }
+    writeJson(res, 200, countTokensResponse(body as AnthropicCountTokensRequest));
     return;
   }
 
@@ -700,6 +726,41 @@ function resolveTargetModel(requestedModel: string | undefined, options: ClaudeP
     (model) => model.alias === requestedModel || model.definition.id === requestedModel,
   );
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
+}
+
+function findClaudeModel(modelId: string, options: ClaudeProxyOptions): ResolvedClaudeModel | undefined {
+  const supported = CLAUDE_SUPPORTED_MODELS.find(
+    (model) => model.alias === modelId || model.definition.id === modelId,
+  );
+  if (supported) {
+    return supported;
+  }
+  if (modelId === options.modelId || modelId === options.targetModelId) {
+    return { alias: options.modelId, definition: options.modelDefinition };
+  }
+  return undefined;
+}
+
+function claudeModelResponse(model: ResolvedClaudeModel): Record<string, unknown> {
+  return {
+    id: model.alias,
+    type: "model",
+    object: "model",
+    display_name: `Together ${model.definition.name}`,
+    max_input_tokens: model.definition.limit.context,
+    max_tokens: model.definition.limit.output,
+    created_at: "2026-06-16T00:00:00Z",
+  };
+}
+
+export function countTokensResponse(body: AnthropicCountTokensRequest): { input_tokens: number } {
+  const text = stableStringify({
+    system: body.system,
+    messages: body.messages,
+    tools: body.tools,
+    tool_choice: body.tool_choice,
+  });
+  return { input_tokens: Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)) };
 }
 
 type TogetherReasoningEffort = "max";
