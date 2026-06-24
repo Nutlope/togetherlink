@@ -396,6 +396,7 @@ function writeDashboardHtml(res: ServerResponse): void {
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { border-top: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    .request-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; max-height: 4.5em; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; padding: 28px; text-align: center; color: var(--muted); }
     @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { align-items: start; flex-direction: column; } }
@@ -435,7 +436,7 @@ function writeDashboardHtml(res: ServerResponse): void {
       const seconds = elapsedMs / 1000;
       const status = trace.ok === undefined ? '<span class="chip">pending</span>' : trace.ok ? '<span class="running">ok</span>' : '<span class="error">error</span>';
       const outputPerSecond = trace.usage && seconds > 0 ? fmt.format(trace.usage.completionTokens / seconds) + '/s' : '-';
-      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + outputPerSecond + '</td><td>' + esc(trace.model || '-') + '</td><td>' + esc(trace.requestPreview || '-') + '</td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
+      return '<tr><td><code>' + new Date(trace.startedAt).toLocaleTimeString() + '</code></td><td>' + status + '</td><td>' + seconds.toFixed(1) + 's</td><td>' + outputPerSecond + '</td><td>' + esc(trace.model || '-') + '</td><td><div class="request-preview" title="' + esc(trace.requestPreview || '') + '">' + esc(trace.requestPreview || '-') + '</div></td><td>' + usage + '</td><td>' + esc(trace.error || '-') + '</td></tr>';
     }
     function sessionCard(session) {
       const traces = session.traces.length ? '<table><thead><tr><th>time</th><th>status</th><th>latency</th><th>tok/sec</th><th>model</th><th>request</th><th>usage</th><th>error</th></tr></thead><tbody>' + session.traces.map(traceRow).join('') + '</tbody></table>' : '<div class="muted">No proxied requests recorded yet.</div>';

@@ -172,6 +172,7 @@ export async function handleCodexProxyRequest(
     startedAt: Date.now(),
   };
   recordProxyTrace(options, traceBase);
+  const upstreamAbort = new AbortController();
   let traceFinalized = false;
   const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
     if (traceFinalized) {
@@ -180,7 +181,10 @@ export async function handleCodexProxyRequest(
     traceFinalized = true;
     recordProxyTrace(options, traceBase, ok, status, error);
   };
-  const markClientDisconnected = () => finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
+  const markClientDisconnected = () => {
+    upstreamAbort.abort();
+    finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
+  };
   req.once("aborted", markClientDisconnected);
   res.once("close", () => {
     if (!res.writableEnded) {
@@ -199,12 +203,12 @@ export async function handleCodexProxyRequest(
 
   try {
     if (body.stream) {
-      await streamResponseFromTogether(res, body, options);
+      await streamResponseFromTogether(res, body, options, upstreamAbort.signal);
       finalizeTrace(true, res.statusCode);
       return;
     }
 
-    const chatResponse = await callTogether(body, options, false);
+    const chatResponse = await callTogether(body, options, false, upstreamAbort.signal);
     recordUsage(chatResponse.usage, options);
     writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
     finalizeTrace(true, res.statusCode);
@@ -278,16 +282,17 @@ async function callTogether(
   body: ResponsesRequest,
   options: CodexProxyOptions,
   stream: boolean,
+  signal?: AbortSignal,
 ): Promise<ChatResponse> {
-  const result = await fetchTogetherChat(toChatPayload(body, options, stream), options);
+  const result = await fetchTogetherChat(toChatPayload(body, options, stream), options, signal);
   if (!result.ok) {
     throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
   }
   return (await result.response.json()) as ChatResponse;
 }
 
-async function fetchTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions): Promise<TogetherChatResult> {
-  const first = await postTogetherChat(payload, options);
+async function fetchTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions, signal?: AbortSignal): Promise<TogetherChatResult> {
+  const first = await postTogetherChat(payload, options, signal);
   if (first.ok) {
     return { ok: true, response: first };
   }
@@ -302,14 +307,14 @@ async function fetchTogetherChat(payload: Record<string, unknown>, options: Code
     maxTokens: retryMaxTokens,
     originalError: text.slice(0, 1000),
   });
-  const retry = await postTogetherChat(retryPayload, options);
+  const retry = await postTogetherChat(retryPayload, options, signal);
   if (retry.ok) {
     return { ok: true, response: retry };
   }
   return { ok: false, status: retry.status, text: await retry.text() };
 }
 
-async function postTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions): Promise<Response> {
+async function postTogetherChat(payload: Record<string, unknown>, options: CodexProxyOptions, signal?: AbortSignal): Promise<Response> {
   return await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -317,6 +322,7 @@ async function postTogetherChat(payload: Record<string, unknown>, options: Codex
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -498,6 +504,7 @@ async function streamResponseFromTogether(
   res: ServerResponse,
   body: ResponsesRequest,
   options: CodexProxyOptions,
+  signal?: AbortSignal,
 ): Promise<void> {
   const responseId = `resp_${randomUUID().replaceAll("-", "")}`;
   res.writeHead(200, {
@@ -517,7 +524,7 @@ async function streamResponseFromTogether(
     },
   });
 
-  const upstreamResult = await fetchTogetherChat(toChatPayload(body, options, true), options);
+  const upstreamResult = await fetchTogetherChat(toChatPayload(body, options, true), options, signal);
   if (!upstreamResult.ok) {
     writeResponsesSse(res, "response.failed", {
       type: "response.failed",
