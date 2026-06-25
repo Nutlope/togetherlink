@@ -118,6 +118,12 @@ async function main() {
     return;
   }
 
+  if (command === "codex" && verb === "benchmark") {
+    const { runCodexBenchmark } = await import("../lib/codex/benchmark.js");
+    await runCodexBenchmark(flags);
+    return;
+  }
+
   // First-run key setup only matters for the harness-launching commands.
   if ((command === "claude" || command === "codex" || command === "opencode" || command === "pi") && verb !== "status") {
     await maybePromptApiKey();

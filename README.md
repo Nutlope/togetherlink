@@ -208,10 +208,22 @@ pnpm -F @togetherlink/cli exec togetherlink codex -- exec "Say hi"
 tcodex -- exec "Say hi"
 ```
 
+Compare direct Codex/OpenAI elapsed time with togetherlink Codex/Together:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink codex benchmark
+```
+
 Check the ephemeral defaults without launching Codex:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink codex status --json
+```
+
+Inspect recent Codex proxy speed traces:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink daemon profile
 ```
 
 ## Testing Pi Code

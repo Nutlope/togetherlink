@@ -20,7 +20,9 @@ type ResponsesInputItem = {
   content?: string | ResponsesContentPart[];
   call_id?: string;
   name?: string;
+  namespace?: string;
   arguments?: string;
+  input?: string;
   output?: unknown;
 };
 
@@ -30,6 +32,8 @@ type ResponsesTool = {
   description?: string;
   parameters?: unknown;
   strict?: boolean;
+  format?: { type?: string; syntax?: string; definition?: string };
+  tools?: ResponsesTool[];
 };
 
 type ResponsesRequest = {
@@ -47,6 +51,7 @@ type ResponsesRequest = {
 type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | null;
+  reasoning_content?: string;
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
 };
@@ -100,6 +105,30 @@ type PendingToolCall = {
   id: string;
   name: string;
   arguments: string;
+};
+
+type CodexToolMapping =
+  | { kind: "function"; sourceName: string; modelName: string; namespace?: string }
+  | { kind: "custom"; sourceName: string; modelName: string }
+  | { kind: "namespace"; sourceName: string; modelName: string; namespace: string }
+  | { kind: "web_search"; sourceName: string; modelName: string; definition: ResponsesTool };
+
+type CodexToolTranslation = {
+  tools: Array<{ type: "function"; function: { name: string; description: string; parameters: unknown } }>;
+  mappings: Map<string, CodexToolMapping>;
+  nativeTools: CodexToolMapping[];
+};
+
+type ExaSearchResult = {
+  title?: string;
+  url?: string;
+  text?: string;
+  publishedDate?: string;
+};
+
+type ExaSearchResponse = {
+  autopromptString?: string;
+  results?: ExaSearchResult[];
 };
 
 type TogetherChatResult =
@@ -167,7 +196,8 @@ export async function handleCodexProxyRequest(
 
   const body = (await readJsonBody(req)) as ResponsesRequest;
   const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
-  const translatedPayload = toChatPayload(body, options, Boolean(body.stream));
+  const toolTranslation = translateCodexTools(body.tools);
+  const translatedPayload = toChatPayload(body, options, Boolean(body.stream), toolTranslation);
   const tracePayload = tracePayloadForCodexPayload(translatedPayload);
   const traceBase = {
     id: randomUUID(),
@@ -232,14 +262,28 @@ export async function handleCodexProxyRequest(
 
   try {
     if (body.stream) {
-      const result = await streamResponseFromTogether(res, body, options, translatedPayload, upstreamAbort.signal, timingHooks);
+      const result = await streamResponseFromTogether(
+        res,
+        body,
+        options,
+        translatedPayload,
+        toolTranslation,
+        upstreamAbort.signal,
+        timingHooks,
+      );
       finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
       return;
     }
 
-    const chatResponse = await callTogether(translatedPayload, options, upstreamAbort.signal, timingHooks);
+    const chatResponse = await callTogetherWithNativeTools(
+      translatedPayload,
+      toolTranslation,
+      options,
+      upstreamAbort.signal,
+      timingHooks,
+    );
     recordUsage(chatResponse.usage, options);
-    writeJson(res, 200, toResponsesResponse(chatResponse, body, options));
+    writeJson(res, 200, toResponsesResponse(chatResponse, body, options, toolTranslation));
     finalizeTrace(true, res.statusCode);
   } catch (err) {
     finalizeTrace(false, res.statusCode >= 400 ? res.statusCode : 500, err instanceof Error ? err.message : String(err));
@@ -320,6 +364,78 @@ async function callTogether(
   return (await result.response.json()) as ChatResponse;
 }
 
+async function callTogetherWithNativeTools(
+  payload: Record<string, unknown>,
+  toolTranslation: CodexToolTranslation,
+  options: CodexProxyOptions,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
+): Promise<ChatResponse> {
+  if (toolTranslation.nativeTools.length === 0) {
+    return callTogether(payload, options, signal, hooks);
+  }
+
+  const messages = Array.isArray(payload.messages) ? ([...(payload.messages as ChatMessage[])] as ChatMessage[]) : [];
+  const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
+  const nativeToolUses = new Map<string, number>();
+
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    const json = await callTogether({ ...payload, messages }, options, signal, hooks);
+    const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
+    const nativeToolCalls = toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function?.name ?? ""));
+    if (nativeToolCalls.length === 0) {
+      return json;
+    }
+
+    const reasoning = json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
+    messages.push({
+      role: "assistant",
+      content: json.choices?.[0]?.message?.content ?? null,
+      tool_calls: toolCalls.map((toolCall) => ({
+        id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: toolCall.function?.name ?? "tool",
+          arguments: toolCall.function?.arguments ?? "{}",
+        },
+      })),
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
+    });
+
+    for (const toolCall of nativeToolCalls) {
+      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+      const name = toolCall.function?.name ?? "web_search";
+      const nativeTool = toolTranslation.mappings.get(name);
+      const input = parseJsonOrEmpty(toolCall.function?.arguments);
+      const priorUses = nativeToolUses.get(name) ?? 0;
+      const maxUses = nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
+      let result: string;
+      if (priorUses >= maxUses) {
+        result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
+      } else if (nativeTool?.kind === "web_search") {
+        nativeToolUses.set(name, priorUses + 1);
+        result = await runExaSearch(input, nativeTool.definition, options);
+      } else {
+        result = "Unsupported native server tool.";
+      }
+      messages.push({ role: "tool", tool_call_id: id, content: result });
+    }
+  }
+
+  return {
+    id: `chatcmpl_${randomUUID().replaceAll("-", "")}`,
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          content:
+            "I could not complete native web search because the model kept requesting additional search tool calls.",
+        },
+      },
+    ],
+  };
+}
+
 async function fetchTogetherChat(
   payload: Record<string, unknown>,
   options: CodexProxyOptions,
@@ -368,30 +484,22 @@ async function postTogetherChat(
   return response;
 }
 
-function toChatPayload(body: ResponsesRequest, options: CodexProxyOptions, stream: boolean): Record<string, unknown> {
+function toChatPayload(
+  body: ResponsesRequest,
+  options: CodexProxyOptions,
+  stream: boolean,
+  toolTranslation: CodexToolTranslation,
+): Record<string, unknown> {
   const messages = toChatMessages(body, options);
   const translatedReasoningEffort = reasoningEffort(body, options);
-  const tools = (body.tools ?? []).flatMap((tool) => {
-    if (tool.type !== "function" || !tool.name) {
-      return [];
-    }
-    return [
-      {
-        type: "function",
-        function: {
-          name: tool.name,
-          description: tool.description ?? "",
-          parameters: tool.parameters ?? { type: "object", properties: {} },
-        },
-      },
-    ];
-  });
+  const messagesWithNativePrompt =
+    toolTranslation.nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, toolTranslation.nativeTools) : messages;
   return {
     model: options.targetModelId,
-    messages,
+    messages: messagesWithNativePrompt,
     max_tokens: body.max_output_tokens,
     temperature: body.temperature,
-    ...(tools.length > 0 ? { tools } : {}),
+    ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
     tool_choice: toChatToolChoice(body.tool_choice),
     ...(translatedReasoningEffort ? { reasoning_effort: translatedReasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
@@ -463,7 +571,21 @@ function toChatMessages(body: ResponsesRequest, options: CodexProxyOptions): Cha
       });
       continue;
     }
-    if (item.type === "function_call_output") {
+    if (item.type === "custom_tool_call") {
+      messages.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
+            type: "function",
+            function: { name: item.name ?? "tool", arguments: JSON.stringify({ input: item.input ?? "" }) },
+          },
+        ],
+      });
+      continue;
+    }
+    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       messages.push({
         role: "tool",
         tool_call_id: item.call_id ?? "",
@@ -477,6 +599,237 @@ function toChatMessages(body: ResponsesRequest, options: CodexProxyOptions): Cha
     }
   }
   return messages;
+}
+
+function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTranslation {
+  const translated: CodexToolTranslation["tools"] = [];
+  const mappings = new Map<string, CodexToolMapping>();
+  const nativeTools: CodexToolMapping[] = [];
+  const usedNames = new Set<string>();
+  const uniqueName = (raw: string) => {
+    const base = sanitizeToolName(raw);
+    let candidate = base;
+    let suffix = 2;
+    while (usedNames.has(candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    usedNames.add(candidate);
+    return candidate;
+  };
+
+  for (const tool of tools ?? []) {
+    if (tool.type === "function" && tool.name) {
+      const modelName = uniqueName(tool.name);
+      const mapping: CodexToolMapping = { kind: "function", sourceName: tool.name, modelName };
+      mappings.set(modelName, mapping);
+      translated.push(toChatFunctionTool(modelName, tool.description ?? "", tool.parameters));
+      continue;
+    }
+
+    if (tool.type === "custom" && tool.name) {
+      const modelName = uniqueName(tool.name);
+      const mapping: CodexToolMapping = { kind: "custom", sourceName: tool.name, modelName };
+      mappings.set(modelName, mapping);
+      translated.push(
+        toChatFunctionTool(
+          modelName,
+          customToolDescription(tool),
+          {
+            type: "object",
+            properties: { input: { type: "string", description: "The complete freeform input for this tool." } },
+            required: ["input"],
+            additionalProperties: false,
+          },
+        ),
+      );
+      continue;
+    }
+
+    if (tool.type === "namespace" && tool.name && Array.isArray(tool.tools)) {
+      for (const child of tool.tools) {
+        if (child.type !== "function" || !child.name) {
+          continue;
+        }
+        const modelName = uniqueName(`${tool.name}__${child.name}`);
+        const mapping: CodexToolMapping = {
+          kind: "namespace",
+          sourceName: child.name,
+          modelName,
+          namespace: tool.name,
+        };
+        mappings.set(modelName, mapping);
+        const description = [tool.description, child.description].filter(Boolean).join("\n\n");
+        translated.push(toChatFunctionTool(modelName, description, child.parameters));
+      }
+      continue;
+    }
+
+    if (isWebSearchTool(tool)) {
+      const sourceName = tool.name ?? "web_search";
+      const modelName = uniqueName(sourceName);
+      const mapping: CodexToolMapping = { kind: "web_search", sourceName, modelName, definition: tool };
+      mappings.set(modelName, mapping);
+      nativeTools.push(mapping);
+      translated.push(
+        toChatFunctionTool(
+          modelName,
+          tool.description ?? "Search the web for recent or source-backed information.",
+          {
+            type: "object",
+            properties: { query: { type: "string", description: "The web search query." } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+        ),
+      );
+    }
+  }
+
+  return { tools: translated, mappings, nativeTools };
+}
+
+function toChatFunctionTool(
+  name: string,
+  description: string,
+  parameters: unknown,
+): { type: "function"; function: { name: string; description: string; parameters: unknown } } {
+  return {
+    type: "function",
+    function: {
+      name,
+      description,
+      parameters: parameters ?? { type: "object", properties: {} },
+    },
+  };
+}
+
+function sanitizeToolName(name: string): string {
+  const sanitized = name.replaceAll(/[^A-Za-z0-9_-]/g, "_").replace(/^_+|_+$/g, "");
+  return sanitized || "tool";
+}
+
+function customToolDescription(tool: ResponsesTool): string {
+  const pieces = [tool.description ?? ""];
+  if (tool.format?.syntax || tool.format?.definition) {
+    pieces.push(`Input format: ${[tool.format.syntax, tool.format.definition].filter(Boolean).join("\n")}`);
+  }
+  return pieces.filter(Boolean).join("\n\n") || "Call this custom freeform tool.";
+}
+
+function isWebSearchTool(tool: ResponsesTool): boolean {
+  return tool.type === "web_search" || tool.type?.startsWith("web_search") === true || tool.name === "web_search";
+}
+
+function withNativeToolSystemPrompt(messages: ChatMessage[], nativeTools: CodexToolMapping[]): ChatMessage[] {
+  const prompt = [
+    "Native server tools are available through function calls.",
+    ...nativeTools.map((tool) => `- ${tool.modelName}: call this for live web search. Always provide a concise non-empty query.`),
+    "After tool results are returned, answer from the provided sources and include source URLs when relevant.",
+  ].join("\n");
+  return [{ role: "system", content: prompt }, ...messages];
+}
+
+function nativeToolMaxUses(tool: ResponsesTool): number {
+  const value = (tool as { max_uses?: unknown }).max_uses;
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 5;
+}
+
+async function runExaSearch(input: unknown, tool: ResponsesTool, options: CodexProxyOptions): Promise<string> {
+  const query = webSearchQuery(input);
+  if (!query) {
+    return "Web search error: missing query.";
+  }
+
+  const allowedDomains = stringArray((tool as { allowed_domains?: unknown }).allowed_domains);
+  const blockedDomains = stringArray((tool as { blocked_domains?: unknown }).blocked_domains);
+  const body: Record<string, unknown> = {
+    query,
+    numResults: 5,
+    type: "auto",
+    contents: { text: true },
+  };
+  if (allowedDomains.length > 0) {
+    body.includeDomains = allowedDomains;
+  }
+  if (blockedDomains.length > 0) {
+    body.excludeDomains = blockedDomains;
+  }
+
+  const exaApiKey = process.env.EXA_API_KEY?.trim();
+  if (!exaApiKey) {
+    return "Web search error: EXA_API_KEY is not set. Run `togetherlink configure` or export EXA_API_KEY and retry.";
+  }
+
+  debugLog(options, "exa search request", { query, hasApiKey: Boolean(exaApiKey), body });
+  const response = await fetch("https://api.exa.ai/search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": exaApiKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    debugLog(options, "exa search error", { status: response.status, body: text.slice(0, 1000) });
+    return `Web search error from Exa (${response.status}): ${text.slice(0, 1200)}`;
+  }
+
+  let json: ExaSearchResponse;
+  try {
+    json = JSON.parse(text) as ExaSearchResponse;
+  } catch {
+    return `Web search error: Exa returned non-JSON content: ${text.slice(0, 1200)}`;
+  }
+
+  const results = (json.results ?? []).slice(0, 5);
+  if (results.length === 0) {
+    return `Web search completed for "${query}" but returned no results.${json.autopromptString ? ` Autoprompt: ${json.autopromptString}` : ""}`;
+  }
+
+  const lines = [`Web search results for "${query}" via Exa:`];
+  results.forEach((result, index) => {
+    lines.push(
+      [
+        `${index + 1}. ${result.title ?? "Untitled"}`,
+        `URL: ${result.url ?? ""}`,
+        result.publishedDate ? `Published: ${result.publishedDate}` : "",
+        `Snippet: ${trimSearchText(result.text ?? "")}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  });
+  if (json.autopromptString) {
+    lines.push(`Autoprompt: ${json.autopromptString}`);
+  }
+  return lines.join("\n\n");
+}
+
+function webSearchQuery(input: unknown): string {
+  if (typeof input === "string") {
+    return input.trim();
+  }
+  if (typeof input !== "object" || input === null) {
+    return "";
+  }
+  const record = input as Record<string, unknown>;
+  for (const key of ["query", "q", "search_query", "input"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function trimSearchText(text: string): string {
+  return text.replaceAll(/\s+/g, " ").trim().slice(0, 700);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }
 
 function toChatRole(role: string | undefined): ChatMessage["role"] {
@@ -538,7 +891,12 @@ function reasoningEffort(body: ResponsesRequest, options: CodexProxyOptions): st
   return undefined;
 }
 
-function toResponsesResponse(chatResponse: ChatResponse, body: ResponsesRequest, options: CodexProxyOptions): Record<string, unknown> {
+function toResponsesResponse(
+  chatResponse: ChatResponse,
+  body: ResponsesRequest,
+  options: CodexProxyOptions,
+  toolTranslation: CodexToolTranslation,
+): Record<string, unknown> {
   const responseId = chatResponse.id ?? `resp_${randomUUID().replaceAll("-", "")}`;
   return {
     id: responseId,
@@ -546,12 +904,12 @@ function toResponsesResponse(chatResponse: ChatResponse, body: ResponsesRequest,
     created_at: Math.floor(Date.now() / 1000),
     status: "completed",
     model: body.model ?? options.modelId,
-    output: toResponsesOutput(chatResponse),
+    output: toResponsesOutput(chatResponse, toolTranslation),
     usage: toResponsesUsage(chatResponse.usage),
   };
 }
 
-function toResponsesOutput(chatResponse: ChatResponse): Record<string, unknown>[] {
+function toResponsesOutput(chatResponse: ChatResponse, toolTranslation: CodexToolTranslation): Record<string, unknown>[] {
   const message = chatResponse.choices?.[0]?.message ?? {};
   const output: Record<string, unknown>[] = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
@@ -567,11 +925,11 @@ function toResponsesOutput(chatResponse: ChatResponse): Record<string, unknown>[
     output.push(messageOutputItem(message.content));
   }
   for (const toolCall of message.tool_calls ?? []) {
-    output.push(functionCallOutputItem({
+    output.push(responseToolCallOutputItem({
       id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
       name: toolCall.function?.name ?? "tool",
       arguments: toolCall.function?.arguments ?? "{}",
-    }));
+    }, toolTranslation));
   }
   return output;
 }
@@ -581,6 +939,7 @@ async function streamResponseFromTogether(
   body: ResponsesRequest,
   options: CodexProxyOptions,
   payload: Record<string, unknown>,
+  toolTranslation: CodexToolTranslation,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<StreamProxyResult> {
@@ -601,6 +960,42 @@ async function streamResponseFromTogether(
       output: [],
     },
   });
+
+  if (toolTranslation.nativeTools.length > 0) {
+    const nativePayload = { ...payload, stream: false };
+    delete (nativePayload as { stream_options?: unknown }).stream_options;
+    const chatResponse = await callTogetherWithNativeTools(nativePayload, toolTranslation, options, signal, hooks);
+    recordUsage(chatResponse.usage, options);
+    const output = toResponsesOutput(chatResponse, toolTranslation);
+    let outputIndex = 0;
+    for (const item of output) {
+      writeResponsesSse(res, "response.output_item.added", {
+        type: "response.output_item.added",
+        output_index: outputIndex,
+        item: { ...item, status: item.status ?? "completed" },
+      });
+      writeResponsesSse(res, "response.output_item.done", {
+        type: "response.output_item.done",
+        output_index: outputIndex,
+        item,
+      });
+      outputIndex += 1;
+    }
+    writeResponsesSse(res, "response.completed", {
+      type: "response.completed",
+      response: {
+        id: responseId,
+        object: "response",
+        created_at: Math.floor(Date.now() / 1000),
+        status: "completed",
+        model: body.model ?? options.modelId,
+        output,
+        usage: toResponsesUsage(chatResponse.usage),
+      },
+    });
+    res.end();
+    return { ok: true, status: res.statusCode };
+  }
 
   const upstreamResult = await fetchTogetherChat(payload, options, signal, hooks);
   if (!upstreamResult.ok) {
@@ -726,7 +1121,7 @@ async function streamResponseFromTogether(
 
   let outputIndex = outputState.nextOutputIndex;
   for (const toolCall of [...toolCalls.values()]) {
-    const item = functionCallOutputItem(toolCall);
+    const item = responseToolCallOutputItem(toolCall, toolTranslation);
     writeResponsesSse(res, "response.output_item.added", {
       type: "response.output_item.added",
       output_index: outputIndex,
@@ -758,7 +1153,7 @@ async function streamResponseFromTogether(
         ...(outputState.textItemId !== undefined
           ? [messageOutputItem(outputState.text, outputState.textItemId)]
           : []),
-        ...[...toolCalls.values()].map((toolCall) => functionCallOutputItem(toolCall)),
+        ...[...toolCalls.values()].map((toolCall) => responseToolCallOutputItem(toolCall, toolTranslation)),
       ],
       usage: toResponsesUsage(usage),
     },
@@ -823,6 +1218,38 @@ function messageOutputItem(text: string, id = `msg_${randomUUID().replaceAll("-"
   };
 }
 
+function responseToolCallOutputItem(toolCall: PendingToolCall, toolTranslation: CodexToolTranslation): Record<string, unknown> {
+  const mapping = toolTranslation.mappings.get(toolCall.name);
+  if (mapping?.kind === "custom") {
+    const parsed = parseJsonOrEmpty(toolCall.arguments);
+    return {
+      id: `ctc_${randomUUID().replaceAll("-", "")}`,
+      type: "custom_tool_call",
+      status: "completed",
+      call_id: toolCall.id,
+      name: mapping.sourceName,
+      input: customToolInput(parsed, toolCall.arguments),
+    };
+  }
+
+  if (mapping?.kind === "namespace") {
+    return {
+      id: `fc_${randomUUID().replaceAll("-", "")}`,
+      type: "function_call",
+      status: "completed",
+      call_id: toolCall.id,
+      namespace: mapping.namespace,
+      name: mapping.sourceName,
+      arguments: toolCall.arguments || "{}",
+    };
+  }
+
+  return functionCallOutputItem({
+    ...toolCall,
+    name: mapping?.sourceName ?? toolCall.name,
+  });
+}
+
 function functionCallOutputItem(toolCall: PendingToolCall): Record<string, unknown> {
   return {
     id: `fc_${randomUUID().replaceAll("-", "")}`,
@@ -832,6 +1259,17 @@ function functionCallOutputItem(toolCall: PendingToolCall): Record<string, unkno
     name: toolCall.name || "tool",
     arguments: toolCall.arguments || "{}",
   };
+}
+
+function customToolInput(parsed: unknown, rawArguments: string): string {
+  if (typeof parsed === "object" && parsed !== null && "input" in parsed) {
+    const input = (parsed as { input?: unknown }).input;
+    if (typeof input === "string") {
+      return input;
+    }
+    return stringifyUnknown(input);
+  }
+  return rawArguments;
 }
 
 async function* parseSseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -955,6 +1393,17 @@ function stringifyUnknown(value: unknown): string {
     return JSON.stringify(value);
   } catch {
     return String(value);
+  }
+}
+
+function parseJsonOrEmpty(value: string | undefined): unknown {
+  if (!value) {
+    return {};
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
   }
 }
 
