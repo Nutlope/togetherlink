@@ -9,7 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "../..",
     "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "vitest.config.ts"]

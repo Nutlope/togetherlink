@@ -54,18 +54,18 @@ const features = [
     accent: undefined,
   },
   {
-    title: 'Auto-updating',
-    tag: 'Always current',
-    tagTone: 'dark',
+    title: 'Pi Code',
+    tag: 'Official provider',
+    tagTone: 'live',
     body: (
       <>
-        The binary checks for new versions in the background and swaps itself
-        atomically. Your command never changes - it just gets better.
+        Run <code>tpi</code> and Pi Code launches with Pi's official Together
+        provider, an ephemeral session, and a temporary Pi config directory.
       </>
     ),
-    supportLabel: 'Self-update path',
-    supportValue: '100%',
-    icon: <UpdateMark />,
+    supportLabel: 'Ephemeral launch',
+    supportValue: 'beta',
+    icon: <PiMark />,
     accent: undefined,
   },
 ]
@@ -154,7 +154,7 @@ function Home() {
 
       <section className="py-[88px] pb-4 text-center max-[520px]:pt-16">
         <span className="mb-7 inline-block rounded-full border border-line-strong bg-white px-3.5 py-1.5 text-[13px] font-medium text-muted">
-          Together AI - for OpenCode, Claude Code & Codex
+          Together AI - for OpenCode, Claude Code, Codex & Pi Code
         </span>
         <h1 className="m-0 text-balance text-[clamp(34px,6vw,52px)] font-semibold leading-[1.08] text-ink">
           Together models,
@@ -165,9 +165,9 @@ function Home() {
           One tiny, always-current binary. Run{' '}
           <code className="text-ink">topencode</code> or{' '}
           <code className="text-ink">tclaude</code> or{' '}
-          <code className="text-ink">tcodex</code> and your existing tools route
-          through Together AI models like GLM 5.2 - no proxy to run, no config
-          to write.
+          <code className="text-ink">tcodex</code> or{' '}
+          <code className="text-ink">tpi</code> and your existing tools route
+          through Together AI models - no proxy to run, no config to write.
         </p>
 
         <div className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]">
@@ -208,8 +208,10 @@ function Home() {
               </strong>{' '}
               Every change happens in an ephemeral session - nothing is saved to
               disk, no files are rewritten. Your subscriptions and your existing
-              OpenCode, Claude Code, or Codex config are never touched. Install
-              and drop it any time; everything goes back exactly as it was.
+              OpenCode, Claude Code, Codex, or Pi Code config are never touched. Install
+              and drop it any time; everything goes back exactly as it was. The
+              binary checks for new versions in the background and swaps itself
+              atomically, so your command never changes - it just gets better.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted">
@@ -263,17 +265,17 @@ function Home() {
           Install with the one-liner above. It drops the binary at{' '}
           <code>~/.togetherlink/bin/</code> and adds{' '}
           <code>togetherlink</code>, <code>tclaude</code>,{' '}
-          <code>topencode</code>, and <code>tcodex</code>.
+          <code>topencode</code>, <code>tcodex</code>, and <code>tpi</code>.
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, or{' '}
-          <code>tcodex</code>. On first launch it asks once for your Together
-          API key - press Enter to skip and add it later.
+          <code>tcodex</code>, or <code>tpi</code>. On first launch it asks
+          once for your Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date
           on its own. Change your mind? Just stop using it - nothing was saved,
-          so your subscriptions and your OpenCode/Claude Code/Codex config are
+          so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code config are
           untouched.
         </Step>
       </section>
@@ -394,6 +396,25 @@ function CodexMark() {
   )
 }
 
+function PiMark() {
+  return (
+    <svg className="size-[26px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5.5 7.2c1.7-1.4 3.8-2.1 6.5-2.1 4.2 0 7.2 2.8 7.2 6.8 0 4.1-3 7-7.2 7-1.4 0-2.7-.3-3.8-.9v3.1H5.5V7.2Z"
+        fill="currentColor"
+        opacity=".14"
+      />
+      <path
+        d="M7.1 8.2c1.2-.9 2.8-1.4 4.8-1.4 3.3 0 5.6 2.1 5.6 5.2 0 3.2-2.3 5.3-5.6 5.3-1.5 0-2.7-.4-3.8-1.1M8.1 21V9.7M11.6 9.7v7.4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function ShieldMark() {
   return (
     <svg className="size-[17px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -436,16 +457,6 @@ function NoDiskMark() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  )
-}
-
-function UpdateMark() {
-  return (
-    <svg className="size-[23px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M20 12a8 8 0 0 1-13.6 5.7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M4 12A8 8 0 0 1 17.6 6.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M17.8 3.8v3.1h-3.1M6.2 20.2v-3.1h3.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

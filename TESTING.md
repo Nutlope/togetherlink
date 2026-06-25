@@ -139,6 +139,7 @@ chmod +x packages/cli/dist/bin/togetherlink.js
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
+packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Pi.test.ts
 ```
 
 Each run writes JSON artifacts to `packages/tests/artifacts/`, including stdout/stderr for every scenario. Longer coding-task scenarios create disposable Git repos under `packages/tests/tmp/` and remove them when the suite finishes.
@@ -153,6 +154,7 @@ Current scenarios cover:
 - Claude and Codex proxy hard context-limit retries with real Together requests that first exceed `input + max_tokens`, then succeed after the proxy lowers `max_tokens`.
 - Codex reasoning-stream usage (`reasoning_output_tokens > 0`).
 - Lighter OpenCode coverage for basic streaming, bash tools, and context pressure.
+- Pi Code coverage for streaming JSON, bash tool calls, usage/cost accounting, and Together model-list vision metadata.
 
 ## GitHub Live Workflow
 
@@ -161,7 +163,7 @@ Current scenarios cover:
 The workflow installs the real agent CLIs explicitly:
 
 ```bash
-npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai
+npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai @earendil-works/pi-coding-agent
 ```
 
 This is intentionally a CI setup step, not something `togetherlink` does silently on a user's machine.

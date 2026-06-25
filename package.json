@@ -2,7 +2,7 @@
   "name": "togetherlink",
   "private": true,
   "version": "0.3.0",
-  "description": "Use Together AI models in Claude Code, OpenCode, and Codex",
+  "description": "Use Together AI models in Claude Code, OpenCode, Codex, and Pi Code",
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",

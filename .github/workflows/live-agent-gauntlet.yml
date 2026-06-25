@@ -13,6 +13,7 @@ on:
           - claude
           - codex
           - opencode
+          - pi
   schedule:
     - cron: "17 3 * * *"
   push:
@@ -70,10 +71,11 @@ jobs:
 
       - name: Install coding-agent CLIs
         run: |
-          npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai
+          npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai @earendil-works/pi-coding-agent
           claude --version
           codex --version
           opencode --version
+          pi --version
 
       - name: Build togetherlink CLI
         run: |
@@ -97,6 +99,9 @@ jobs:
               ;;
             opencode)
               packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
+              ;;
+            pi)
+              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Pi.test.ts
               ;;
             *)
               echo "Unknown harness: $HARNESS" >&2

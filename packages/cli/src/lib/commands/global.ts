@@ -24,6 +24,8 @@ Usage:
   togetherlink codex [run] [-- ...]     Launch Codex through a local Responses proxy (ephemeral)
   tcodex [-- ...]                       Alias for: togetherlink codex
   togetherlink codex -- exec "Say hi"   Run Codex headlessly through Together
+  togetherlink pi|picode [run] [-- ...] Launch Pi Code with Together AI (ephemeral)
+  tpi [-- ...]                          Alias for: togetherlink pi
   togetherlink daemon status            Show the shared proxy daemon status
   togetherlink daemon stop              Stop the shared proxy daemon
   togetherlink --version                Show the CLI version

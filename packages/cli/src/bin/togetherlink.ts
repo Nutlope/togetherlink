@@ -82,7 +82,8 @@ async function main() {
   await loadStoredExaKey();
 
   const { positional, flags } = parseArgs(process.argv.slice(2));
-  const [command, verb] = positional;
+  const [rawCommand, verb] = positional;
+  const command = rawCommand === "picode" ? "pi" : rawCommand;
 
   if (!command || command === "help" || command === "--help") {
     printHelp();
@@ -118,7 +119,7 @@ async function main() {
   }
 
   // First-run key setup only matters for the harness-launching commands.
-  if ((command === "claude" || command === "codex" || command === "opencode") && verb !== "status") {
+  if ((command === "claude" || command === "codex" || command === "opencode" || command === "pi") && verb !== "status") {
     await maybePromptApiKey();
   }
 

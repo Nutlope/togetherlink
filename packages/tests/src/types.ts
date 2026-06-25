@@ -1,4 +1,4 @@
-export type AgentId = "codex" | "claude" | "opencode";
+export type AgentId = "codex" | "claude" | "opencode" | "pi";
 
 export type TestStatus = "passed" | "failed";
 
