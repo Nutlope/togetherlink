@@ -6,6 +6,32 @@ import type { Scenario } from "../types.js";
 export function piScenarios(): Scenario[] {
   return [
     {
+      name: "pi: status exposes Codex-curated Together models",
+      run: async (context) => {
+        const result = await runCommand(context, "pi-status", process.execPath, [
+          context.cliBin,
+          "pi",
+          "status",
+          "--json",
+        ]);
+        assert(result.status === 0, `exit ${result.status}`);
+        const status = asRecord(JSON.parse(result.stdout));
+        assert(status.provider === "together", "expected Together provider");
+        assert(status.currentModel === "zai-org/GLM-5.2", "expected Codex default model");
+        const supportedModels = String(status.supportedModels ?? "").split(",");
+        for (const model of [
+          "zai-org/GLM-5.2",
+          "moonshotai/Kimi-K2.6",
+          "moonshotai/Kimi-K2.7-Code",
+          "MiniMaxAI/MiniMax-M3",
+          "Qwen/Qwen3.7-Max",
+          "deepseek-ai/DeepSeek-V4-Pro",
+        ]) {
+          assert(supportedModels.includes(model), `missing Codex-supported model ${model}`);
+        }
+      },
+    },
+    {
       name: "pi: basic streaming json response with cost",
       run: async (context) => {
         assertCommandExists("pi");
@@ -55,6 +81,17 @@ export function piScenarios(): Scenario[] {
     {
       name: "pi: together model list includes multiple models and vision metadata",
       run: async (context) => {
+        const codexModelResult = await runCommand(context, "pi-model-list-codex-default", process.execPath, [
+          context.cliBin,
+          "pi",
+          "--",
+          "--list-models",
+          "GLM-5.2",
+        ]);
+        assert(codexModelResult.status === 0, `exit ${codexModelResult.status}`);
+        assert(codexModelResult.stdout.includes("zai-org/GLM-5.2"), "missing registered Codex default model");
+        assert(!codexModelResult.stderr.includes("Using custom model id"), "Codex default should be registered in Pi");
+
         const result = await runCommand(context, "pi-model-list", process.execPath, [
           context.cliBin,
           "pi",

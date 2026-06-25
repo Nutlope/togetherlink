@@ -16,15 +16,15 @@ const features = [
         to disk. Close it and your OpenCode setup is exactly as it was.
       </>
     ),
-    supportLabel: 'Ephemeral launch',
+    supportLabel: 'Status',
     supportValue: '100%',
     icon: <OpenCodeMark />,
     accent: undefined,
   },
   {
     title: 'Claude Code',
-    tag: '85% optimizing',
-    tagTone: 'soon',
+    tag: 'Beta',
+    tagTone: 'beta',
     body: (
       <>
         Run <code>tclaude</code> and Claude Code routes through a local
@@ -32,15 +32,13 @@ const features = [
         Code subscription and login the whole time.
       </>
     ),
-    supportLabel: 'Proxy compatibility',
-    supportValue: '85%',
     icon: <ClaudeMark />,
     accent: undefined,
   },
   {
     title: 'Codex',
-    tag: 'Headless ready',
-    tagTone: 'soon',
+    tag: 'Beta',
+    tagTone: 'beta',
     body: (
       <>
         Run <code>tcodex</code> and Codex talks to Together through a local
@@ -48,14 +46,12 @@ const features = [
         headless <code>exec</code> support for fast checks.
       </>
     ),
-    supportLabel: 'Responses proxy',
-    supportValue: 'beta',
     icon: <CodexMark />,
     accent: undefined,
   },
   {
     title: 'Pi Code',
-    tag: 'Official provider',
+    tag: '100% supported',
     tagTone: 'live',
     body: (
       <>
@@ -63,8 +59,8 @@ const features = [
         provider, an ephemeral session, and a temporary Pi config directory.
       </>
     ),
-    supportLabel: 'Ephemeral launch',
-    supportValue: 'beta',
+    supportLabel: 'Status',
+    supportValue: '100%',
     icon: <PiMark />,
     accent: undefined,
   },
@@ -109,7 +105,7 @@ function Home() {
   }
 
   return (
-    <main className="mx-auto max-w-[880px] px-6 max-[520px]:px-[18px]">
+    <main className="mx-auto max-w-[1120px] px-6 max-[520px]:px-[18px]">
       <header className="flex items-center gap-2.5 pt-6 max-[520px]:flex-wrap max-[520px]:gap-y-3.5">
         <a
           href="https://www.together.ai/"
@@ -209,14 +205,13 @@ function Home() {
               Every change happens in an ephemeral session - nothing is saved to
               disk, no files are rewritten. Your subscriptions and your existing
               OpenCode, Claude Code, Codex, or Pi Code config are never touched. Install
-              and drop it any time; everything goes back exactly as it was. The
-              binary checks for new versions in the background and swaps itself
-              atomically, so your command never changes - it just gets better.
+              and drop it any time; everything goes back exactly as it was.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted">
+          <div className="flex flex-wrap items-center justify-between gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted max-[620px]:justify-start max-[620px]:gap-x-4">
             <Guarantee icon={<NoDiskMark />} label="Nothing written to disk" />
             <Guarantee icon={<NoDiskMark />} label="No config overwritten" />
+            <Guarantee icon={<NoDiskMark />} label="Auto-updates atomically" />
             <Guarantee icon={<NoDiskMark />} label="Keep your subscription" />
           </div>
         </div>
@@ -226,7 +221,7 @@ function Home() {
         {features.map((feature) => (
           <article
             key={feature.title}
-            className="rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]"
+            className="flex h-full flex-col rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]"
           >
             <div className="flex items-start justify-between gap-3.5">
               <span
@@ -236,10 +231,10 @@ function Home() {
                 {feature.icon}
               </span>
               <span
-                className="inline-flex items-center gap-1.5 rounded-md bg-code px-[9px] py-1 text-[11px] font-semibold tracking-[.05em] text-muted uppercase data-[tone=dark]:bg-neutral-100 data-[tone=dark]:text-ink data-[tone=live]:bg-neutral-100 data-[tone=live]:text-ink"
+                className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-code px-[9px] py-1 text-[11px] font-semibold tracking-[.05em] text-muted uppercase data-[tone=beta]:rotate-[-1.5deg] data-[tone=beta]:border-amber-300 data-[tone=beta]:bg-amber-50 data-[tone=beta]:text-amber-900 data-[tone=beta]:shadow-[0_1px_0_rgba(255,255,255,.85)_inset,0_1px_2px_rgba(146,64,14,.12)] data-[tone=dark]:bg-neutral-100 data-[tone=dark]:text-ink data-[tone=live]:bg-neutral-100 data-[tone=live]:text-ink"
                 data-tone={feature.tagTone}
               >
-                <span className="size-1.5 rounded-full bg-faint data-[tone=dark]:bg-ink data-[tone=live]:bg-green-500" data-tone={feature.tagTone} />
+                <span className="size-1.5 rounded-full bg-faint data-[tone=beta]:bg-amber-500 data-[tone=dark]:bg-ink data-[tone=live]:bg-green-500" data-tone={feature.tagTone} />
                 {feature.tag}
               </span>
             </div>
@@ -249,18 +244,26 @@ function Home() {
             <p className="m-0 text-[14.5px] leading-normal text-muted [&_code]:text-ink">
               {feature.body}
             </p>
-            <div className="mt-[18px] flex items-baseline justify-between gap-3 text-xs font-semibold text-muted">
-              <span>{feature.supportLabel}</span>
-              <strong className="text-[13px] text-ink tabular-nums">
-                {feature.supportValue}
-              </strong>
-            </div>
+            {feature.supportLabel ? (
+              <div className="mt-auto flex items-baseline justify-between gap-3 pt-[18px] text-xs font-semibold text-muted">
+                <span>{feature.supportLabel}</span>
+                <strong className="whitespace-nowrap text-[13px] text-ink tabular-nums">
+                  {feature.supportValue}
+                </strong>
+              </div>
+            ) : null}
           </article>
         ))}
       </section>
 
-      <section className="mt-2 mb-20">
+      <section className="mx-auto mt-2 mb-20 max-w-[880px]">
         <h2 className="m-0 mb-5 text-xl font-semibold text-ink">Get started</h2>
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)]">
+          <span className="select-none text-faint">$</span>
+          <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            {installCommand}
+          </code>
+        </div>
         <Step number="1">
           Install with the one-liner above. It drops the binary at{' '}
           <code>~/.togetherlink/bin/</code> and adds{' '}
@@ -278,6 +281,11 @@ function Home() {
           so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code config are
           untouched.
         </Step>
+        <p className="m-0 border-t border-line pt-[18px] text-[15px] leading-relaxed text-muted [&_code]:rounded-md [&_code]:border [&_code]:border-line-strong [&_code]:bg-code [&_code]:px-[7px] [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_code]:text-ink">
+          Prefer explicit commands? Use <code>togetherlink opencode</code>,{' '}
+          <code>togetherlink claude</code>, <code>togetherlink codex</code>, or{' '}
+          <code>togetherlink pi</code> instead of the short wrappers.
+        </p>
       </section>
 
       <footer className="border-t border-line py-8 pb-14 text-sm text-faint">
@@ -361,19 +369,15 @@ function ClaudeMark() {
 function CodexMark() {
   return (
     <svg
-      className="size-[26px]"
+      className="size-[30px]"
       height="1em"
       style={{ flex: 'none', lineHeight: 1 }}
-      viewBox="0 0 24 24"
+      viewBox="2 2.7 20 18.7"
       width="1em"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
       <title>Codex</title>
-      <path
-        d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z"
-        fill="#fff"
-      />
       <path
         d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z"
         fill="url(#codex-mark-gradient)"
@@ -398,19 +402,13 @@ function CodexMark() {
 
 function PiMark() {
   return (
-    <svg className="size-[26px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg className="size-[26px]" viewBox="0 0 800 800" aria-hidden="true">
       <path
-        d="M5.5 7.2c1.7-1.4 3.8-2.1 6.5-2.1 4.2 0 7.2 2.8 7.2 6.8 0 4.1-3 7-7.2 7-1.4 0-2.7-.3-3.8-.9v3.1H5.5V7.2Z"
         fill="currentColor"
-        opacity=".14"
+        fillRule="evenodd"
+        d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
       />
-      <path
-        d="M7.1 8.2c1.2-.9 2.8-1.4 4.8-1.4 3.3 0 5.6 2.1 5.6 5.2 0 3.2-2.3 5.3-5.6 5.3-1.5 0-2.7-.4-3.8-1.1M8.1 21V9.7M11.6 9.7v7.4"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
     </svg>
   )
 }
@@ -440,7 +438,7 @@ function Guarantee({
   label,
 }: Readonly<{ icon: ReactNode; label: string }>) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <span className="text-emerald-500">{icon}</span>
       {label}
     </span>

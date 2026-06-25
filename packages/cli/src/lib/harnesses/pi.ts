@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_DEFAULT_MODEL, CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
@@ -60,6 +60,36 @@ function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
   return sanitized;
 }
 
+function writePiModelsJson(agentDir: string, apiKey: string): void {
+  const models = CODEX_SUPPORTED_MODELS.map(({ definition }) => ({
+    id: definition.id,
+    name: definition.name,
+    reasoning: definition.reasoning,
+    input: definition.modalities.input,
+    contextWindow: definition.limit.context,
+    maxTokens: definition.limit.output,
+    cost: {
+      input: definition.cost.input,
+      output: definition.cost.output,
+      cacheRead: definition.cost.cache_read ?? 0,
+      cacheWrite: 0,
+    },
+  }));
+
+  writeFileSync(
+    join(agentDir, "models.json"),
+    `${JSON.stringify({
+      providers: {
+        [PI_PROVIDER_ID]: {
+          apiKey,
+          models,
+        },
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 export default defineHarness({
   id: HARNESS.PI,
   label: "Pi Code",
@@ -74,6 +104,7 @@ export default defineHarness({
     }
 
     const agentDir = mkdtempSync(join(tmpdir(), "togetherlink-pi-"));
+    writePiModelsJson(agentDir, apiKey);
     const selectedModel = resolveCodexModel(ctx.main);
     const args = [
       "--provider",
