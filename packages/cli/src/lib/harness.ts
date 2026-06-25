@@ -20,3 +20,18 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   [HARNESS.CODEX]: "Codex",
   [HARNESS.OPENCODE]: "OpenCode",
 };
+
+export const HARNESS_INSTALL: Record<HarnessId, { command: string; url: string }> = {
+  [HARNESS.CLAUDE]: {
+    command: "npm install -g @anthropic-ai/claude-code",
+    url: "https://docs.anthropic.com/en/docs/claude-code/setup",
+  },
+  [HARNESS.CODEX]: {
+    command: "npm install -g @openai/codex",
+    url: "https://github.com/openai/codex",
+  },
+  [HARNESS.OPENCODE]: {
+    command: "npm install -g opencode-ai",
+    url: "https://opencode.ai/docs",
+  },
+};

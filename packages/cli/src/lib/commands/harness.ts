@@ -1,10 +1,11 @@
 import os from "node:os";
 import { ALL_HARNESSES, HARNESS_LABEL, type HarnessId } from "../harness.js";
 import { loadHarness, isHarnessImplemented } from "../harness-registry.js";
+import { detectInstalledHarness, missingHarnessMessage } from "../detect.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
 
-const VALID_VERBS = new Set(["run", "on", "off", "status"]);
-type HarnessVerb = "run" | "on" | "off" | "status";
+const VALID_VERBS = new Set(["run", "status"]);
+type HarnessVerb = "run" | "status";
 
 export async function dispatchHarnessCommand(
   harnessName: string,
@@ -20,14 +21,13 @@ export async function dispatchHarnessCommand(
     );
   }
   const harnessModule = await loadHarness(harnessName);
-  const resolvedVerb = verb ?? (harnessModule.run ? "run" : "on");
+  const resolvedVerb = verb ?? "run";
   if (!isHarnessVerb(resolvedVerb)) {
-    throw new Error(`Unknown command "${harnessName} ${verb}". Expected: run, on, off, status.`);
+    throw new Error(`Unknown command "${harnessName} ${verb}". Expected: run, status.`);
   }
   const handler = harnessModule[resolvedVerb];
-  if (!handler) {
-    const supported = (["run", "on", "off", "status"] as const).filter((candidate) => Boolean(harnessModule[candidate]));
-    throw new Error(`"${harnessName} ${resolvedVerb}" is not supported. Expected: ${supported.join(", ")}.`);
+  if (resolvedVerb !== "status" && !detectInstalledHarness(harnessName).installed) {
+    throw new Error(missingHarnessMessage(harnessName));
   }
 
   const ctx = { home: os.homedir(), ...flags };

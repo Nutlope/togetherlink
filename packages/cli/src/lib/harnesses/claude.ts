@@ -5,24 +5,17 @@ import {
   resolveClaudeModel,
 } from "../claude/defaults.js";
 import { HARNESS } from "../harness.js";
-import { defineHarness, type HarnessContext } from "../harness-types.js";
+import { defineHarness } from "../harness-types.js";
 import { resolveTogetherApiKey } from "../together-core.js";
 import { runClaudeTogether } from "../claude/core.js";
-
-async function claudeResolveKey(ctx: HarnessContext): Promise<string> {
-  return ctx.apiKey ?? process.env.TOGETHER_API_KEY?.trim() ?? "";
-}
 
 export default defineHarness({
   id: HARNESS.CLAUDE,
   label: "Claude Code",
-  mode: "ephemeral",
-  resolveKey: claudeResolveKey,
 
   async run(ctx) {
     const apiKey = await resolveTogetherApiKey({
       apiKey: ctx.apiKey,
-      resolveKey: () => claudeResolveKey(ctx),
       home: ctx.home,
     });
     if (!apiKey) {
@@ -46,7 +39,6 @@ export default defineHarness({
     return {
       payload: {
         harness: HARNESS.CLAUDE,
-        mode: "ephemeral",
         provider: "local-together-proxy",
         currentModel: CLAUDE_DEFAULT_MODEL,
         targetModel: CLAUDE_DEFAULT_TOGETHER_MODEL,

@@ -6,8 +6,8 @@
 # when executed with `bun run`. The version from the root package.json is
 # baked in via --define so the binary's self-update check knows its version.
 #
-# Output: site/togetherlink.js  (served from togetherlink.vercel.app and downloaded
-# by the install script + the auto-updater).
+# Output: site/public/togetherlink.js for the Vercel static build, mirrored to
+# tracked site/* artifacts so manual/static release flows stay in sync too.
 
 set -euo pipefail
 
@@ -22,10 +22,12 @@ echo "Building togetherlink v${VERSION} bundle…"
 # first so `bun build` can resolve and inline it into the bundle.
 pnpm --filter @togetherlink/models build
 
-SITE_DIR="$ROOT/site/public"
-mkdir -p "$SITE_DIR"
-cp "$ROOT/scripts/install.sh" "$SITE_DIR/install.sh"
-echo "✓ installer → site/public/install.sh"
+PUBLIC_DIR="$ROOT/site/public"
+TRACKED_DIR="$ROOT/site"
+mkdir -p "$PUBLIC_DIR"
+cp "$ROOT/scripts/install.sh" "$PUBLIC_DIR/install.sh"
+cp "$ROOT/scripts/install.sh" "$TRACKED_DIR/install.sh"
+echo "✓ installer → site/public/install.sh and site/install.sh"
 
 # Bundle the CLI entry. --target=bun keeps Bun-only runtime assumptions; the
 # result is a single self-contained JS file with models inlined.
@@ -34,9 +36,10 @@ bun build \
   --target=bun \
   --production \
   --define "process.env.TOGETHERLINK_VERSION=\"${VERSION}\"" \
-  --outfile "$SITE_DIR/togetherlink.js"
+  --outfile "$PUBLIC_DIR/togetherlink.js"
 
-echo "✓ bundle → site/public/togetherlink.js ($(wc -c < "$SITE_DIR/togetherlink.js") bytes)"
+cp "$PUBLIC_DIR/togetherlink.js" "$TRACKED_DIR/togetherlink.js"
+echo "✓ bundle → site/public/togetherlink.js and site/togetherlink.js ($(wc -c < "$PUBLIC_DIR/togetherlink.js") bytes)"
 
 # Refresh the manifest the auto-updater and install script read.
 node -e "
@@ -47,6 +50,8 @@ const manifest = {
   url: 'https://togetherlink.vercel.app/togetherlink.js',
   publishedAt: new Date().toISOString(),
 };
-fs.writeFileSync('$SITE_DIR/latest.json', JSON.stringify(manifest, null, 2) + '\n');
-console.log('✓ manifest → site/public/latest.json (v' + version + ')');
+const json = JSON.stringify(manifest, null, 2) + '\n';
+fs.writeFileSync('$PUBLIC_DIR/latest.json', json);
+fs.writeFileSync('$TRACKED_DIR/latest.json', json);
+console.log('✓ manifest → site/public/latest.json and site/latest.json (v' + version + ')');
 "

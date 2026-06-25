@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { ALL_HARNESSES, HARNESS_BIN, type HarnessId } from "./harness.js";
+import { ALL_HARNESSES, HARNESS_BIN, HARNESS_INSTALL, HARNESS_LABEL, type HarnessId } from "./harness.js";
 
 export type HarnessDetection = {
   installed: boolean;
@@ -28,4 +28,19 @@ export function detectInstalledHarnesses(harnesses: readonly HarnessId[] = ALL_H
     result[harness] = { installed: Boolean(path), path };
   }
   return result;
+}
+
+export function detectInstalledHarness(harness: HarnessId): HarnessDetection {
+  const path = resolveBinPath(HARNESS_BIN[harness]);
+  return { installed: Boolean(path), path };
+}
+
+export function missingHarnessMessage(harness: HarnessId): string {
+  const install = HARNESS_INSTALL[harness];
+  return [
+    `${HARNESS_LABEL[harness]} is not installed or "${HARNESS_BIN[harness]}" is not on PATH.`,
+    `Install it with: ${install.command}`,
+    `Docs: ${install.url}`,
+    `Then re-run: togetherlink ${harness}`,
+  ].join("\n");
 }

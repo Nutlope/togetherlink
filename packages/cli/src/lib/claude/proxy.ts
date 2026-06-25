@@ -1,10 +1,13 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
+import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
+import { stableHash, stableStringify } from "../stable-hash.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -37,6 +40,11 @@ type AnthropicMessagesRequest = {
   effort?: unknown;
   reasoning_effort?: unknown;
 };
+
+type AnthropicCountTokensRequest = Pick<
+  AnthropicMessagesRequest,
+  "model" | "system" | "messages" | "tools" | "tool_choice"
+>;
 
 type AnthropicTool = {
   name?: string;
@@ -79,6 +87,9 @@ type OpenAIChatResponse = {
     total_tokens?: number;
     cached_tokens?: number;
     reasoning_tokens?: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
   };
 };
 
@@ -110,6 +121,14 @@ type TogetherFetchResult =
   | { ok: true; json: OpenAIChatResponse; error?: undefined }
   | { ok: false; error: TogetherApiError; json?: undefined };
 
+type UpstreamTimings = Pick<ProxyTraceEvent, "upstreamStartedAt" | "upstreamHeadersAt" | "firstByteAt">;
+type UpstreamTimingHooks = {
+  onStart?: () => void;
+  onHeaders?: () => void;
+  onFirstByte?: () => void;
+};
+type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
+
 // Transient upstream faults worth retrying with backoff. 429 = rate limited;
 // 503/overloaded = server-side temporary capacity. Everything else (401, 400,
 // 402, 404, 5xx other than 503) is non-retryable — retrying a bad key or a
@@ -118,11 +137,7 @@ const RETRYABLE_STATUSES = new Set([429, 503]);
 const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 const MAX_RETRIES = 3;
 const CONTEXT_LENGTH_RETRY_FLOOR = 1;
-const TOGETHERLINK_IDENTITY_PROMPT =
-  "You are running inside Claude Code through togetherlink's local Anthropic-to-Together proxy. " +
-  "The upstream model is a Together AI model, not an Anthropic Claude model. " +
-  "If asked what model you are, identify yourself as the selected Together AI backend routed by togetherlink, " +
-  "and do not claim to be Claude, Claude Fable, Opus, Sonnet, or Haiku.";
+const TOGETHERLINK_IDENTITY_PROMPT = "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 
 function clampRequestedMaxTokens(maxTokens: number | undefined, model: ModelDefinition): number | undefined {
   if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens)) {
@@ -196,6 +211,7 @@ export type ClaudeProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  recordTrace?: ((trace: ProxyTraceEvent) => void) | undefined;
 };
 
 /**
@@ -239,16 +255,37 @@ export async function handleProxyRequest(
     // context indicator shows the wrong "% used". Advertise the real limits so
     // compaction triggers at the right point.
     writeJson(res, 200, {
-      data: CLAUDE_SUPPORTED_MODELS.map((model) => ({
-        id: model.alias,
-        type: "model",
-        object: "model",
-        display_name: `Together ${model.definition.name}`,
-        max_input_tokens: model.definition.limit.context,
-        max_tokens: model.definition.limit.output,
-        created_at: "2026-06-16T00:00:00Z",
-      })),
+      data: CLAUDE_SUPPORTED_MODELS.map(claudeModelResponse),
     });
+    return;
+  }
+
+  if (req.method === "GET" && path.startsWith("/v1/models/")) {
+    const modelId = decodeURIComponent(path.slice("/v1/models/".length));
+    const model = findClaudeModel(modelId, options);
+    if (!model) {
+      writeAnthropicError(res, 404, "not_found_error", `Unknown model "${modelId}".`);
+      return;
+    }
+    writeJson(res, 200, claudeModelResponse(model));
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/messages/count_tokens") {
+    const body = (await readJsonBody(req)) as Partial<AnthropicCountTokensRequest>;
+    if (!body || typeof body !== "object") {
+      writeAnthropicError(res, 400, "invalid_request_error", "Request body must be an object.");
+      return;
+    }
+    if (!body.model) {
+      writeAnthropicError(res, 400, "invalid_request_error", "model is required.");
+      return;
+    }
+    if (!Array.isArray(body.messages)) {
+      writeAnthropicError(res, 400, "invalid_request_error", "messages must be an array.");
+      return;
+    }
+    writeJson(res, 200, countTokensResponse(body as AnthropicCountTokensRequest));
     return;
   }
 
@@ -258,6 +295,61 @@ export async function handleProxyRequest(
   }
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
+  const nativeTools = nativeServerTools(body.tools);
+  const tracePayload = tracePayloadForClaudeUpstream(body, options);
+  const upstreamMode: ProxyTraceEvent["upstreamMode"] = body.stream ? "stream" : "buffered";
+  const traceBase = {
+    id: randomUUID(),
+    route: path,
+    method: req.method ?? "POST",
+    model: body.model ?? options.modelId,
+    stream: Boolean(body.stream),
+    upstreamMode,
+    requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+    requestPreview: summarizeAnthropicRequestContent(body),
+    cacheKey: tracePayload.cacheKey,
+    promptProfile: tracePayload.promptProfile,
+    messageCount: body.messages?.length ?? 0,
+    toolCount: body.tools?.length ?? 0,
+    nativeToolCount: nativeTools.length,
+    startedAt: Date.now(),
+  };
+  recordProxyTrace(options, traceBase);
+  const upstreamTimings: Partial<UpstreamTimings> = {};
+  const emitPendingTrace = () => options.recordTrace?.({ ...traceBase, ...upstreamTimings });
+  const timingHooks: UpstreamTimingHooks = {
+    onStart: () => {
+      upstreamTimings.upstreamStartedAt ??= Date.now();
+      emitPendingTrace();
+    },
+    onHeaders: () => {
+      upstreamTimings.upstreamHeadersAt ??= Date.now();
+      emitPendingTrace();
+    },
+    onFirstByte: () => {
+      upstreamTimings.firstByteAt ??= Date.now();
+      emitPendingTrace();
+    },
+  };
+  const upstreamAbort = new AbortController();
+  let traceFinalized = false;
+  const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
+    if (traceFinalized) {
+      return;
+    }
+    traceFinalized = true;
+    recordProxyTrace(options, { ...traceBase, ...upstreamTimings }, ok, status, error);
+  };
+  const markClientDisconnected = () => {
+    upstreamAbort.abort();
+    finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
+  };
+  req.once("aborted", markClientDisconnected);
+  res.once("close", () => {
+    if (!res.writableEnded) {
+      markClientDisconnected();
+    }
+  });
   options.costTracker?.beginRequest();
   debugLog(options, "anthropic request", {
     model: body.model,
@@ -270,62 +362,183 @@ export async function handleProxyRequest(
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
-  // GLM-5.2 can't see images: describe each image/url block with a vision model
-  // and replace it with a text block, so GLM reasons over the description.
-  await resolveImageBlocks(body, options);
-  // When the inbound request is streaming AND there are no native server-side
-  // tools (web_search), stream Together's response directly to Claude Code as
-  // Anthropic SSE — reasoning, text, and tool_use deltas land as they're
-  // generated, so the user sees first tokens (and the live thinking trace) while
-  // GLM is still working, instead of one burst at the very end. For GLM-5.2,
-  // thinking stays on and Claude's requested effort is mapped to Together's
-  // supported high/max levels; for Kimi, we omit the undocumented effort
-  // parameter. When native web_search tools ARE present, a single
-  // /v1/messages request can span several upstream turns (model calls web_search
-  // → we run Exa → feed result back); those intermediate turns must stay buffered
-  // (their output never reaches the client), so we fall back to the fully buffered
-  // loop for correctness. The common coding path declares no web_search tool, so
-  // it streams. See the OpenCode ephemeral harness memory for why high reasoning
-  // is the intended config, not something to dial down.
-  const nativeTools = nativeServerTools(body.tools);
-  if (body.stream && nativeTools.length === 0) {
-    await streamAnthropicFromTogether(res, body, options);
-    if (options.debug) {
-      const delta = options.costTracker?.requestDelta;
-      const totals = options.costTracker?.totals;
-      if (delta && totals) {
-        debugLog(options, "request cost", {
-          requestCostUsd: Number(delta.costUsd.toFixed(6)),
-          requestInputTokens: delta.promptTokens,
-          requestCachedTokens: delta.cachedTokens,
-          requestOutputTokens: delta.completionTokens,
-          sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
-        });
+  try {
+    // GLM-5.2 can't see images: describe each image/url block with a vision model
+    // and replace it with a text block, so GLM reasons over the description.
+    await resolveImageBlocks(body, options);
+    if (body.stream) {
+      const result = await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
+      finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
+      if (options.debug) {
+        const delta = options.costTracker?.requestDelta;
+        const totals = options.costTracker?.totals;
+        if (delta && totals) {
+          debugLog(options, "request cost", {
+            requestCostUsd: Number(delta.costUsd.toFixed(6)),
+            requestInputTokens: delta.promptTokens,
+            requestCachedTokens: delta.cachedTokens,
+            requestOutputTokens: delta.completionTokens,
+            sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+          });
+        }
       }
+      return;
     }
-    return;
-  }
 
-  const openAiResponse = await callTogetherChatCompletions(body, options);
-  const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
+    const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal, timingHooks);
+    const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
-  const delta = options.costTracker?.requestDelta;
-  const totals = options.costTracker?.totals;
-  if (options.debug && delta && totals) {
-    debugLog(options, "request cost", {
-      requestCostUsd: Number(delta.costUsd.toFixed(6)),
-      requestInputTokens: delta.promptTokens,
-      requestCachedTokens: delta.cachedTokens,
-      requestOutputTokens: delta.completionTokens,
-      sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
-    });
-  }
+    const delta = options.costTracker?.requestDelta;
+    const totals = options.costTracker?.totals;
+    if (options.debug && delta && totals) {
+      debugLog(options, "request cost", {
+        requestCostUsd: Number(delta.costUsd.toFixed(6)),
+        requestInputTokens: delta.promptTokens,
+        requestCachedTokens: delta.cachedTokens,
+        requestOutputTokens: delta.completionTokens,
+        sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+      });
+    }
 
-  if (body.stream) {
-    writeAnthropicStream(res, anthropicMessage);
-  } else {
     writeJson(res, 200, anthropicMessage);
+    finalizeTrace(true, res.statusCode);
+  } catch (err) {
+    const status = isTogetherApiError(err) ? err.anthropicStatus : res.statusCode >= 400 ? res.statusCode : 500;
+    finalizeTrace(false, status, err instanceof Error ? err.message : String(err));
+    throw err;
   }
+}
+
+function recordProxyTrace(
+  options: ClaudeProxyOptions,
+  base: Omit<ProxyTraceEvent, "durationMs" | "completedAt" | "ok" | "status" | "error" | "usage">,
+  ok?: boolean,
+  status?: number,
+  error?: string,
+): void {
+  const completedAt = ok === undefined ? undefined : Date.now();
+  options.recordTrace?.({
+    ...base,
+    ...(completedAt !== undefined && ok !== undefined ? { completedAt, durationMs: completedAt - base.startedAt, ok } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(error ? { error: redactTraceError(error) } : {}),
+    ...(ok !== undefined && options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
+  });
+}
+
+function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): string {
+  const parts: string[] = [];
+  if (typeof body.system === "string" && body.system.trim()) {
+    parts.push(`system: ${body.system}`);
+  } else if (Array.isArray(body.system)) {
+    const systemText = body.system
+      .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
+      .filter(Boolean)
+      .join(" ");
+    if (systemText.trim()) {
+      parts.push(`system: ${systemText}`);
+    }
+  }
+  for (const message of body.messages ?? []) {
+    const content = summarizeAnthropicContent(message.content);
+    if (content) {
+      parts.push(`${message.role}: ${content}`);
+    }
+  }
+  const toolNames = body.tools?.map((tool) => tool.name).filter(Boolean);
+  if (toolNames?.length) {
+    parts.push(`tools: ${toolNames.join(", ")}`);
+  }
+  return redactTraceError(parts.join("\n")).slice(0, 2000);
+}
+
+function tracePayloadForClaudeUpstream(
+  body: AnthropicMessagesRequest,
+  options: ClaudeProxyOptions,
+): {
+  cacheKey: NonNullable<ProxyTraceEvent["cacheKey"]>;
+  promptProfile: NonNullable<ProxyTraceEvent["promptProfile"]>;
+} {
+  const targetModel = resolveTargetModel(body.model, options);
+  const nativeTools = nativeServerTools(body.tools);
+  const messages = toOpenAIMessages(body, targetModel.definition);
+  const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+  const systemMessages = upstreamMessages.filter((message) => message.role === "system");
+  const nonSystemMessages = upstreamMessages.filter((message) => message.role !== "system");
+  const tools = body.tools?.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description ?? "",
+      parameters: toOpenAIToolParameters(tool),
+    },
+  }));
+  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+  const upstreamPayload = {
+    model: targetModel.definition.id,
+    messages: upstreamMessages,
+    max_tokens: clampRequestedMaxTokens(body.max_tokens, targetModel.definition),
+    temperature: body.temperature,
+    tools,
+    tool_choice: toOpenAIToolChoice(body.tool_choice),
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    chat_template_kwargs: { clear_thinking: false },
+    stream: Boolean(body.stream),
+  };
+  const systemBytes = byteLength(systemMessages);
+  const toolsBytes = byteLength(tools ?? []);
+  const messagesBytes = byteLength(upstreamMessages);
+  const dynamicBytes = byteLength(nonSystemMessages);
+  return {
+    cacheKey: {
+      systemHash: stableHash(systemMessages),
+      toolsHash: stableHash(tools ?? []),
+      messagesHash: stableHash(upstreamMessages),
+      fullHash: stableHash(upstreamPayload),
+    },
+    promptProfile: {
+      stablePrefixBytes: systemBytes + toolsBytes,
+      dynamicBytes,
+      totalBytes: byteLength(upstreamPayload),
+      systemBytes,
+      toolsBytes,
+      messagesBytes,
+    },
+  };
+}
+
+function byteLength(value: unknown): number {
+  return Buffer.byteLength(stableStringify(value), "utf8");
+}
+
+function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | undefined): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((block) => {
+      if (block.type === "text") {
+        return block.text;
+      }
+      if (block.type === "tool_use") {
+        return `[tool_use ${block.name}]`;
+      }
+      if (block.type === "tool_result") {
+        return `[tool_result ${block.tool_use_id}]`;
+      }
+      if (block.type === "image") {
+        return "[image]";
+      }
+      if (block.type === "url") {
+        return `[url ${block.url}]`;
+      }
+      return `[${block.type}]`;
+    })
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**
@@ -366,6 +579,8 @@ function constantTimeEqual(actual: string | undefined, expected: string): boolea
 async function callTogetherChatCompletions(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<OpenAIChatResponse> {
   const targetModel = resolveTargetModel(body.model, options);
   const nativeTools = nativeServerTools(body.tools);
@@ -405,7 +620,7 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    let response = await fetchTogether(payload, options);
+    let response = await fetchTogether(payload, options, signal, hooks);
     if (!response.ok) {
       const initialError = response.error;
       const retryMaxTokens = maxTokensForContextLengthRetry(initialError, targetModel.definition, maxTokens);
@@ -418,7 +633,7 @@ async function callTogetherChatCompletions(
           originalError: initialError.message,
           turn,
         });
-        response = await fetchTogether(payload, options);
+        response = await fetchTogether(payload, options, signal, hooks);
       }
     }
 
@@ -432,7 +647,7 @@ async function callTogetherChatCompletions(
     const usage = json.usage;
     const promptTokens = usage?.prompt_tokens ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
-    const cachedTokens = usage?.cached_tokens ?? 0;
+    const cachedTokens = usage?.prompt_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? 0;
     const incrementalCost =
       options.costTracker?.addUsage(promptTokens, cachedTokens, completionTokens, targetModel.definition) ?? 0;
     debugLog(options, "together response", {
@@ -509,6 +724,41 @@ function resolveTargetModel(requestedModel: string | undefined, options: ClaudeP
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
 }
 
+function findClaudeModel(modelId: string, options: ClaudeProxyOptions): ResolvedClaudeModel | undefined {
+  const supported = CLAUDE_SUPPORTED_MODELS.find(
+    (model) => model.alias === modelId || model.definition.id === modelId,
+  );
+  if (supported) {
+    return supported;
+  }
+  if (modelId === options.modelId || modelId === options.targetModelId) {
+    return { alias: options.modelId, definition: options.modelDefinition };
+  }
+  return undefined;
+}
+
+function claudeModelResponse(model: ResolvedClaudeModel): Record<string, unknown> {
+  return {
+    id: model.alias,
+    type: "model",
+    object: "model",
+    display_name: `Together ${model.definition.name}`,
+    max_input_tokens: model.definition.limit.context,
+    max_tokens: model.definition.limit.output,
+    created_at: "2026-06-16T00:00:00Z",
+  };
+}
+
+export function countTokensResponse(body: AnthropicCountTokensRequest): { input_tokens: number } {
+  const text = stableStringify({
+    system: body.system,
+    messages: body.messages,
+    tools: body.tools,
+    tool_choice: body.tool_choice,
+  });
+  return { input_tokens: Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)) };
+}
+
 type TogetherReasoningEffort = "max";
 
 function togetherReasoningEffort(
@@ -560,10 +810,13 @@ function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffo
 async function fetchTogether(
   payload: Record<string, unknown>,
   options: ClaudeProxyOptions,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
 ): Promise<TogetherFetchResult> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let response: Response;
     try {
+      hooks?.onStart?.();
       response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -571,7 +824,9 @@ async function fetchTogether(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        ...(signal ? { signal } : {}),
       });
+      hooks?.onHeaders?.();
     } catch (err) {
       // Network-level failure (DNS, connection reset, timeout). Treat as
       // retryable transient — the request never reached Together, so it's
@@ -896,7 +1151,7 @@ function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDef
     {
       role: "system",
       content: targetModel
-        ? `${TOGETHERLINK_IDENTITY_PROMPT}\nSelected Together backend: ${targetModel.name} (${targetModel.id}).`
+        ? `${TOGETHERLINK_IDENTITY_PROMPT} Backend: ${targetModel.name} (${targetModel.id}).`
         : TOGETHERLINK_IDENTITY_PROMPT,
     },
   ];
@@ -1012,7 +1267,9 @@ async function streamAnthropicFromTogether(
   res: ServerResponse,
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
-): Promise<void> {
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
+): Promise<StreamProxyResult> {
   const targetModel = resolveTargetModel(body.model, options);
   const messages = toOpenAIMessages(body, targetModel.definition);
   const tools = body.tools?.map((tool) => ({
@@ -1051,6 +1308,7 @@ async function streamAnthropicFromTogether(
 
   let response: Response;
   try {
+    hooks?.onStart?.();
     response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -1058,10 +1316,13 @@ async function streamAnthropicFromTogether(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      ...(signal ? { signal } : {}),
     });
+    hooks?.onHeaders?.();
   } catch (err) {
-    writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
-    return;
+    const message = err instanceof Error ? err.message : String(err);
+    writeAnthropicError(res, 503, "overloaded_error", message);
+    return { ok: false, status: 503, error: message };
   }
 
   if (!response.ok) {
@@ -1076,6 +1337,7 @@ async function streamAnthropicFromTogether(
         originalError: error.message,
       });
       try {
+        hooks?.onStart?.();
         response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
@@ -1083,10 +1345,13 @@ async function streamAnthropicFromTogether(
             "Content-Type": "application/json",
           },
           body: JSON.stringify(payload),
+          ...(signal ? { signal } : {}),
         });
+        hooks?.onHeaders?.();
       } catch (err) {
-        writeAnthropicError(res, 503, "overloaded_error", err instanceof Error ? err.message : String(err));
-        return;
+        const message = err instanceof Error ? err.message : String(err);
+        writeAnthropicError(res, 503, "overloaded_error", message);
+        return { ok: false, status: 503, error: message };
       }
       if (!response.ok) {
         error = await mapTogetherError(response);
@@ -1100,12 +1365,13 @@ async function streamAnthropicFromTogether(
         body: error.message.slice(0, 1000),
       });
       writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
-      return;
+      return { ok: false, status: error.anthropicStatus, error: error.message };
     }
   }
   if (!response.body) {
-    writeAnthropicError(res, 500, "api_error", "Together returned no stream body.");
-    return;
+    const message = "Together returned no stream body.";
+    writeAnthropicError(res, 500, "api_error", message);
+    return { ok: false, status: 500, error: message };
   }
 
   res.writeHead(200, {
@@ -1149,6 +1415,7 @@ async function streamAnthropicFromTogether(
       if (done) {
         break;
       }
+      hooks?.onFirstByte?.();
       buffer += decoder.decode(value, { stream: true });
       buffer = consumeSseLines(buffer, (data) => {
         if (!data) {
@@ -1176,7 +1443,7 @@ async function streamAnthropicFromTogether(
         if (event.usage) {
           inputTokens = event.usage.prompt_tokens ?? inputTokens;
           outputTokens = event.usage.completion_tokens ?? outputTokens;
-          cachedTokens = event.usage.cached_tokens ?? cachedTokens;
+          cachedTokens = event.usage.prompt_tokens_details?.cached_tokens ?? event.usage.cached_tokens ?? cachedTokens;
         }
         if (event.finish_reason) {
           stopReason = mapStopReason(event.finish_reason);
@@ -1209,6 +1476,7 @@ async function streamAnthropicFromTogether(
   });
   writeSse(res, "message_stop", { type: "message_stop" });
   res.end();
+  return { ok: true, status: res.statusCode };
 }
 
 /**
@@ -1236,6 +1504,9 @@ function parseStreamData(
     completion_tokens?: number;
     total_tokens?: number;
     cached_tokens?: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+    };
   } | null;
   finish_reason?: string | null;
 } | null {
@@ -1439,52 +1710,6 @@ class StreamBlockManager {
   }
 }
 
-function writeAnthropicStream(res: ServerResponse, message: Record<string, unknown>): void {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-  writeSse(res, "message_start", { type: "message_start", message: { ...message, content: [] } });
-  const content = Array.isArray(message.content) ? message.content : [];
-  content.forEach((block, index) => {
-    const contentBlock = isToolUseBlock(block) ? { ...block, input: {} } : block;
-    writeSse(res, "content_block_start", { type: "content_block_start", index, content_block: contentBlock });
-    if (isTextBlock(block)) {
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "text_delta", text: block.text },
-      });
-    } else if (isThinkingBlock(block)) {
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "thinking_delta", thinking: block.thinking },
-      });
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "signature_delta", signature: block.signature ?? "" },
-      });
-    } else if (isToolUseBlock(block)) {
-      writeSse(res, "content_block_delta", {
-        type: "content_block_delta",
-        index,
-        delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
-      });
-    }
-    writeSse(res, "content_block_stop", { type: "content_block_stop", index });
-  });
-  writeSse(res, "message_delta", {
-    type: "message_delta",
-    delta: { stop_reason: message.stop_reason, stop_sequence: null },
-    usage: message.usage,
-  });
-  writeSse(res, "message_stop", { type: "message_stop" });
-  res.end();
-}
-
 function writeSse(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -1522,7 +1747,11 @@ function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): v
   if (!options.debug) {
     return;
   }
-  process.stderr.write(`[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`);
+  const line = `[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`;
+  process.stderr.write(line);
+  if (process.env.TOGETHERLINK_DEBUG_LOG) {
+    appendFileSync(process.env.TOGETHERLINK_DEBUG_LOG, line);
+  }
 }
 
 export function requestPath(req: IncomingMessage): string {
@@ -1754,9 +1983,10 @@ function summarizeAnthropicTools(tools: AnthropicTool[] | undefined): Array<Reco
   if (!tools || tools.length === 0) {
     return undefined;
   }
-  return tools.slice(0, 5).map((tool) => ({
+  return tools.map((tool) => ({
     name: tool.name,
     type: tool.type,
+    maxUses: tool.max_uses,
     inputSchemaKeys: objectKeys(tool.input_schema),
     rawKeys: Object.keys(tool),
   }));
@@ -1785,22 +2015,4 @@ function mapStopReason(reason: string | null | undefined): string {
     return "max_tokens";
   }
   return "end_turn";
-}
-
-function isTextBlock(block: unknown): block is { type: "text"; text: string } {
-  return typeof block === "object" && block !== null && "type" in block && block.type === "text" && "text" in block;
-}
-
-function isThinkingBlock(block: unknown): block is { type: "thinking"; thinking: string; signature?: string } {
-  return (
-    typeof block === "object" &&
-    block !== null &&
-    "type" in block &&
-    block.type === "thinking" &&
-    "thinking" in block
-  );
-}
-
-function isToolUseBlock(block: unknown): block is { type: "tool_use"; input?: unknown } {
-  return typeof block === "object" && block !== null && "type" in block && block.type === "tool_use";
 }

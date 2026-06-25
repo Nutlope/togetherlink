@@ -38,6 +38,22 @@ const features = [
     accent: undefined,
   },
   {
+    title: 'Codex',
+    tag: 'Headless ready',
+    tagTone: 'soon',
+    body: (
+      <>
+        Run <code>tcodex</code> and Codex talks to Together through a local
+        Responses-to-chat proxy. Terminal sessions stay ephemeral, with
+        headless <code>exec</code> support for fast checks.
+      </>
+    ),
+    supportLabel: 'Responses proxy',
+    supportValue: 'beta',
+    icon: <CodexMark />,
+    accent: undefined,
+  },
+  {
     title: 'Auto-updating',
     tag: 'Always current',
     tagTone: 'dark',
@@ -138,7 +154,7 @@ function Home() {
 
       <section className="py-[88px] pb-4 text-center max-[520px]:pt-16">
         <span className="mb-7 inline-block rounded-full border border-line-strong bg-white px-3.5 py-1.5 text-[13px] font-medium text-muted">
-          Together AI - for OpenCode & Claude Code
+          Together AI - for OpenCode, Claude Code & Codex
         </span>
         <h1 className="m-0 text-balance text-[clamp(34px,6vw,52px)] font-semibold leading-[1.08] text-ink">
           Together models,
@@ -148,9 +164,10 @@ function Home() {
         <p className="mx-auto mt-5 mb-9 max-w-[560px] text-pretty text-[19px] leading-normal text-muted">
           One tiny, always-current binary. Run{' '}
           <code className="text-ink">topencode</code> or{' '}
-          <code className="text-ink">tclaude</code> and your existing tools
-          route through Together AI models like GLM 5.2 - no proxy to run, no
-          config to write.
+          <code className="text-ink">tclaude</code> or{' '}
+          <code className="text-ink">tcodex</code> and your existing tools route
+          through Together AI models like GLM 5.2 - no proxy to run, no config
+          to write.
         </p>
 
         <div className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]">
@@ -190,10 +207,9 @@ function Home() {
                 Non-destructive by design.
               </strong>{' '}
               Every change happens in an ephemeral session - nothing is saved to
-              disk, no files are rewritten. Your Claude Code subscription and
-              your existing OpenCode or Claude Code config are never touched.
-              Install and drop it any time; everything goes back exactly as it
-              was.
+              disk, no files are rewritten. Your subscriptions and your existing
+              OpenCode, Claude Code, or Codex config are never touched. Install
+              and drop it any time; everything goes back exactly as it was.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted">
@@ -246,19 +262,19 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at{' '}
           <code>~/.togetherlink/bin/</code> and adds{' '}
-          <code>togetherlink</code>, <code>tclaude</code> and{' '}
-          <code>topencode</code>.
+          <code>togetherlink</code>, <code>tclaude</code>,{' '}
+          <code>topencode</code>, and <code>tcodex</code>.
         </Step>
         <Step number="2">
-          Run <code>topencode</code> (or <code>tclaude</code>). On first launch
-          it asks once for your Together API key - press Enter to skip and add it
-          later.
+          Run <code>topencode</code>, <code>tclaude</code>, or{' '}
+          <code>tcodex</code>. On first launch it asks once for your Together
+          API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date
           on its own. Change your mind? Just stop using it - nothing was saved,
-          so your Claude Code subscription and your OpenCode/Claude Code config
-          are untouched.
+          so your subscriptions and your OpenCode/Claude Code/Codex config are
+          untouched.
         </Step>
       </section>
 
@@ -288,6 +304,14 @@ function Home() {
             rel="noopener noreferrer"
           >
             OpenCode
+          </a>
+          <a
+            className="transition-colors hover:text-ink"
+            href="https://github.com/openai/codex"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Codex
           </a>
         </div>
         <p className="m-0 text-[13px]">{version}</p>
@@ -327,6 +351,26 @@ function ClaudeMark() {
       <path
         fill="#d97757"
         d="M233.96 800.215 468.644 668.537l3.947-11.436-3.947-6.363h-11.436l-39.221-2.416-134.094-3.624-116.296-4.832-112.671-6.04-28.349-6.041L0 592.752l2.738-17.477 23.839-16.027 34.148 2.98 75.463 5.155 113.235 7.812 82.148 4.832 121.691 12.644h19.329l2.738-7.812-6.604-4.832-5.154-4.832-117.182-79.41-126.846-83.919-66.442-48.322-35.92-24.483-18.12-22.953-7.813-50.094 32.617-35.92 43.812 2.98 11.195 2.98 44.376 34.148 94.792 73.369 123.785 91.168 18.121 15.06 7.248-5.154.886-3.624-8.134-13.611-67.329-121.691-71.839-123.785-31.973-51.302-8.456-30.765c-2.98-12.644-5.154-23.275-5.154-36.241L312.322 13.208l20.537-6.604 49.53 6.604 20.859 18.121 30.765 70.389 49.852 110.819 77.316 150.684 22.631 44.698 12.08 41.396 4.511 12.645h7.812v-7.248l6.362-84.886 11.759-104.215 11.436-134.094 3.946-37.772 18.685-45.262L697.53 24l28.993 13.852L750.363 72l-3.302 22.067-14.175 92.134-27.785 144.322-18.121 96.645h10.55l12.081-12.081 48.886-64.912 82.148-102.685 36.241-40.752 42.282-45.02 27.141-21.423h51.302l37.772 56.134-16.913 57.987-52.832 67.007-43.812 56.778-62.819 84.564-39.221 67.651 3.624 5.396 9.342-.886 141.906-30.201 76.671-13.852 91.49-15.705 41.396 19.329 4.51 19.651-16.268 40.188-97.852 24.161-114.765 22.953-170.899 40.429-2.094 1.53 2.416 2.98 76.993 7.248 32.94 1.772h80.617l150.121 11.195 39.221 25.933 23.517 31.732-3.946 24.161-60.403 30.765-81.503-19.329-190.228-45.262-65.235-16.268h-9.02v5.396l54.362 53.154 99.624 89.96 124.752 115.973 6.362 28.671-16.027 22.631-16.912-2.416-109.611-82.47-42.282-37.127-95.758-80.618h-6.363v8.456l22.067 32.295 116.537 175.168 6.04 53.718-8.456 17.476-30.201 10.55-33.181-6.04-68.215-95.758-70.389-107.839-56.779-96.644-6.926 3.946-33.503 360.886-15.705 18.443L565.53 1200l-30.201-22.953-16.027-37.127 16.027-73.369 19.329-95.758 15.705-76.107 14.174-94.55 8.456-31.41-.563-2.095-6.927.886-71.275 97.852-108.402 146.497-85.772 91.812-20.537 8.134-35.597-18.443 3.302-32.939 19.893-29.316 118.711-151.007 71.597-93.583 46.228-54.04-.323-7.812h-2.738L205.289 929.396l-56.135 7.248-24.161-22.63 2.98-37.128 11.436-12.081 94.792-65.234-.322.322Z"
+      />
+    </svg>
+  )
+}
+
+function CodexMark() {
+  return (
+    <svg className="size-[26px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4.5 7.5 12 3l7.5 4.5v9L12 21l-7.5-4.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m8.2 9.7-2.4 2.4 2.4 2.4M15.8 9.7l2.4 2.4-2.4 2.4M13.4 8.6l-2.8 6.8"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   )

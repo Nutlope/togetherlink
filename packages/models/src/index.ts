@@ -260,6 +260,27 @@ export function findModelById(id: string): ModelDefinition | undefined {
 }
 
 /**
+ * Resolve a model from a list by trying each candidate key against `value`,
+ * falling back to the model whose id is `defaultId` (or the first in the list)
+ * when no value is given. Returns undefined only when a value is given but no
+ * model matches — the caller decides whether that is an error. Pure: no I/O,
+ * no throwing; the per-harness "Unsupported <harness> model" error is a cli
+ * policy that lives in the thin wrappers, not here.
+ */
+export function resolveModelByKeys(
+  list: readonly ModelDefinition[],
+  value: string | undefined,
+  keys: ReadonlyArray<(model: ModelDefinition) => string | null | undefined>,
+  defaultId: string,
+): ModelDefinition | undefined {
+  const defaultModel = list.find((model) => model.id === defaultId) ?? list[0];
+  if (!value) {
+    return defaultModel;
+  }
+  return list.find((model) => keys.some((key) => key(model) === value));
+}
+
+/**
  * Prompt for the image-description sub-call. Shared by the Claude proxy (which
  * injects it on its own vision fetch) and the OpenCode `@vision` subagent
  * (which uses it as the agent system prompt). Keep it perception-focused and

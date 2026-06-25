@@ -126,3 +126,46 @@ GLM-5.2 returns preserved reasoning in `choices[0].message.reasoning`. Keep that
 ## Notes
 
 The Claude proxy intentionally runs as an ephemeral local process. It should not write Claude Code config files, and tests should use `--no-session-persistence` unless the behavior under test specifically needs session state.
+
+## Live Agent Gauntlet
+
+The executable live suite is in `packages/tests`. It uses Vitest, real Claude/Codex/OpenCode CLI processes, and real Together inference; it does not mock the model provider.
+
+Build once, then run any harness test file:
+
+```bash
+node_modules/.bin/tsc -p packages/cli/tsconfig.json
+chmod +x packages/cli/dist/bin/togetherlink.js
+packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
+packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts
+packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
+```
+
+Each run writes JSON artifacts to `packages/tests/artifacts/`, including stdout/stderr for every scenario. Longer coding-task scenarios create disposable Git repos under `packages/tests/tmp/` and remove them when the suite finishes.
+
+Current scenarios cover:
+
+- Basic headless response.
+- Streaming JSON/event output.
+- Shell/read tool usage.
+- Claude/Codex multi-step coding tasks in temporary Git repos, including edits and `node --test` verification.
+- Long-context pressure with a final checksum assertion.
+- Claude and Codex proxy hard context-limit retries with real Together requests that first exceed `input + max_tokens`, then succeed after the proxy lowers `max_tokens`.
+- Codex reasoning-stream usage (`reasoning_output_tokens > 0`).
+- Lighter OpenCode coverage for basic streaming, bash tools, and context pressure.
+
+## GitHub Live Workflow
+
+`.github/workflows/live-agent-gauntlet.yml` runs the same real-inference suite on a daily schedule, on pushes to `main` that touch integration code, and by manual dispatch. It requires a repository secret named `TOGETHER_API_KEY`.
+
+The workflow installs the real agent CLIs explicitly:
+
+```bash
+npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai
+```
+
+This is intentionally a CI setup step, not something `togetherlink` does silently on a user's machine.
+
+## Tool Compatibility Audit
+
+The current Claude/Codex tool compatibility notes live in `packages/cli/src/lib/TOOL_COMPATIBILITY.md`. Update that file whenever a new CLI version starts sending a different tool catalog.

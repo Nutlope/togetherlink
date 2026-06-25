@@ -23,7 +23,7 @@ async function loadStoredExaKey(): Promise<void> {
 }
 
 /**
- * On the first `togetherlink claude`/`opencode` run after install, if no API
+ * On the first harness run after install, if no API
  * key is configured anywhere, prompt for it once. Enter = skip (optional): a
  * skipped key just means the harness throws a clear "set a key" message later,
  * and the user can run `togetherlink configure` or set the env var. This makes
@@ -118,7 +118,7 @@ async function main() {
   }
 
   // First-run key setup only matters for the harness-launching commands.
-  if ((command === "claude" || command === "opencode") && verb !== "status") {
+  if ((command === "claude" || command === "codex" || command === "opencode") && verb !== "status") {
     await maybePromptApiKey();
   }
 
