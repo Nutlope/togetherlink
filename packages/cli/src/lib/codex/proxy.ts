@@ -393,6 +393,29 @@ async function callTogetherWithNativeTools(
       return json;
     }
     if (nativeToolCalls.length !== toolCalls.length) {
+      const message = json.choices?.[0]?.message;
+      if (message) {
+        const nativeResults: string[] = [];
+        for (const toolCall of nativeToolCalls) {
+          const name = toolCall.function?.name ?? "web_search";
+          const nativeTool = toolTranslation.mappings.get(name);
+          const input = parseJsonOrEmpty(toolCall.function?.arguments);
+          const priorUses = nativeToolUses.get(name) ?? 0;
+          const maxUses = nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
+          let result: string;
+          if (priorUses >= maxUses) {
+            result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
+          } else if (nativeTool?.kind === "web_search") {
+            nativeToolUses.set(name, priorUses + 1);
+            result = await runExaSearch(input, nativeTool.definition, options);
+          } else {
+            result = "Unsupported native server tool.";
+          }
+          nativeResults.push(`Native ${name} result:\n${result}`);
+        }
+        message.tool_calls = toolCalls.filter((toolCall) => !nativeToolNames.has(toolCall.function?.name ?? ""));
+        message.content = [message.content?.trim(), ...nativeResults].filter(Boolean).join("\n\n") || null;
+      }
       return json;
     }
 
@@ -656,6 +679,27 @@ function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTrans
   };
 
   for (const tool of tools ?? []) {
+    if (isWebSearchTool(tool)) {
+      const sourceName = tool.name ?? "web_search";
+      const modelName = uniqueName(sourceName);
+      const mapping: CodexToolMapping = { kind: "web_search", sourceName, modelName, definition: tool };
+      mappings.set(modelName, mapping);
+      nativeTools.push(mapping);
+      translated.push(
+        toChatFunctionTool(
+          modelName,
+          tool.description ?? "Search the web for recent or source-backed information.",
+          {
+            type: "object",
+            properties: { query: { type: "string", description: "The web search query." } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+        ),
+      );
+      continue;
+    }
+
     if (tool.type === "function" && tool.name) {
       const modelName = uniqueName(tool.name);
       const mapping: CodexToolMapping = { kind: "function", sourceName: tool.name, modelName };
@@ -702,25 +746,6 @@ function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTrans
       continue;
     }
 
-    if (isWebSearchTool(tool)) {
-      const sourceName = tool.name ?? "web_search";
-      const modelName = uniqueName(sourceName);
-      const mapping: CodexToolMapping = { kind: "web_search", sourceName, modelName, definition: tool };
-      mappings.set(modelName, mapping);
-      nativeTools.push(mapping);
-      translated.push(
-        toChatFunctionTool(
-          modelName,
-          tool.description ?? "Search the web for recent or source-backed information.",
-          {
-            type: "object",
-            properties: { query: { type: "string", description: "The web search query." } },
-            required: ["query"],
-            additionalProperties: false,
-          },
-        ),
-      );
-    }
   }
 
   return { tools: translated, mappings, nativeTools };

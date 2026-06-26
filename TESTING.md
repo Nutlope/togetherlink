@@ -2,6 +2,28 @@
 
 Use these checks when changing the Claude local proxy or CLI launch path.
 
+## Regression-First Debugging
+
+When a user reports a concrete agent/proxy failure, do not start with the fix. First turn the report into a red-capable regression at the closest stable seam.
+
+Use this loop:
+
+1. Capture the exact failing prompt, command, trace row, or session artifact.
+2. Add a focused test that reproduces the bad protocol shape or output. The test should fail on the current code for the same reason the user saw.
+3. Run only that focused test and confirm it fails.
+4. Patch the smallest proxy or launcher boundary that makes the regression pass.
+5. Run the focused test again, then the relevant typecheck/build.
+6. Re-run a live smoke using the user's original pattern when the bug depends on real Codex, Claude, OpenCode, Pi, or Together behavior.
+
+For Codex proxy bugs, prefer `packages/tests/src/CodexProxyApi.test.ts` for deterministic protocol regressions before doing a live `tcodex -- exec ...` smoke. Examples of patterns that need regression coverage:
+
+- parallel `multi_agent_v1` calls must stay in one assistant tool-call group before their tool outputs;
+- more than five parallel subagent calls must preserve all call IDs and outputs;
+- native `web_search` must not leak back to Codex as an unsupported client tool, including when it appears in the same parallel group as client tools;
+- function-shaped tools named `web_search` still count as proxy-native search tools.
+
+If a correct automated seam does not exist, document that explicitly in the bug notes and use the smallest live command as the temporary regression signal.
+
 ## Setup
 
 Install dependencies and build the CLI:

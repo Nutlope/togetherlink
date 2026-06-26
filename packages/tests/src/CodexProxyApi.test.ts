@@ -360,7 +360,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
-  test("does not continue native-tool loop when a client tool call is returned in the same group", async () => {
+  test("does not leak native web_search when a client tool call is returned in the same group", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -399,7 +399,16 @@ describe("Codex Responses proxy tool compatibility", () => {
     const response = await postResponses({
       model: GLM_5_2.id,
       tools: [
-        { type: "web_search", name: "web_search" },
+        {
+          type: "function",
+          name: "web_search",
+          description: "Search the web.",
+          parameters: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
         {
           type: "custom",
           name: "apply_patch",
@@ -411,15 +420,20 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
 
     expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
-    expect(requests.some((request) => request.url.includes("api.exa.ai"))).toBe(false);
+    expect(requests.some((request) => request.url.includes("api.exa.ai"))).toBe(true);
     expect(response.output).toEqual([
       {
-        id: expect.stringMatching(/^fc_/),
-        type: "function_call",
+        id: expect.stringMatching(/^msg_/),
+        type: "message",
+        role: "assistant",
         status: "completed",
-        call_id: "call_search",
-        name: "web_search",
-        arguments: JSON.stringify({ query: "Codex docs" }),
+        content: [
+          {
+            type: "output_text",
+            text: expect.stringContaining("Web search results for \"Codex docs\" via Exa"),
+            annotations: [],
+          },
+        ],
       },
       {
         id: expect.stringMatching(/^ctc_/),
