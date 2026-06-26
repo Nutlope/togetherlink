@@ -229,6 +229,87 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("preserves namespace tool-call groups with more than five parallel calls", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push(JSON.parse(String(init?.body)));
+      return sseResponse([
+        {
+          choices: [{ delta: { content: "A B C D E F" } }],
+        },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+      ]);
+    }));
+
+    const calls = ["A", "B", "C", "D", "E", "F"].map((letter) => ({
+      type: "function_call",
+      namespace: "multi_agent_v1",
+      name: "spawn_agent",
+      call_id: `call_${letter.toLowerCase()}`,
+      arguments: JSON.stringify({ task: `Say ${letter}.` }),
+    }));
+    const outputs = ["A", "B", "C", "D", "E", "F"].map((letter) => ({
+      type: "function_call_output",
+      call_id: `call_${letter.toLowerCase()}`,
+      output: letter,
+    }));
+
+    await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "namespace",
+          name: "multi_agent_v1",
+          description: "Spawn and manage sub-agents.",
+          tools: [
+            {
+              type: "function",
+              name: "spawn_agent",
+              description: "Start a sub-agent.",
+              parameters: {
+                type: "object",
+                properties: { task: { type: "string" } },
+                required: ["task"],
+              },
+            },
+          ],
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Use six agents." }] },
+        ...calls,
+        ...outputs,
+      ],
+    });
+
+    const upstream = requests[0] as {
+      messages: Array<{ role: string; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string } }> }>;
+    };
+    const assistantToolGroup = upstream.messages.find((message) => message.role === "assistant" && message.tool_calls);
+    expect(assistantToolGroup?.tool_calls).toHaveLength(6);
+    expect(assistantToolGroup?.tool_calls?.map((toolCall) => toolCall.id)).toEqual([
+      "call_a",
+      "call_b",
+      "call_c",
+      "call_d",
+      "call_e",
+      "call_f",
+    ]);
+    expect(assistantToolGroup?.tool_calls?.every((toolCall) => toolCall.function.name === "multi_agent_v1__spawn_agent")).toBe(true);
+    expect(upstream.messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id)).toEqual([
+      "call_a",
+      "call_b",
+      "call_c",
+      "call_d",
+      "call_e",
+      "call_f",
+    ]);
+  });
+
   test("runs web_search internally with Exa and returns the final assistant answer", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
