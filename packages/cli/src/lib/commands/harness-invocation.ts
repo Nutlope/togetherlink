@@ -20,11 +20,14 @@ export function isHarnessCommand(value: string | undefined): value is HarnessId 
 }
 
 function withPrependedPassthrough(flags: ParsedArgs["flags"], args: string[]): ParsedArgs["flags"] {
-  if (args.length === 0) {
+  const passthrough = [...args, ...(flags.passthrough ?? [])];
+  if (passthrough.length === 0) {
     return flags;
   }
+  const hasSeparator = passthrough[0] === "--";
   return {
     ...flags,
-    passthrough: [...args, ...(flags.passthrough ?? [])],
+    passthrough: hasSeparator ? passthrough.slice(1) : passthrough,
+    ...(hasSeparator ? { passthroughSeparator: true } : {}),
   };
 }

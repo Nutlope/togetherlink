@@ -156,7 +156,7 @@ const CONTEXT_INPUT_SAFETY_TOKENS = 4096;
 const CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 const CONTEXT_RETRY_TRIM_EXTRA_TOKENS = 512;
 const APPROX_CHARS_PER_TOKEN = 4;
-const CONSERVATIVE_CHARS_PER_TOKEN = 3;
+const TRIM_PRESERVED_PREFIX_CHARS = 4096;
 const TOGETHERLINK_IDENTITY_PROMPT = "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 const CLAUDE_HAIKU_SUBAGENT_MODEL_ENV = "TOGETHERLINK_CLAUDE_HAIKU_MODEL";
 const CLAUDE_SONNET_SUBAGENT_MODEL_ENV = "TOGETHERLINK_CLAUDE_SONNET_MODEL";
@@ -207,10 +207,25 @@ function applyEstimatedContextBudget(
   if (typeof currentMaxTokens !== "number" || !Number.isFinite(currentMaxTokens)) {
     return;
   }
-  const estimatedInputTokens = estimatePayloadInputTokens(payload);
+  let estimatedInputTokens = estimatePayloadInputTokens(payload);
+  const reserveOverflowTokens =
+    estimatedInputTokens + currentMaxTokens + CONTEXT_OUTPUT_SAFETY_TOKENS - model.limit.context;
+  if (reserveOverflowTokens > 0) {
+    const trimmed = trimPayloadInputByApproxTokens(payload, reserveOverflowTokens);
+    if (trimmed) {
+      estimatedInputTokens = estimatePayloadInputTokens(payload);
+      debugLog(options, `trimmed ${label} input to reserve requested output`, {
+        model: payload.model,
+        trimmedChars: trimmed.trimmedChars,
+        requestedMaxTokens: currentMaxTokens,
+        estimatedInputTokens,
+      });
+    }
+  }
+
   const availableOutputTokens = Math.max(
     CONTEXT_LENGTH_RETRY_FLOOR,
-    Math.floor(model.limit.context - estimatedInputTokens - CONTEXT_INPUT_SAFETY_TOKENS),
+    Math.floor(model.limit.context - estimatedInputTokens - CONTEXT_OUTPUT_SAFETY_TOKENS),
   );
   const nextMaxTokens = Math.min(currentMaxTokens, model.limit.output, availableOutputTokens);
   if (nextMaxTokens >= currentMaxTokens) {
@@ -233,9 +248,38 @@ function estimatePayloadInputTokens(payload: Record<string, unknown>): number {
         messages: payload.messages,
         tools: payload.tools,
         tool_choice: payload.tool_choice,
-      }) / CONSERVATIVE_CHARS_PER_TOKEN,
+      }) / APPROX_CHARS_PER_TOKEN,
     ),
   );
+}
+
+function trimPayloadInputByApproxTokens(
+  payload: Record<string, unknown>,
+  tokensToTrim: number,
+): { trimmedChars: number } | undefined {
+  const messages = payload.messages;
+  if (!Array.isArray(messages) || tokensToTrim <= 0) {
+    return undefined;
+  }
+  let charsToTrim = Math.max(1, Math.ceil(tokensToTrim * APPROX_CHARS_PER_TOKEN));
+  let trimmedChars = 0;
+  for (const message of messages) {
+    if (charsToTrim <= 0) {
+      break;
+    }
+    const record = asOpenAIMessageRecord(message);
+    if (!record || record.role === "system" || typeof record.content !== "string" || record.content.length === 0) {
+      continue;
+    }
+    const result = trimOldContextText(record.content, charsToTrim);
+    if (!result) {
+      continue;
+    }
+    record.content = result.text;
+    charsToTrim -= result.trimmedChars;
+    trimmedChars += result.trimmedChars;
+  }
+  return trimmedChars > 0 ? { trimmedChars } : undefined;
 }
 
 function canTrimInputForContextLengthRetry(error: TogetherApiError, model: ModelDefinition): boolean {
@@ -642,16 +686,22 @@ function trimPayloadInputForContextLengthRetry(
 }
 
 function trimOldContextText(text: string, requestedChars: number): { text: string; trimmedChars: number } | undefined {
-  const marker = "[togetherlink trimmed older context to fit the model window]\n";
+  const marker = "\n[togetherlink trimmed older context to fit the model window]\n";
   if (requestedChars <= 0 || text.length <= marker.length + 32) {
     return undefined;
   }
-  const removableChars = Math.min(requestedChars, Math.max(1, text.length - marker.length - 32));
-  const nextText = `${marker}${text.slice(removableChars)}`;
+  const preservedPrefixChars = Math.min(TRIM_PRESERVED_PREFIX_CHARS, Math.max(0, text.length - marker.length - 32));
+  const maxRemovableChars = Math.max(1, text.length - preservedPrefixChars - marker.length - 32);
+  const removableChars = Math.min(requestedChars, maxRemovableChars);
+  const nextText = `${text.slice(0, preservedPrefixChars)}${marker}${text.slice(preservedPrefixChars + removableChars)}`;
   return {
     text: nextText,
     trimmedChars: Math.max(0, text.length - nextText.length),
   };
+}
+
+function thinkingSignature(reasoning: string): string {
+  return `togetherlink:${stableHash(reasoning)}`;
 }
 
 function asOpenAIMessageRecord(value: unknown): OpenAIMessage | undefined {
@@ -1570,11 +1620,11 @@ function toAnthropicMessage(response: OpenAIChatResponse, model: string): Record
   const content: Array<Record<string, unknown>> = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
-    content.push({
-      type: "thinking",
-      thinking: reasoning,
-      signature: `togetherlink:${Buffer.from(reasoning).toString("base64url")}`,
-    });
+      content.push({
+        type: "thinking",
+        thinking: reasoning,
+        signature: thinkingSignature(reasoning),
+      });
   }
   if (message.content) {
     content.push({ type: "text", text: message.content });
@@ -2072,16 +2122,15 @@ class StreamBlockManager {
     if (!this.openBlock) {
       return;
     }
-    // For a thinking block, emit the signature (derived from the full reasoning
-    // via the same base64url scheme the buffered path uses) as a signature_delta
-    // before closing. The signature is computed over the complete accumulated
-    // reasoning, which we only have at close time — so we send it once here.
+    // For a thinking block, emit a compact stable signature before closing.
+    // Do not base64 the full reasoning text here: Claude Code counts the
+    // signature in its output budget, so duplicating long reasoning can make an
+    // otherwise valid response exceed its 32k output-token guard.
     if (this.openBlock.type === "thinking") {
-      const signature = `togetherlink:${Buffer.from(this.openBlock.reasoning).toString("base64url")}`;
       writeSse(this.res, "content_block_delta", {
         type: "content_block_delta",
         index: this.openBlock.index,
-        delta: { type: "signature_delta", signature },
+        delta: { type: "signature_delta", signature: thinkingSignature(this.openBlock.reasoning) },
       });
     }
     writeSse(this.res, "content_block_stop", {

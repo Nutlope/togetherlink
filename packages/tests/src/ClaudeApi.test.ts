@@ -56,7 +56,7 @@ describe("Claude proxy compatibility API", () => {
     expect(response.body.input_tokens).toBeGreaterThan(GLM_5_2.limit.context - 4096);
   });
 
-  test("clamps Claude compaction-sized completions before sending them upstream", async () => {
+  test("trims Claude compaction-sized input before sacrificing the summary budget", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -71,7 +71,7 @@ describe("Claude proxy compatibility API", () => {
       });
     }));
 
-    const nearFullContext = "context budget pressure ".repeat(36_000);
+    const nearFullContext = "context budget pressure ".repeat(44_000);
     const response = await callClaudeProxy({
       method: "POST",
       url: "/v1/messages",
@@ -85,7 +85,46 @@ describe("Claude proxy compatibility API", () => {
     expect(response.status).toBe(200);
     expect(response.body.content).toEqual([{ type: "text", text: "BUDGETED_OK" }]);
     expect(upstreamBodies).toHaveLength(1);
-    expect(upstreamBodies[0]?.max_tokens).toBeLessThan(32_000);
+    const upstreamContent = firstUserContent(upstreamBodies[0]);
+    expect(typeof upstreamContent).toBe("string");
+    if (typeof upstreamContent !== "string") {
+      throw new Error("expected upstream user content to be a string");
+    }
+    expect(upstreamContent).toContain("[togetherlink trimmed older context to fit the model window]");
+    expect(upstreamContent.length).toBeLessThan(nearFullContext.length);
+    expect(upstreamBodies[0]?.max_tokens).toBeGreaterThanOrEqual(16_000);
+  });
+
+  test("uses compact thinking signatures instead of echoing full reasoning", async () => {
+    const longReasoning = "reasoning trace ".repeat(10_000);
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      return new Response(JSON.stringify({
+        id: "chatcmpl_reasoning_signature",
+        choices: [{ message: { reasoning: longReasoning, content: "SIGNATURE_OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 10_000, total_tokens: 10_010 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 32_000,
+        thinking: { type: "enabled", budget_tokens: 32_000 },
+        messages: [{ role: "user", content: "Think briefly." }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const content = response.body.content as Array<Record<string, unknown>>;
+    expect(content[0]?.type).toBe("thinking");
+    expect(content[0]?.thinking).toBe(longReasoning);
+    expect(String(content[0]?.signature)).toMatch(/^togetherlink:[a-f0-9]{16}$/);
+    expect(String(content[0]?.signature).length).toBeLessThan(40);
   });
 
   test("recovers from Together input-over-context errors by trimming old prompt text", async () => {

@@ -30,7 +30,8 @@ export async function assertClaudeContextLimitRetry(context: TestContext): Promi
     const stderr = daemon.stderr();
     assert(
       stderr.includes("retrying together request with reduced max_tokens") ||
-        stderr.includes("clamped request max_tokens to estimated context budget"),
+        stderr.includes("clamped request max_tokens to estimated context budget") ||
+        stderr.includes("trimmed request input to reserve requested output"),
       "daemon did not log context-limit prevention",
     );
     assert(/CONTEXT_RETRY_OK/i.test(text), "retry response did not include expected final answer");

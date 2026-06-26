@@ -7,6 +7,7 @@ import { isHarnessCommand, resolveHarnessInvocation } from "../lib/commands/harn
 import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from "../lib/global-config.js";
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { VERSION } from "../lib/version.js";
+import type { HarnessContext } from "../lib/harness-types.js";
 
 async function loadStoredExaKey(): Promise<void> {
   if (process.env.EXA_API_KEY) {
@@ -132,7 +133,7 @@ async function main() {
     if (!isHarnessCommand(target)) {
       throw new Error(`Unknown status target "${target ?? ""}". Expected one of: claude, codex, opencode, pi, daemon.`);
     }
-    await dispatchHarnessCommand(target, "status", parsed.flags);
+    await dispatchHarnessCommand(target, "status", flagsWithTrailingJson(parsed.flags));
     return;
   }
 
@@ -143,6 +144,11 @@ async function main() {
   }
 
   const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
+
+  if (isHarnessCommand(invocation.command) && isHarnessStatusInvocation(invocation.flags)) {
+    await dispatchHarnessCommand(invocation.command, "status", statusFlags(invocation.flags));
+    return;
+  }
 
   // First-run key setup only matters for the harness-launching commands.
   if (
@@ -156,6 +162,27 @@ async function main() {
   }
 
   await dispatchHarnessCommand(invocation.command, undefined, invocation.flags);
+}
+
+function isHarnessStatusInvocation(flags: Partial<HarnessContext> & { passthroughSeparator?: boolean }): boolean {
+  return flags.passthroughSeparator !== true && flags.passthrough?.[0] === "status";
+}
+
+function statusFlags(flags: Partial<HarnessContext> & { passthroughSeparator?: boolean }): Partial<HarnessContext> {
+  const trailing = flags.passthrough?.slice(1) ?? [];
+  return flagsWithTrailingJson({
+    ...flags,
+    passthrough: trailing,
+  });
+}
+
+function flagsWithTrailingJson(flags: Partial<HarnessContext>): Partial<HarnessContext> {
+  const trailing = flags.passthrough ?? [];
+  return {
+    ...flags,
+    json: flags.json || trailing.includes("--json"),
+    passthrough: trailing.filter((arg) => arg !== "--json"),
+  };
 }
 
 main().catch((err: unknown) => {
