@@ -1,4 +1,5 @@
 import type { HarnessContext } from "./harness-types.js";
+import { ALL_HARNESSES } from "./harness.js";
 
 const FLAG_ALIASES = {
   "--api-key": "apiKey",
@@ -50,6 +51,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     positional.push(token);
+    if (isHarnessToken(token)) {
+      flags.passthrough = argv.slice(i + 1);
+      break;
+    }
   }
 
   if (flags.apiKey) {
@@ -57,4 +62,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   return { positional, flags };
+}
+
+function isHarnessToken(value: string): boolean {
+  return value === "picode" || (ALL_HARNESSES as readonly string[]).includes(value);
 }

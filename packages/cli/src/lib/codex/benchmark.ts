@@ -80,7 +80,7 @@ function benchmarkCases(prompt: string, modelId: string | undefined): BenchmarkC
       id: "togetherlink",
       label: "togetherlink Codex/Together",
       command: process.execPath,
-      args: [currentTogetherlinkBin(), "codex", ...(modelId ? ["--main", modelId] : []), "--", ...codexExecArgs(prompt)],
+      args: [currentTogetherlinkBin(), ...(modelId ? ["--main", modelId] : []), "codex", ...codexExecArgs(prompt)],
     },
   ];
 }

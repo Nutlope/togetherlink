@@ -3,7 +3,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
-import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
+import { findModelById, GLM_5_2, VISION_MODELS, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
 import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
@@ -128,6 +128,21 @@ type UpstreamTimingHooks = {
   onFirstByte?: () => void;
 };
 type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
+type ClaudeCodeSubagentKind = "explore" | "claude-code-guide" | "statusline-setup" | "unknown";
+type ClaudeCodeSubagentModelHint = "haiku" | "sonnet" | "inherit" | undefined;
+type ClaudeCodeMetadata = {
+  isSubagent: boolean;
+  kind: ClaudeCodeSubagentKind | undefined;
+  modelHint: ClaudeCodeSubagentModelHint;
+};
+type ClaudeRequestProfile = {
+  targetModel: ResolvedClaudeModel;
+  maxTokens: number | undefined;
+  reasoningEffort: TogetherReasoningEffort | undefined;
+  clearThinking: boolean;
+  subagent: ClaudeCodeMetadata;
+  label: "default" | "haiku-subagent" | "sonnet-subagent";
+};
 
 // Transient upstream faults worth retrying with backoff. 429 = rate limited;
 // 503/overloaded = server-side temporary capacity. Everything else (401, 400,
@@ -138,9 +153,16 @@ const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 const MAX_RETRIES = 3;
 const CONTEXT_LENGTH_RETRY_FLOOR = 1;
 const CONTEXT_INPUT_SAFETY_TOKENS = 4096;
+const CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 const CONTEXT_RETRY_TRIM_EXTRA_TOKENS = 512;
 const APPROX_CHARS_PER_TOKEN = 4;
+const CONSERVATIVE_CHARS_PER_TOKEN = 3;
 const TOGETHERLINK_IDENTITY_PROMPT = "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
+const CLAUDE_HAIKU_SUBAGENT_MODEL_ENV = "TOGETHERLINK_CLAUDE_HAIKU_MODEL";
+const CLAUDE_SONNET_SUBAGENT_MODEL_ENV = "TOGETHERLINK_CLAUDE_SONNET_MODEL";
+const CLAUDE_HAIKU_SUBAGENT_MAX_TOKENS = 4096;
+const CLAUDE_SONNET_SUBAGENT_MAX_TOKENS = 8192;
+const CLAUDE_HAIKU_SUBAGENT_FALLBACK_MODEL = VISION_MODELS[1] ?? VISION_MODELS[0] ?? GLM_5_2;
 
 function clampRequestedMaxTokens(maxTokens: number | undefined, model: ModelDefinition): number | undefined {
   if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens)) {
@@ -161,15 +183,59 @@ function maxTokensForContextLengthRetry(
   if (inputTokens === undefined) {
     return undefined;
   }
-  const availableOutputTokens = Math.min(model.limit.context - inputTokens, model.limit.output);
-  if (availableOutputTokens < CONTEXT_LENGTH_RETRY_FLOOR) {
+  const rawAvailableOutputTokens = Math.min(model.limit.context - inputTokens, model.limit.output);
+  if (rawAvailableOutputTokens < CONTEXT_LENGTH_RETRY_FLOOR) {
     return undefined;
   }
-  const retryMaxTokens = Math.floor(availableOutputTokens);
+  const retryMaxTokens = Math.max(
+    CONTEXT_LENGTH_RETRY_FLOOR,
+    Math.floor(rawAvailableOutputTokens - CONTEXT_OUTPUT_SAFETY_TOKENS),
+  );
   if (typeof currentMaxTokens === "number" && retryMaxTokens >= currentMaxTokens) {
     return undefined;
   }
   return retryMaxTokens;
+}
+
+function applyEstimatedContextBudget(
+  payload: Record<string, unknown>,
+  model: ModelDefinition,
+  options: ClaudeProxyOptions,
+  label: string,
+): void {
+  const currentMaxTokens = payload.max_tokens;
+  if (typeof currentMaxTokens !== "number" || !Number.isFinite(currentMaxTokens)) {
+    return;
+  }
+  const estimatedInputTokens = estimatePayloadInputTokens(payload);
+  const availableOutputTokens = Math.max(
+    CONTEXT_LENGTH_RETRY_FLOOR,
+    Math.floor(model.limit.context - estimatedInputTokens - CONTEXT_INPUT_SAFETY_TOKENS),
+  );
+  const nextMaxTokens = Math.min(currentMaxTokens, model.limit.output, availableOutputTokens);
+  if (nextMaxTokens >= currentMaxTokens) {
+    return;
+  }
+  payload.max_tokens = nextMaxTokens;
+  debugLog(options, `clamped ${label} max_tokens to estimated context budget`, {
+    model: payload.model,
+    maxTokens: nextMaxTokens,
+    requestedMaxTokens: currentMaxTokens,
+    estimatedInputTokens,
+  });
+}
+
+function estimatePayloadInputTokens(payload: Record<string, unknown>): number {
+  return Math.max(
+    1,
+    Math.ceil(
+      byteLength({
+        messages: payload.messages,
+        tools: payload.tools,
+        tool_choice: payload.tool_choice,
+      }) / CONSERVATIVE_CHARS_PER_TOKEN,
+    ),
+  );
 }
 
 function canTrimInputForContextLengthRetry(error: TogetherApiError, model: ModelDefinition): boolean {
@@ -317,7 +383,8 @@ export async function handleProxyRequest(
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
   const nativeTools = nativeServerTools(body.tools);
-  const tracePayload = tracePayloadForClaudeUpstream(body, options);
+  const profile = resolveClaudeRequestProfile(body, options);
+  const tracePayload = tracePayloadForClaudeUpstream(body, options, profile);
   const upstreamMode: ProxyTraceEvent["upstreamMode"] = body.stream ? "stream" : "buffered";
   const traceBase = {
     id: randomUUID(),
@@ -374,6 +441,9 @@ export async function handleProxyRequest(
   options.costTracker?.beginRequest();
   debugLog(options, "anthropic request", {
     model: body.model,
+    targetModel: profile.targetModel.definition.id,
+    profile: profile.label,
+    subagent: profile.subagent.isSubagent ? profile.subagent : undefined,
     stream: body.stream,
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
@@ -388,7 +458,7 @@ export async function handleProxyRequest(
     // and replace it with a text block, so GLM reasons over the description.
     await resolveImageBlocks(body, options);
     if (body.stream) {
-      const result = await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
+      const result = await streamAnthropicFromTogether(res, body, options, profile, upstreamAbort.signal, timingHooks);
       finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
       if (options.debug) {
         const delta = options.costTracker?.requestDelta;
@@ -406,7 +476,7 @@ export async function handleProxyRequest(
       return;
     }
 
-    const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal, timingHooks);
+    const openAiResponse = await callTogetherChatCompletions(body, options, profile, upstreamAbort.signal, timingHooks);
     const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
     const delta = options.costTracker?.requestDelta;
@@ -476,11 +546,12 @@ function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): strin
 function tracePayloadForClaudeUpstream(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
+  profile = resolveClaudeRequestProfile(body, options),
 ): {
   cacheKey: NonNullable<ProxyTraceEvent["cacheKey"]>;
   promptProfile: NonNullable<ProxyTraceEvent["promptProfile"]>;
 } {
-  const targetModel = resolveTargetModel(body.model, options);
+  const targetModel = profile.targetModel;
   const nativeTools = nativeServerTools(body.tools);
   const messages = toOpenAIMessages(body, targetModel.definition);
   const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
@@ -494,16 +565,16 @@ function tracePayloadForClaudeUpstream(
       parameters: toOpenAIToolParameters(tool),
     },
   }));
-  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+  const reasoningEffort = profile.reasoningEffort;
   const upstreamPayload = {
     model: targetModel.definition.id,
     messages: upstreamMessages,
-    max_tokens: clampRequestedMaxTokens(body.max_tokens, targetModel.definition),
+    max_tokens: profile.maxTokens,
     temperature: body.temperature,
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    chat_template_kwargs: { clear_thinking: false },
+    chat_template_kwargs: { clear_thinking: profile.clearThinking },
     stream: Boolean(body.stream),
   };
   const systemBytes = byteLength(systemMessages);
@@ -655,10 +726,11 @@ function constantTimeEqual(actual: string | undefined, expected: string): boolea
 async function callTogetherChatCompletions(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
+  profile: ClaudeRequestProfile,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<OpenAIChatResponse> {
-  const targetModel = resolveTargetModel(body.model, options);
+  const targetModel = profile.targetModel;
   const nativeTools = nativeServerTools(body.tools);
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
@@ -673,8 +745,8 @@ async function callTogetherChatCompletions(
   }));
 
   for (let turn = 0; turn < 5; turn += 1) {
-    const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-    let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+    const reasoningEffort = profile.reasoningEffort;
+    let maxTokens = profile.maxTokens;
     const payload = {
       model: targetModel.definition.id,
       messages:
@@ -684,9 +756,11 @@ async function callTogetherChatCompletions(
       tools,
       tool_choice: toOpenAIToolChoice(body.tool_choice),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-      chat_template_kwargs: { clear_thinking: false },
+      chat_template_kwargs: { clear_thinking: profile.clearThinking },
       stream: false,
     };
+    applyEstimatedContextBudget(payload, targetModel.definition, options, "request");
+    maxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : maxTokens;
     debugLog(options, "together request", {
       model: payload.model,
       messageCount: payload.messages.length,
@@ -811,6 +885,189 @@ function resolveTargetModel(requestedModel: string | undefined, options: ClaudeP
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
 }
 
+function resolveClaudeRequestProfile(body: AnthropicMessagesRequest, options: ClaudeProxyOptions): ClaudeRequestProfile {
+  const baseTarget = resolveTargetModel(body.model, options);
+  const subagent = extractClaudeCodeMetadata(body);
+  const lightweight = isHaikuLikeSubagent(subagent);
+  const sonnetLike = isSonnetLikeSubagent(subagent);
+  if (lightweight) {
+    const target = resolveProfileTarget(
+      process.env[CLAUDE_HAIKU_SUBAGENT_MODEL_ENV],
+      CLAUDE_HAIKU_SUBAGENT_FALLBACK_MODEL,
+      baseTarget,
+    );
+    return {
+      targetModel: target,
+      maxTokens: cappedMaxTokens(body.max_tokens, target.definition, CLAUDE_HAIKU_SUBAGENT_MAX_TOKENS),
+      reasoningEffort: undefined,
+      clearThinking: true,
+      subagent,
+      label: "haiku-subagent",
+    };
+  }
+  if (sonnetLike) {
+    const target = resolveProfileTarget(
+      process.env[CLAUDE_SONNET_SUBAGENT_MODEL_ENV],
+      baseTarget.definition,
+      baseTarget,
+    );
+    return {
+      targetModel: target,
+      maxTokens: cappedMaxTokens(body.max_tokens, target.definition, CLAUDE_SONNET_SUBAGENT_MAX_TOKENS),
+      reasoningEffort: togetherReasoningEffort(body, target.definition),
+      clearThinking: false,
+      subagent,
+      label: "sonnet-subagent",
+    };
+  }
+  return {
+    targetModel: baseTarget,
+    maxTokens: clampRequestedMaxTokens(body.max_tokens, baseTarget.definition),
+    reasoningEffort: togetherReasoningEffort(body, baseTarget.definition),
+    clearThinking: false,
+    subagent,
+    label: "default",
+  };
+}
+
+function resolveProfileTarget(
+  configuredModelId: string | undefined,
+  fallback: ModelDefinition,
+  baseTarget: ResolvedClaudeModel,
+): ResolvedClaudeModel {
+  const configured = configuredModelId?.trim();
+  const definition = configured ? findModelById(configured) ?? fallback : fallback;
+  if (definition.id === baseTarget.definition.id) {
+    return baseTarget;
+  }
+  return { alias: definition.anthropicAlias ?? definition.id, definition };
+}
+
+function cappedMaxTokens(maxTokens: number | undefined, model: ModelDefinition, cap: number): number | undefined {
+  const requested = clampRequestedMaxTokens(maxTokens, model);
+  if (typeof requested !== "number" || !Number.isFinite(requested)) {
+    return Math.min(cap, model.limit.output);
+  }
+  return Math.min(requested, cap, model.limit.output);
+}
+
+function isHaikuLikeSubagent(metadata: ClaudeCodeMetadata): boolean {
+  return metadata.isSubagent && (
+    metadata.modelHint === "haiku" ||
+    metadata.kind === "explore" ||
+    metadata.kind === "claude-code-guide"
+  );
+}
+
+function isSonnetLikeSubagent(metadata: ClaudeCodeMetadata): boolean {
+  return metadata.isSubagent && (
+    metadata.modelHint === "sonnet" ||
+    metadata.kind === "statusline-setup"
+  );
+}
+
+function extractClaudeCodeMetadata(body: AnthropicMessagesRequest): ClaudeCodeMetadata {
+  const text = claudeRequestSearchText(body);
+  const billingFields = parseClaudeBillingHeader(text);
+  const isSubagent =
+    billingFields.get("cc_is_subagent") === "true" ||
+    /\bcc_is_subagent=true\b/i.test(text);
+  const explicitKind = normalizeSubagentKind(
+    billingFields.get("cc_subagent_name") ??
+      billingFields.get("cc_subagent") ??
+      billingFields.get("cc_agent") ??
+      billingFields.get("subagent"),
+  );
+  const detectedKind = explicitKind ?? detectSubagentKindFromPrompt(text);
+  const modelHint = normalizeSubagentModelHint(
+    billingFields.get("cc_subagent_model") ??
+      billingFields.get("cc_model") ??
+      billingFields.get("model") ??
+      body.model,
+  );
+  return {
+    isSubagent,
+    kind: isSubagent ? detectedKind ?? "unknown" : undefined,
+    modelHint: isSubagent ? modelHint : undefined,
+  };
+}
+
+function parseClaudeBillingHeader(text: string): Map<string, string> {
+  const fields = new Map<string, string>();
+  const match = text.match(/x-anthropic-billing-header:\s*([^\n\r]+)/i);
+  const header = match?.[1];
+  if (!header) {
+    return fields;
+  }
+  for (const part of header.split(";")) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    const key = rawKey?.trim().toLowerCase();
+    if (!key || rawValue.length === 0) {
+      continue;
+    }
+    fields.set(key, rawValue.join("=").trim().toLowerCase());
+  }
+  return fields;
+}
+
+function detectSubagentKindFromPrompt(text: string): ClaudeCodeSubagentKind | undefined {
+  if (/file search specialist/i.test(text)) {
+    return "explore";
+  }
+  if (/claude-code-guide|claude code guide/i.test(text)) {
+    return "claude-code-guide";
+  }
+  if (/statusline-setup|statusline setup/i.test(text)) {
+    return "statusline-setup";
+  }
+  return undefined;
+}
+
+function normalizeSubagentKind(value: string | undefined): ClaudeCodeSubagentKind | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.toLowerCase().replaceAll(/[\s_]+/g, "-");
+  if (normalized === "explore") {
+    return "explore";
+  }
+  if (normalized === "claude-code-guide") {
+    return "claude-code-guide";
+  }
+  if (normalized === "statusline-setup") {
+    return "statusline-setup";
+  }
+  if (normalized === "general-purpose" || normalized === "plan" || normalized === "claude") {
+    return "unknown";
+  }
+  return undefined;
+}
+
+function normalizeSubagentModelHint(value: string | undefined): ClaudeCodeSubagentModelHint {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.toLowerCase();
+  if (normalized.includes("haiku")) {
+    return "haiku";
+  }
+  if (normalized.includes("sonnet")) {
+    return "sonnet";
+  }
+  if (normalized.includes("inherit")) {
+    return "inherit";
+  }
+  return undefined;
+}
+
+function claudeRequestSearchText(body: AnthropicMessagesRequest): string {
+  const parts = [stringifyAnthropicContent(body.system)];
+  for (const message of body.messages ?? []) {
+    parts.push(stringifyAnthropicContent(message.content));
+  }
+  return parts.filter(Boolean).join("\n");
+}
+
 function findClaudeModel(modelId: string, options: ClaudeProxyOptions): ResolvedClaudeModel | undefined {
   const supported = CLAUDE_SUPPORTED_MODELS.find(
     (model) => model.alias === modelId || model.definition.id === modelId,
@@ -857,7 +1114,7 @@ export function countTokensResponse(
   });
   const estimatedTokens = Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / APPROX_CHARS_PER_TOKEN));
   return {
-    input_tokens: targetModel ? Math.min(estimatedTokens, safeClaudeInputLimit(targetModel)) : estimatedTokens,
+    input_tokens: estimatedTokens,
   };
 }
 
@@ -1369,10 +1626,11 @@ async function streamAnthropicFromTogether(
   res: ServerResponse,
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
+  profile: ClaudeRequestProfile,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<StreamProxyResult> {
-  const targetModel = resolveTargetModel(body.model, options);
+  const targetModel = profile.targetModel;
   const messages = toOpenAIMessages(body, targetModel.definition);
   const tools = body.tools?.map((tool) => ({
     type: "function",
@@ -1382,8 +1640,8 @@ async function streamAnthropicFromTogether(
       parameters: toOpenAIToolParameters(tool),
     },
   }));
-  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-  let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+  const reasoningEffort = profile.reasoningEffort;
+  let maxTokens = profile.maxTokens;
 
   const payload = {
     model: targetModel.definition.id,
@@ -1393,12 +1651,14 @@ async function streamAnthropicFromTogether(
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    chat_template_kwargs: { clear_thinking: false },
+    chat_template_kwargs: { clear_thinking: profile.clearThinking },
     stream: true,
     // Guarantee Together sends a usage chunk at the end so cost tracking has
     // real token counts (without this, some streamed responses omit usage).
     stream_options: { include_usage: true },
   };
+  applyEstimatedContextBudget(payload, targetModel.definition, options, "stream");
+  maxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : maxTokens;
 
   debugLog(options, "together stream request", {
     model: payload.model,

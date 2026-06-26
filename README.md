@@ -49,20 +49,20 @@ Run the built CLI directly:
 
 ```bash
 node packages/cli/dist/bin/togetherlink.js help
-node packages/cli/dist/bin/togetherlink.js opencode status --json
-node packages/cli/dist/bin/togetherlink.js claude status --json
-node packages/cli/dist/bin/togetherlink.js codex status --json
-node packages/cli/dist/bin/togetherlink.js pi status --json
+node packages/cli/dist/bin/togetherlink.js --json status opencode
+node packages/cli/dist/bin/togetherlink.js --json status claude
+node packages/cli/dist/bin/togetherlink.js --json status codex
+node packages/cli/dist/bin/togetherlink.js --json status pi
 ```
 
 Run through the workspace bin, which is closest to how users will invoke it:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink help
-pnpm -F @togetherlink/cli exec togetherlink opencode status --json
-pnpm -F @togetherlink/cli exec togetherlink claude status --json
-pnpm -F @togetherlink/cli exec togetherlink codex status --json
-pnpm -F @togetherlink/cli exec togetherlink pi status --json
+pnpm -F @togetherlink/cli exec togetherlink --json status opencode
+pnpm -F @togetherlink/cli exec togetherlink --json status claude
+pnpm -F @togetherlink/cli exec togetherlink --json status codex
+pnpm -F @togetherlink/cli exec togetherlink --json status pi
 ```
 
 Typecheck/test:
@@ -79,7 +79,7 @@ OpenCode uses ephemeral Together settings: `togetherlink opencode` injects the T
 ```bash
 export TOGETHER_API_KEY="..."
 
-pnpm -F @togetherlink/cli exec togetherlink opencode status --json
+pnpm -F @togetherlink/cli exec togetherlink --json status opencode
 pnpm -F @togetherlink/cli exec togetherlink opencode
 ```
 
@@ -168,25 +168,25 @@ export TOGETHER_API_KEY="..."
 pnpm -F @togetherlink/cli exec togetherlink claude
 ```
 
-Pass arguments through to `claude` after `--`:
+Pass arguments through to `claude` after the harness name:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink claude -- --help
-pnpm -F @togetherlink/cli exec togetherlink claude -- --version
+pnpm -F @togetherlink/cli exec togetherlink claude --help
+pnpm -F @togetherlink/cli exec togetherlink claude --version
 ```
 
 The Claude local proxy defaults to Together GLM-5.2 (`zai-org/GLM-5.2`) and can also route Claude Code through Kimi K2.7 Code.
 Pick a backend for one launch:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink claude --main together-glm-5-2
-pnpm -F @togetherlink/cli exec togetherlink claude --main together-kimi-k2-7-code
+pnpm -F @togetherlink/cli exec togetherlink --main together-glm-5-2 claude
+pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k2-7-code claude
 ```
 
 Check the runtime defaults without launching Claude:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink claude status --json
+pnpm -F @togetherlink/cli exec togetherlink --json status claude
 ```
 
 ## Testing Codex
@@ -204,20 +204,20 @@ pnpm -F @togetherlink/cli exec togetherlink codex
 Run Codex headlessly through Together:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink codex -- exec "Say hi"
-tcodex -- exec "Say hi"
+pnpm -F @togetherlink/cli exec togetherlink codex exec "Say hi"
+tcodex exec "Say hi"
 ```
 
 Compare direct Codex/OpenAI elapsed time with togetherlink Codex/Together:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink codex benchmark
+pnpm -F @togetherlink/cli exec togetherlink benchmark codex
 ```
 
 Check the runtime defaults without launching Codex:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink codex status --json
+pnpm -F @togetherlink/cli exec togetherlink --json status codex
 ```
 
 Inspect recent Codex proxy speed traces:
@@ -243,12 +243,12 @@ tpi
 Run Pi Code headlessly through Together:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink pi -- -p "Say hi"
-tpi -- -p "Say hi"
+pnpm -F @togetherlink/cli exec togetherlink pi -p "Say hi"
+tpi -p "Say hi"
 ```
 
 Check the runtime defaults without launching Pi:
 
 ```bash
-pnpm -F @togetherlink/cli exec togetherlink pi status --json
+pnpm -F @togetherlink/cli exec togetherlink --json status pi
 ```

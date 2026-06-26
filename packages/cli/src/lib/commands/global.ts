@@ -13,21 +13,22 @@ export function printHelp() {
 
 Usage:
   togetherlink configure                Detect installed tools and set your Together API key
-  togetherlink claude [run] [-- ...]    Launch Claude Code through a local Together proxy
-  tclaude [-- ...]                      Alias for: togetherlink claude
-  togetherlink claude --main together-kimi-k2-7-code
+  togetherlink claude [...]             Launch Claude Code through a local Together proxy
+  tclaude [...]                         Claude Code through Together; passes args to claude
+  togetherlink --main together-kimi-k2-7-code claude
                                       Launch Claude Code with Kimi K2.7 Code
-  togetherlink claude status            Show Claude Code local proxy defaults
-  togetherlink opencode [run] [-- ...]  Launch OpenCode with Together GLM 5.2
-  topencode [-- ...]                    Alias for: togetherlink opencode
-  togetherlink opencode status          Show OpenCode runtime defaults
-  togetherlink codex [run] [-- ...]     Launch Codex through a local Responses proxy
-  tcodex [-- ...]                       Alias for: togetherlink codex
-  togetherlink codex -- exec "Say hi"   Run Codex headlessly through Together
-  togetherlink codex benchmark          Compare direct Codex vs togetherlink Codex latency
-  togetherlink pi|picode [run] [-- ...] Launch Pi Code with Together AI
-  tpi [-- ...]                          Alias for: togetherlink pi
-  togetherlink daemon status            Show the shared proxy daemon status
+  togetherlink status claude            Show Claude Code local proxy defaults
+  togetherlink opencode [...]           Launch OpenCode with Together GLM 5.2
+  topencode [...]                       OpenCode through Together; passes args to opencode
+  togetherlink status opencode          Show OpenCode runtime defaults
+  togetherlink codex [...]              Launch Codex through a local Responses proxy
+  tcodex [...]                          Codex through Together; passes args to codex
+  togetherlink codex exec "Say hi"      Run Codex headlessly through Together
+  togetherlink benchmark codex          Compare direct Codex vs togetherlink Codex latency
+  togetherlink pi|picode [...]          Launch Pi Code with Together AI
+  tpi [...]                             Pi Code through Together; passes args to pi
+  togetherlink status pi                Show Pi Code runtime defaults
+  togetherlink status daemon            Show the shared proxy daemon status
   togetherlink daemon profile           Summarize recent Codex proxy speed traces
   togetherlink daemon stop              Stop the shared proxy daemon
   togetherlink --version                Show the CLI version

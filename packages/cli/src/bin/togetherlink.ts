@@ -3,6 +3,7 @@ import { loadEnvFile } from "../lib/load-env.js";
 import { parseArgs } from "../lib/parse-args.js";
 import { printHelp, runConfigure } from "../lib/commands/global.js";
 import { dispatchHarnessCommand } from "../lib/commands/harness.js";
+import { isHarnessCommand, resolveHarnessInvocation } from "../lib/commands/harness-invocation.js";
 import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from "../lib/global-config.js";
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { VERSION } from "../lib/version.js";
@@ -81,8 +82,8 @@ async function main() {
   // without the user re-sourcing .env every session.
   await loadStoredExaKey();
 
-  const { positional, flags } = parseArgs(process.argv.slice(2));
-  const [rawCommand, verb] = positional;
+  const parsed = parseArgs(process.argv.slice(2));
+  const [rawCommand, rawVerb] = parsed.positional;
   const command = rawCommand === "picode" ? "pi" : rawCommand;
 
   if (!command || command === "help" || command === "--help") {
@@ -113,23 +114,48 @@ async function main() {
   // User-facing daemon control. Not a harness, so handle it before the harness
   // dispatch (which would reject "daemon" as an unknown harness).
   if (command === "daemon") {
+    if (rawVerb === undefined || rawVerb === "status") {
+      throw new Error('Use "togetherlink status daemon" for daemon status.');
+    }
     const { runDaemonCommand } = await import("../lib/daemon/cli.js");
-    await runDaemonCommand(verb);
+    await runDaemonCommand(rawVerb);
     return;
   }
 
-  if (command === "codex" && verb === "benchmark") {
-    const { runCodexBenchmark } = await import("../lib/codex/benchmark.js");
-    await runCodexBenchmark(flags);
+  if (command === "status") {
+    const target = rawVerb === "picode" ? "pi" : rawVerb;
+    if (target === "daemon") {
+      const { runDaemonCommand } = await import("../lib/daemon/cli.js");
+      await runDaemonCommand("status");
+      return;
+    }
+    if (!isHarnessCommand(target)) {
+      throw new Error(`Unknown status target "${target ?? ""}". Expected one of: claude, codex, opencode, pi, daemon.`);
+    }
+    await dispatchHarnessCommand(target, "status", parsed.flags);
     return;
   }
+
+  if (command === "benchmark" && rawVerb === "codex") {
+    const { runCodexBenchmark } = await import("../lib/codex/benchmark.js");
+    await runCodexBenchmark(parsed.flags);
+    return;
+  }
+
+  const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
   // First-run key setup only matters for the harness-launching commands.
-  if ((command === "claude" || command === "codex" || command === "opencode" || command === "pi") && verb !== "status") {
+  if (
+    (invocation.command === "claude" ||
+      invocation.command === "codex" ||
+      invocation.command === "opencode" ||
+      invocation.command === "pi") &&
+    invocation.command !== undefined
+  ) {
     await maybePromptApiKey();
   }
 
-  await dispatchHarnessCommand(command, verb, flags);
+  await dispatchHarnessCommand(invocation.command, undefined, invocation.flags);
 }
 
 main().catch((err: unknown) => {

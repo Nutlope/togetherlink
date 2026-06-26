@@ -8,7 +8,7 @@ const VALID_VERBS = new Set(["run", "status"]);
 type HarnessVerb = "run" | "status";
 
 export async function dispatchHarnessCommand(
-  harnessName: string,
+  harnessName: string | undefined,
   verb: string | undefined,
   flags: Partial<HarnessContext>,
 ): Promise<void> {
@@ -35,8 +35,8 @@ export async function dispatchHarnessCommand(
   renderResult(result, flags);
 }
 
-function isKnownHarness(value: string): value is HarnessId {
-  return (ALL_HARNESSES as readonly string[]).includes(value);
+function isKnownHarness(value: string | undefined): value is HarnessId {
+  return value !== undefined && (ALL_HARNESSES as readonly string[]).includes(value);
 }
 
 function isHarnessVerb(value: string): value is HarnessVerb {

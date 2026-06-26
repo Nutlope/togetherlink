@@ -14,7 +14,7 @@ type DashboardResponse = {
 };
 
 /**
- * `togetherlink daemon status` / `togetherlink daemon stop`. These are thin
+ * `togetherlink status daemon` / `togetherlink daemon stop`. These are thin
  * user-facing controls over the shared proxy daemon; the daemon itself is
  * started lazily by `togetherlink claude` via `ensureDaemon`.
  */
@@ -70,7 +70,7 @@ async function daemonProfile(): Promise<void> {
   const healthy = await probeHealthz(port);
   if (!healthy) {
     console.log(`togetherlink codex profile: daemon is not running on ${daemonUrl(port)}.`);
-    console.log('Run `tcodex -- exec "Say hi"` or `togetherlink codex`, then rerun this command.');
+    console.log('Run `tcodex exec "Say hi"` or `togetherlink codex`, then rerun this command.');
     return;
   }
 
@@ -86,7 +86,7 @@ async function daemonProfile(): Promise<void> {
 
   if (traces.length === 0) {
     console.log("togetherlink codex profile: no Codex proxy traces recorded yet.");
-    console.log('Run `tcodex -- exec "Say hi"` or a coding task, then rerun `togetherlink daemon profile`.');
+    console.log('Run `tcodex exec "Say hi"` or a coding task, then rerun `togetherlink daemon profile`.');
     return;
   }
 
