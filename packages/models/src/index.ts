@@ -185,6 +185,22 @@ export const KIMI_K2_7_CODE: ModelDefinition = {
 };
 
 /**
+ * Qwen3.5 9B — small, cheap, vision-capable fallback for image description.
+ */
+export const QWEN_3_5_9B: ModelDefinition = {
+  id: "Qwen/Qwen3.5-9B",
+  name: "Qwen3.5 9B",
+  anthropicAlias: null,
+  cost: { input: 0.17, output: 0.25, cache_read: 0 },
+  limit: { context: 131_072, output: 32_768 },
+  attachment: true,
+  reasoning: true,
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text", "image"], output: ["text"] },
+};
+
+/**
  * Curated vision models for image description, ordered primary-first. The
  * Claude proxy iterates this list with automatic failover; OpenCode wires only
  * the primary (VISION_MODELS[0]) into its `@vision` subagent since subagents
@@ -194,18 +210,7 @@ export const KIMI_K2_7_CODE: ModelDefinition = {
  */
 export const VISION_MODELS: readonly ModelDefinition[] = [
   KIMI_K2_7_CODE,
-  {
-    id: "Qwen/Qwen3.5-9B",
-    name: "Qwen3.5 9B",
-    anthropicAlias: null,
-    cost: { input: 0.17, output: 0.25, cache_read: 0 },
-    limit: { context: 131_072, output: 32_768 },
-    attachment: true,
-    reasoning: true,
-    temperature: true,
-    tool_call: true,
-    modalities: { input: ["text", "image"], output: ["text"] },
-  },
+  QWEN_3_5_9B,
 ];
 
 /** Primary vision model (first in VISION_MODELS). */

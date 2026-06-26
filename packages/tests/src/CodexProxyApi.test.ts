@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2 } from "@togetherlink/models";
+import { GLM_5_2, MINIMAX_M3, QWEN_3_5_9B } from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
@@ -21,6 +21,7 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   test("maps custom tool calls back to Codex custom_tool_call items", async () => {
@@ -540,6 +541,95 @@ describe("Codex Responses proxy tool compatibility", () => {
       total_tokens: 19,
       output_tokens_details: { reasoning_tokens: 5 },
     });
+  });
+
+  test("routes Codex memory extraction requests to the default long-context Together model", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push(JSON.parse(String(init?.body)));
+      return jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                rollout_summary: "Captured TogetherLink memory support investigation.",
+                rollout_slug: "togetherlink_codex_memory_support",
+                raw_memory: "TogetherLink should route Codex memory extraction separately from the main coding model.",
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 25, total_tokens: 125 },
+      });
+    }));
+
+    const response = await postResponses({
+      model: "gpt-5.4-mini",
+      instructions: "## Memory Writing Agent: Phase 1 (Single Rollout)\n\nYou are a Memory Writing Agent.",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Analyze this rollout." }] }],
+      text: {
+        format: {
+          type: "json_schema",
+          strict: true,
+          name: "codex_output_schema",
+          schema: {
+            type: "object",
+            properties: {
+              rollout_summary: { type: "string" },
+              rollout_slug: { type: ["string", "null"] },
+              raw_memory: { type: "string" },
+            },
+            required: ["rollout_summary", "rollout_slug", "raw_memory"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+
+    const upstream = requests[0] as { model?: string; response_format?: unknown };
+    expect(upstream.model).toBe(MINIMAX_M3.id);
+    expect(upstream.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "codex_output_schema",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            rollout_summary: { type: "string" },
+            rollout_slug: { type: ["string", "null"] },
+            raw_memory: { type: "string" },
+          },
+          required: ["rollout_summary", "rollout_slug", "raw_memory"],
+          additionalProperties: false,
+        },
+      },
+    });
+    expect(response.model).toBe("gpt-5.4-mini");
+  });
+
+  test("allows Codex memory extraction model override from env", async () => {
+    const requests: unknown[] = [];
+    vi.stubEnv("TOGETHERLINK_CODEX_MEMORY_MODEL", QWEN_3_5_9B.id);
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ choices: [{ message: { content: "{}" } }] });
+    }));
+
+    await postResponses({
+      model: "gpt-5.4-mini",
+      instructions: "## Memory Writing Agent: Phase 1 (Single Rollout)",
+      input: "Analyze this rollout.",
+    });
+
+    const upstream = requests[0] as { model?: string };
+    expect(upstream.model).toBe(QWEN_3_5_9B.id);
   });
 });
 

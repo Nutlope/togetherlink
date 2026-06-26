@@ -126,13 +126,7 @@ function codexConfigArgs(proxyUrl: string, authToken: string, modelId: string, c
     `model_providers.${CODEX_PROVIDER_ID}.wire_api="responses"`,
     "-c",
     `model_providers.${CODEX_PROVIDER_ID}.env_key="${CODEX_AUTH_ENV}"`,
-    "-c",
-    `features.memories=${codexMemoriesEnabled() ? "true" : "false"}`,
   ];
-}
-
-function codexMemoriesEnabled(): boolean {
-  return process.env.TOGETHERLINK_CODEX_MEMORIES === "1";
 }
 
 function writeCodexModelCatalog(): { path: string; cleanup: () => void } {

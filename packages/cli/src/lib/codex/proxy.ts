@@ -2,7 +2,7 @@ import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
-import { type ModelDefinition } from "@togetherlink/models";
+import { findModelById, MINIMAX_M3, type ModelDefinition } from "@togetherlink/models";
 import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
@@ -48,6 +48,16 @@ type ResponsesRequest = {
   max_output_tokens?: number;
   stream?: boolean;
   reasoning?: { effort?: string | null } | null;
+  text?: ResponsesTextConfig;
+};
+
+type ResponsesTextConfig = {
+  format?: {
+    type?: string;
+    name?: string;
+    schema?: unknown;
+    strict?: boolean;
+  };
 };
 
 type ChatMessage = {
@@ -148,6 +158,12 @@ type UpstreamTimingHooks = {
   onFirstByte?: () => void;
 };
 type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
+type ResolvedCodexRequestModel = {
+  requestedModelId: string;
+  targetModelId: string;
+  definition: ModelDefinition;
+  memory: boolean;
+};
 
 type StreamOutputState = {
   nextOutputIndex: number;
@@ -176,6 +192,9 @@ const CODEX_IDENTITY_PROMPT =
   "The upstream model is a Together AI model, not an OpenAI model. " +
   "If asked what model you are, identify yourself as the selected Together AI backend routed by togetherlink.";
 
+const CODEX_MEMORY_MODEL_ENV = "TOGETHERLINK_CODEX_MEMORY_MODEL";
+const CODEX_MEMORY_REQUESTED_MODELS = new Set(["gpt-5.4-mini"]);
+
 export async function handleCodexProxyRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -203,7 +222,8 @@ export async function handleCodexProxyRequest(
   const body = (await readJsonBody(req)) as ResponsesRequest;
   const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
   const toolTranslation = translateCodexTools(body.tools);
-  const translatedPayload = toChatPayload(body, options, Boolean(body.stream), toolTranslation);
+  const requestModel = resolveCodexRequestModel(body, options);
+  const translatedPayload = toChatPayload(body, options, Boolean(body.stream), toolTranslation, requestModel);
   const tracePayload = tracePayloadForCodexPayload(translatedPayload);
   const traceBase = {
     id: randomUUID(),
@@ -259,6 +279,8 @@ export async function handleCodexProxyRequest(
   options.costTracker?.beginRequest();
   debugLog(options, "responses request", {
     model: body.model,
+    targetModel: requestModel.targetModelId,
+    memory: requestModel.memory,
     stream: body.stream,
     inputItems: Array.isArray(body.input) ? body.input.length : typeof body.input,
     toolCount: body.tools?.length ?? 0,
@@ -274,6 +296,7 @@ export async function handleCodexProxyRequest(
         options,
         translatedPayload,
         toolTranslation,
+        requestModel.definition,
         upstreamAbort.signal,
         timingHooks,
       );
@@ -285,10 +308,11 @@ export async function handleCodexProxyRequest(
       translatedPayload,
       toolTranslation,
       options,
+      requestModel.definition,
       upstreamAbort.signal,
       timingHooks,
     );
-    recordUsage(chatResponse.usage, options);
+    recordUsage(chatResponse.usage, options, requestModel.definition);
     writeJson(res, 200, toResponsesResponse(chatResponse, body, options, toolTranslation));
     finalizeTrace(true, res.statusCode);
   } catch (err) {
@@ -360,10 +384,11 @@ function summarizeResponsesContent(content: string | ResponsesContentPart[] | un
 async function callTogether(
   payload: Record<string, unknown>,
   options: CodexProxyOptions,
+  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<ChatResponse> {
-  const result = await fetchTogetherChat(payload, options, signal, hooks);
+  const result = await fetchTogetherChat(payload, options, modelDefinition, signal, hooks);
   if (!result.ok) {
     throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
   }
@@ -374,11 +399,12 @@ async function callTogetherWithNativeTools(
   payload: Record<string, unknown>,
   toolTranslation: CodexToolTranslation,
   options: CodexProxyOptions,
+  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<ChatResponse> {
   if (toolTranslation.nativeTools.length === 0) {
-    return callTogether(payload, options, signal, hooks);
+    return callTogether(payload, options, modelDefinition, signal, hooks);
   }
 
   const messages = Array.isArray(payload.messages) ? ([...(payload.messages as ChatMessage[])] as ChatMessage[]) : [];
@@ -386,7 +412,7 @@ async function callTogetherWithNativeTools(
   const nativeToolUses = new Map<string, number>();
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
-    const json = await callTogether({ ...payload, messages }, options, signal, hooks);
+    const json = await callTogether({ ...payload, messages }, options, modelDefinition, signal, hooks);
     const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
     const nativeToolCalls = toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function?.name ?? ""));
     if (nativeToolCalls.length === 0) {
@@ -471,6 +497,7 @@ async function callTogetherWithNativeTools(
 async function fetchTogetherChat(
   payload: Record<string, unknown>,
   options: CodexProxyOptions,
+  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<TogetherChatResult> {
@@ -479,7 +506,7 @@ async function fetchTogetherChat(
     return { ok: true, response: first };
   }
   const text = await first.text();
-  const retryMaxTokens = maxTokensForContextLengthRetry(text, options, payload.max_tokens);
+  const retryMaxTokens = maxTokensForContextLengthRetry(text, modelDefinition, payload.max_tokens);
   if (retryMaxTokens === undefined) {
     return { ok: false, status: first.status, text };
   }
@@ -521,23 +548,54 @@ function toChatPayload(
   options: CodexProxyOptions,
   stream: boolean,
   toolTranslation: CodexToolTranslation,
+  requestModel: ResolvedCodexRequestModel,
 ): Record<string, unknown> {
   const messages = toChatMessages(body, options, toolTranslation);
-  const translatedReasoningEffort = reasoningEffort(body, options);
+  const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
   const messagesWithNativePrompt =
     toolTranslation.nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, toolTranslation.nativeTools) : messages;
   return {
-    model: options.targetModelId,
+    model: requestModel.targetModelId,
     messages: messagesWithNativePrompt,
     max_tokens: body.max_output_tokens,
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
     tool_choice: toChatToolChoice(body.tool_choice, toolTranslation),
+    response_format: toChatResponseFormat(body.text),
     ...(translatedReasoningEffort ? { reasoning_effort: translatedReasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
   };
+}
+
+function resolveCodexRequestModel(body: ResponsesRequest, options: CodexProxyOptions): ResolvedCodexRequestModel {
+  const requestedModelId = body.model ?? options.modelId;
+  if (!isCodexMemoryRequest(body, requestedModelId)) {
+    return {
+      requestedModelId,
+      targetModelId: options.targetModelId,
+      definition: options.modelDefinition,
+      memory: false,
+    };
+  }
+
+  const configured = process.env[CODEX_MEMORY_MODEL_ENV]?.trim();
+  const configuredModel = configured ? findModelById(configured) : undefined;
+  const definition = configuredModel ?? MINIMAX_M3;
+  return {
+    requestedModelId,
+    targetModelId: definition.id,
+    definition,
+    memory: true,
+  };
+}
+
+function isCodexMemoryRequest(body: ResponsesRequest, requestedModelId: string): boolean {
+  if (CODEX_MEMORY_REQUESTED_MODELS.has(requestedModelId)) {
+    return true;
+  }
+  return body.instructions?.includes("## Memory Writing Agent:") === true;
 }
 
 function tracePayloadForCodexPayload(payload: Record<string, unknown>): {
@@ -975,9 +1033,33 @@ function toChatToolChoiceName(name: string, toolTranslation: CodexToolTranslatio
   return name;
 }
 
-function reasoningEffort(body: ResponsesRequest, options: CodexProxyOptions): string | undefined {
+function toChatResponseFormat(text: ResponsesTextConfig | undefined): unknown {
+  const format = text?.format;
+  if (!format?.type) {
+    return undefined;
+  }
+  if (format.type === "json_schema") {
+    return {
+      type: "json_schema",
+      json_schema: {
+        name: format.name ?? "codex_output_schema",
+        ...(format.schema !== undefined ? { schema: format.schema } : {}),
+        ...(format.strict !== undefined ? { strict: format.strict } : {}),
+      },
+    };
+  }
+  if (format.type === "json_object") {
+    return { type: "json_object" };
+  }
+  return undefined;
+}
+
+function reasoningEffort(body: ResponsesRequest, model: ModelDefinition): string | undefined {
   const effort = body.reasoning?.effort;
-  if (options.targetModelId === "zai-org/GLM-5.2") {
+  if (!model.reasoning) {
+    return undefined;
+  }
+  if (model.id === "zai-org/GLM-5.2") {
     if (effort === "high" || effort === "xhigh" || effort === "max") {
       return "max";
     }
@@ -1041,6 +1123,7 @@ async function streamResponseFromTogether(
   options: CodexProxyOptions,
   payload: Record<string, unknown>,
   toolTranslation: CodexToolTranslation,
+  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<StreamProxyResult> {
@@ -1065,8 +1148,8 @@ async function streamResponseFromTogether(
   if (toolTranslation.nativeTools.length > 0) {
     const nativePayload = { ...payload, stream: false };
     delete (nativePayload as { stream_options?: unknown }).stream_options;
-    const chatResponse = await callTogetherWithNativeTools(nativePayload, toolTranslation, options, signal, hooks);
-    recordUsage(chatResponse.usage, options);
+    const chatResponse = await callTogetherWithNativeTools(nativePayload, toolTranslation, options, modelDefinition, signal, hooks);
+    recordUsage(chatResponse.usage, options, modelDefinition);
     const output = toResponsesOutput(chatResponse, toolTranslation);
     let outputIndex = 0;
     for (const item of output) {
@@ -1098,7 +1181,7 @@ async function streamResponseFromTogether(
     return { ok: true, status: res.statusCode };
   }
 
-  const upstreamResult = await fetchTogetherChat(payload, options, signal, hooks);
+  const upstreamResult = await fetchTogetherChat(payload, options, modelDefinition, signal, hooks);
   if (!upstreamResult.ok) {
     const message = `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}`;
     writeResponsesSse(res, "response.failed", {
@@ -1237,7 +1320,7 @@ async function streamResponseFromTogether(
   }
 
   if (usage) {
-    recordUsage(usage, options);
+    recordUsage(usage, options, modelDefinition);
   }
   writeResponsesSse(res, "response.completed", {
     type: "response.completed",
@@ -1414,7 +1497,7 @@ function toResponsesUsage(usage: ChatResponse["usage"]): Record<string, unknown>
   };
 }
 
-function recordUsage(usage: ChatResponse["usage"], options: CodexProxyOptions): void {
+function recordUsage(usage: ChatResponse["usage"], options: CodexProxyOptions, modelDefinition: ModelDefinition): void {
   if (!usage) {
     return;
   }
@@ -1422,20 +1505,20 @@ function recordUsage(usage: ChatResponse["usage"], options: CodexProxyOptions): 
     usage.prompt_tokens ?? 0,
     usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0,
     usage.completion_tokens ?? 0,
-    options.modelDefinition,
+    modelDefinition,
   );
 }
 
 function maxTokensForContextLengthRetry(
   message: string,
-  options: CodexProxyOptions,
+  modelDefinition: ModelDefinition,
   currentMaxTokens: unknown,
 ): number | undefined {
   const inputTokens = parseTogetherContextLengthInputTokens(message);
   if (inputTokens === undefined) {
     return undefined;
   }
-  const availableOutputTokens = Math.min(options.modelDefinition.limit.context - inputTokens, options.modelDefinition.limit.output);
+  const availableOutputTokens = Math.min(modelDefinition.limit.context - inputTokens, modelDefinition.limit.output);
   if (availableOutputTokens < 1) {
     return undefined;
   }
