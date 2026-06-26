@@ -2,6 +2,7 @@ import {
   GLM_5_2,
   GLM_5_2_ANTHROPIC_CAPABILITIES,
   SELECTABLE_MODELS,
+  VISION_MODELS,
   resolveModelByKeys,
   type ModelDefinition,
 } from "@togetherlink/models";
@@ -18,18 +19,33 @@ export type ClaudeModelSelection = {
   definition: ModelDefinition;
 };
 
+export const CLAUDE_HAIKU_MODEL = VISION_MODELS[1] ?? VISION_MODELS[0] ?? GLM_5_2;
+export const CLAUDE_HAIKU_MODEL_SELECTION: ClaudeModelSelection = {
+  alias: CLAUDE_HAIKU_MODEL.anthropicAlias ?? CLAUDE_HAIKU_MODEL.id,
+  definition: CLAUDE_HAIKU_MODEL,
+};
+
 /**
  * Claude-routable models = the curated flagships that carry an Anthropic alias
- * (only alias-bearing models can be selected as a Claude Code backend). Derived
- * from the shared manifest so a new alias-bearing model appears here without a
- * code edit.
+ * plus the lightweight Haiku-tier backend Claude Code uses for built-in
+ * exploration subagents. Derived from the shared manifest so a new alias-bearing
+ * model appears here without a code edit.
  */
-export const CLAUDE_SUPPORTED_MODELS: readonly ClaudeModelSelection[] = SELECTABLE_MODELS.filter(
+const aliasBackedClaudeModels = SELECTABLE_MODELS.filter(
   (model) => model.anthropicAlias !== null,
 ).map((definition) => ({
   alias: definition.anthropicAlias ?? definition.id,
   definition,
 }));
+
+export const CLAUDE_SUPPORTED_MODELS: readonly ClaudeModelSelection[] = [
+  ...aliasBackedClaudeModels,
+  ...(
+    aliasBackedClaudeModels.some((model) => model.definition.id === CLAUDE_HAIKU_MODEL_SELECTION.definition.id)
+      ? []
+      : [CLAUDE_HAIKU_MODEL_SELECTION]
+  ),
+];
 
 export function resolveClaudeModel(value: string | undefined): ClaudeModelSelection {
   if (CLAUDE_SUPPORTED_MODELS.length === 0) {

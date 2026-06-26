@@ -1,12 +1,14 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2, VISION_MODELS } from "../../models/src/index.js";
+import { GLM_5_2 } from "../../models/src/index.js";
+import { buildClaudeEnv } from "../../cli/src/lib/claude/core.js";
+import { CLAUDE_HAIKU_MODEL } from "../../cli/src/lib/claude/defaults.js";
 import { handleProxyRequest, type ModelDefinition } from "../../cli/src/lib/claude/proxy.js";
 import type { ClaudeProxyOptions } from "../../cli/src/lib/claude/proxy.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-const EXPECTED_HAIKU_PROFILE_MODEL_ID = VISION_MODELS[1]?.id ?? VISION_MODELS[0]?.id ?? GLM_5_2.id;
+const EXPECTED_HAIKU_MODEL_ID = CLAUDE_HAIKU_MODEL.anthropicAlias ?? CLAUDE_HAIKU_MODEL.id;
 
 describe("Claude proxy compatibility API", () => {
   afterEach(() => {
@@ -24,6 +26,20 @@ describe("Claude proxy compatibility API", () => {
     expect(response.body.id).toBe(GLM_5_2.anthropicAlias);
     expect(response.body.max_input_tokens).toBeLessThan(GLM_5_2.limit.context);
     expect(response.body.max_tokens).toBe(GLM_5_2.limit.output);
+  });
+
+  test("configures Claude Code's Haiku tier to a lightweight Together model", () => {
+    const env = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+
+    expect(env.ANTHROPIC_MODEL).toBe(GLM_5_2.anthropicAlias);
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(EXPECTED_HAIKU_MODEL_ID);
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).not.toBe(GLM_5_2.anthropicAlias);
   });
 
   test("counts tokens without calling the upstream model", async () => {
@@ -181,7 +197,7 @@ describe("Claude proxy compatibility API", () => {
     expect(secondContent).toContain("[togetherlink trimmed older context to fit the model window]");
   });
 
-  test("routes Claude Code Explore subagents through the lightweight Haiku-like profile", async () => {
+  test("routes Claude Code Haiku-tier model requests without proxy subagent inference", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -198,13 +214,11 @@ describe("Claude proxy compatibility API", () => {
       method: "POST",
       url: "/v1/messages",
       body: JSON.stringify({
-        model: GLM_5_2.anthropicAlias,
+        model: EXPECTED_HAIKU_MODEL_ID,
         stream: true,
         max_tokens: 64_000,
         thinking: { type: "enabled", budget_tokens: 64_000 },
-        system:
-          "x-anthropic-billing-header: cc_version=2.1.193; cc_entrypoint=cli; cc_is_subagent=true; cc_subagent_name=Explore; cc_model=haiku;\n" +
-          "You are Claude Code. You are a file search specialist for Claude Code.",
+        system: "You are Claude Code. You are a file search specialist for Claude Code.",
         messages: [{ role: "user", content: "Find the relevant files." }],
       }),
     });
@@ -213,9 +227,9 @@ describe("Claude proxy compatibility API", () => {
     expect(response.body).toContain("EXPLORE_OK");
     expect(upstreamBodies).toHaveLength(1);
     expect(upstreamBodies[0]).toMatchObject({
-      model: EXPECTED_HAIKU_PROFILE_MODEL_ID,
-      max_tokens: 4096,
-      chat_template_kwargs: { clear_thinking: true },
+      model: CLAUDE_HAIKU_MODEL.id,
+      max_tokens: Math.min(64_000, CLAUDE_HAIKU_MODEL.limit.output),
+      chat_template_kwargs: { clear_thinking: false },
       stream: true,
     });
     expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();

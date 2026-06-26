@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  CLAUDE_HAIKU_MODEL_SELECTION,
   CLAUDE_MODEL_CAPABILITIES,
   CLAUDE_SUPPORTED_MODELS,
   resolveClaudeModel,
@@ -100,7 +101,7 @@ function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string):
 
   setTierModelEnv(env, "OPUS", defaultModel);
   setTierModelEnv(env, "SONNET", secondaryModel);
-  setTierModelEnv(env, "HAIKU", defaultModel);
+  setTierModelEnv(env, "HAIKU", CLAUDE_HAIKU_MODEL_SELECTION);
 
   // Claude Code currently exposes a single generic custom-model slot in
   // addition to the three tier slots. Point that at the selected backend so a
