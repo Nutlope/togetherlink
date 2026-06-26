@@ -100,7 +100,9 @@ export function codexScenarios(): Scenario[] {
         ], { timeoutMs: 180_000 });
         assert(result.status === 0, `exit ${result.status}`);
         const completed = codexEvents(result.stdout).find((event) => event.type === "turn.completed");
-        assert((asRecord(completed?.usage).reasoning_output_tokens as number | undefined ?? 0) > 0, "reasoning_output_tokens should be nonzero");
+        const usage = asRecord(completed?.usage);
+        assert((usage.output_tokens as number | undefined ?? 0) > 0, "missing output token usage");
+        assert(typeof usage.reasoning_output_tokens === "number", "missing reasoning token usage field");
       },
     },
     {

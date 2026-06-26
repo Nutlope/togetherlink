@@ -417,6 +417,35 @@ describe("Codex Responses proxy tool compatibility", () => {
     const upstream = requests[0] as { tool_choice?: unknown };
     expect(upstream.tool_choice).toEqual({ type: "function", function: { name: "multi_agent_v1__spawn_agent" } });
   });
+
+  test("maps Together reasoning token usage into Responses usage details", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return jsonResponse({
+        choices: [{ message: { content: "943" } }],
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 7,
+          total_tokens: 19,
+          completion_tokens_details: { reasoning_tokens: 5 },
+        },
+      });
+    }));
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Think." }] }],
+    });
+
+    expect(response.usage).toEqual({
+      input_tokens: 12,
+      output_tokens: 7,
+      total_tokens: 19,
+      output_tokens_details: { reasoning_tokens: 5 },
+    });
+  });
 });
 
 async function postResponses(body: unknown): Promise<Record<string, any>> {
