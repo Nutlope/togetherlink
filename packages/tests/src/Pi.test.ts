@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, test } from "vitest";
 import { cleanupTmpDir, createTestContext, resetTmpDir } from "./context.js";
-import { claudeScenarios } from "./harnesses/claude.js";
+import { piScenarios } from "./harnesses/pi.js";
 import type { TestContext } from "./types.js";
 
-describe("Claude live headless gauntlet", () => {
+describe("Pi Code live headless gauntlet", () => {
   let context: TestContext;
 
   beforeAll(async () => {
@@ -15,7 +15,7 @@ describe("Claude live headless gauntlet", () => {
     await cleanupTmpDir(context);
   });
 
-  for (const scenario of claudeScenarios()) {
+  for (const scenario of piScenarios()) {
     test(scenario.name, async () => {
       await scenario.run(context);
     });

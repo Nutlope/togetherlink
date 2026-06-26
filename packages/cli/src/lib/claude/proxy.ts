@@ -137,6 +137,9 @@ const RETRYABLE_STATUSES = new Set([429, 503]);
 const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 const MAX_RETRIES = 3;
 const CONTEXT_LENGTH_RETRY_FLOOR = 1;
+const CONTEXT_INPUT_SAFETY_TOKENS = 4096;
+const CONTEXT_RETRY_TRIM_EXTRA_TOKENS = 512;
+const APPROX_CHARS_PER_TOKEN = 4;
 const TOGETHERLINK_IDENTITY_PROMPT = "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 
 function clampRequestedMaxTokens(maxTokens: number | undefined, model: ModelDefinition): number | undefined {
@@ -169,6 +172,20 @@ function maxTokensForContextLengthRetry(
   return retryMaxTokens;
 }
 
+function canTrimInputForContextLengthRetry(error: TogetherApiError, model: ModelDefinition): boolean {
+  if (error.status !== 400) {
+    return false;
+  }
+  const inputTokens = parseTogetherContextLengthInputTokens(error.message);
+  const contextTokens = parseTogetherContextLengthMaxTokens(error.message) ?? model.limit.context;
+  return inputTokens !== undefined && inputTokens >= contextTokens;
+}
+
+function parseTogetherContextLengthMaxTokens(message: string): number | undefined {
+  const match = message.match(/maximum context length is\s+([\d,_]+)\s+tokens/is);
+  return parseTokenCount(match?.[1]);
+}
+
 function parseTogetherContextLengthInputTokens(message: string): number | undefined {
   const parentheticalMatch = message.match(/maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is);
   if (parentheticalMatch) {
@@ -184,6 +201,10 @@ function parseTokenCount(value: string | undefined): number | undefined {
   }
   const parsed = Number.parseInt(value.replaceAll(/[,_]/g, ""), 10);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function safeClaudeInputLimit(model: ModelDefinition): number {
+  return Math.max(1, model.limit.context - CONTEXT_INPUT_SAFETY_TOKENS);
 }
 
 type ExaSearchResult = {
@@ -285,7 +306,7 @@ export async function handleProxyRequest(
       writeAnthropicError(res, 400, "invalid_request_error", "messages must be an array.");
       return;
     }
-    writeJson(res, 200, countTokensResponse(body as AnthropicCountTokensRequest));
+    writeJson(res, 200, countTokensResponse(body as AnthropicCountTokensRequest, options));
     return;
   }
 
@@ -511,6 +532,61 @@ function byteLength(value: unknown): number {
   return Buffer.byteLength(stableStringify(value), "utf8");
 }
 
+function trimPayloadInputForContextLengthRetry(
+  payload: Record<string, unknown>,
+  error: TogetherApiError,
+  model: ModelDefinition,
+): { trimmedChars: number } | undefined {
+  const messages = payload.messages;
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  const inputTokens = parseTogetherContextLengthInputTokens(error.message);
+  const contextTokens = parseTogetherContextLengthMaxTokens(error.message) ?? model.limit.context;
+  if (inputTokens === undefined || inputTokens < contextTokens) {
+    return undefined;
+  }
+
+  const excessTokens = inputTokens - contextTokens + CONTEXT_RETRY_TRIM_EXTRA_TOKENS;
+  let charsToTrim = Math.max(1, excessTokens * APPROX_CHARS_PER_TOKEN);
+  let trimmedChars = 0;
+  for (const message of messages) {
+    if (charsToTrim <= 0) {
+      break;
+    }
+    const record = asOpenAIMessageRecord(message);
+    if (!record || record.role === "system" || typeof record.content !== "string" || record.content.length === 0) {
+      continue;
+    }
+    const result = trimOldContextText(record.content, charsToTrim);
+    if (!result) {
+      continue;
+    }
+    record.content = result.text;
+    charsToTrim -= result.trimmedChars;
+    trimmedChars += result.trimmedChars;
+  }
+
+  return trimmedChars > 0 ? { trimmedChars } : undefined;
+}
+
+function trimOldContextText(text: string, requestedChars: number): { text: string; trimmedChars: number } | undefined {
+  const marker = "[togetherlink trimmed older context to fit the model window]\n";
+  if (requestedChars <= 0 || text.length <= marker.length + 32) {
+    return undefined;
+  }
+  const removableChars = Math.min(requestedChars, Math.max(1, text.length - marker.length - 32));
+  const nextText = `${marker}${text.slice(removableChars)}`;
+  return {
+    text: nextText,
+    trimmedChars: Math.max(0, text.length - nextText.length),
+  };
+}
+
+function asOpenAIMessageRecord(value: unknown): OpenAIMessage | undefined {
+  return typeof value === "object" && value !== null ? (value as OpenAIMessage) : undefined;
+}
+
 function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | undefined): string {
   if (typeof content === "string") {
     return content;
@@ -634,6 +710,17 @@ async function callTogetherChatCompletions(
           turn,
         });
         response = await fetchTogether(payload, options, signal, hooks);
+      } else if (canTrimInputForContextLengthRetry(initialError, targetModel.definition)) {
+        const trimmed = trimPayloadInputForContextLengthRetry(payload, initialError, targetModel.definition);
+        if (trimmed) {
+          debugLog(options, "retrying together request with trimmed input context", {
+            model: payload.model,
+            trimmedChars: trimmed.trimmedChars,
+            originalError: initialError.message,
+            turn,
+          });
+          response = await fetchTogether(payload, options, signal, hooks);
+        }
       }
     }
 
@@ -743,20 +830,35 @@ function claudeModelResponse(model: ResolvedClaudeModel): Record<string, unknown
     type: "model",
     object: "model",
     display_name: `Together ${model.definition.name}`,
-    max_input_tokens: model.definition.limit.context,
+    max_input_tokens: safeClaudeInputLimit(model.definition),
     max_tokens: model.definition.limit.output,
     created_at: "2026-06-16T00:00:00Z",
   };
 }
 
-export function countTokensResponse(body: AnthropicCountTokensRequest): { input_tokens: number } {
+export function countTokensResponse(
+  body: AnthropicCountTokensRequest,
+  options?: Pick<ClaudeProxyOptions, "modelDefinition" | "modelId" | "targetModelId">,
+): { input_tokens: number } {
+  const targetModel = options
+    ? resolveTargetModel(body.model, options as ClaudeProxyOptions).definition
+    : undefined;
   const text = stableStringify({
-    system: body.system,
-    messages: body.messages,
+    messages: targetModel
+      ? toOpenAIMessages({ ...body, max_tokens: 1 }, targetModel)
+      : [
+          {
+            system: body.system,
+            messages: body.messages,
+          },
+        ],
     tools: body.tools,
     tool_choice: body.tool_choice,
   });
-  return { input_tokens: Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)) };
+  const estimatedTokens = Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / APPROX_CHARS_PER_TOKEN));
+  return {
+    input_tokens: targetModel ? Math.min(estimatedTokens, safeClaudeInputLimit(targetModel)) : estimatedTokens,
+  };
 }
 
 type TogetherReasoningEffort = "max";
@@ -1355,6 +1457,35 @@ async function streamAnthropicFromTogether(
       }
       if (!response.ok) {
         error = await mapTogetherError(response);
+      }
+    } else if (canTrimInputForContextLengthRetry(error, targetModel.definition)) {
+      const trimmed = trimPayloadInputForContextLengthRetry(payload, error, targetModel.definition);
+      if (trimmed) {
+        debugLog(options, "retrying together stream with trimmed input context", {
+          model: payload.model,
+          trimmedChars: trimmed.trimmedChars,
+          originalError: error.message,
+        });
+        try {
+          hooks?.onStart?.();
+          response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${options.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            ...(signal ? { signal } : {}),
+          });
+          hooks?.onHeaders?.();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          writeAnthropicError(res, 503, "overloaded_error", message);
+          return { ok: false, status: 503, error: message };
+        }
+        if (!response.ok) {
+          error = await mapTogetherError(response);
+        }
       }
     }
     if (!response.ok) {

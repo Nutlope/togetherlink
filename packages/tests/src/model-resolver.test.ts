@@ -37,7 +37,7 @@ describe("resolveModelByKeys", () => {
   });
 
   it("matches by alias", () => {
-    expect(resolveModelByKeys(SELECTABLE_MODELS, GLM_5_2.anthropicAlias, aliasAndId, GLM_5_2.id)?.id).toBe(
+    expect(resolveModelByKeys(SELECTABLE_MODELS, GLM_5_2.anthropicAlias ?? undefined, aliasAndId, GLM_5_2.id)?.id).toBe(
       GLM_5_2.id,
     );
   });

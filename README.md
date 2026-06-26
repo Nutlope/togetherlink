@@ -4,7 +4,7 @@ Use Together AI models from local coding-agent CLIs.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, and `tcodex` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | sh
@@ -16,6 +16,7 @@ Then run your tool through Together models:
 topencode            # OpenCode with Together GLM 5.2 (officially supported)
 tclaude              # Claude Code through a local Together proxy
 tcodex               # Codex through a local Responses proxy
+tpi                  # Pi Code with Pi's official Together provider
 ```
 
 On first launch, togetherlink asks once for your Together API key (press Enter to skip — the key is optional and can be added later with `togetherlink configure` or `TOGETHER_API_KEY`). The binary keeps itself up to date automatically from `togetherlink.vercel.app`.
@@ -51,6 +52,7 @@ node packages/cli/dist/bin/togetherlink.js help
 node packages/cli/dist/bin/togetherlink.js opencode status --json
 node packages/cli/dist/bin/togetherlink.js claude status --json
 node packages/cli/dist/bin/togetherlink.js codex status --json
+node packages/cli/dist/bin/togetherlink.js pi status --json
 ```
 
 Run through the workspace bin, which is closest to how users will invoke it:
@@ -60,6 +62,7 @@ pnpm -F @togetherlink/cli exec togetherlink help
 pnpm -F @togetherlink/cli exec togetherlink opencode status --json
 pnpm -F @togetherlink/cli exec togetherlink claude status --json
 pnpm -F @togetherlink/cli exec togetherlink codex status --json
+pnpm -F @togetherlink/cli exec togetherlink pi status --json
 ```
 
 Typecheck/test:
@@ -205,8 +208,47 @@ pnpm -F @togetherlink/cli exec togetherlink codex -- exec "Say hi"
 tcodex -- exec "Say hi"
 ```
 
+Compare direct Codex/OpenAI elapsed time with togetherlink Codex/Together:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink codex benchmark
+```
+
 Check the ephemeral defaults without launching Codex:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink codex status --json
+```
+
+Inspect recent Codex proxy speed traces:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink daemon profile
+```
+
+## Testing Pi Code
+
+Pi Code is ephemeral only. `togetherlink pi` uses Pi's official Together provider (`together`) with `--no-session` and a temporary `PI_CODING_AGENT_DIR`; it does not write Pi config or sessions.
+
+Launch Pi Code through Together:
+
+```bash
+export TOGETHER_API_KEY="..."
+
+pnpm -F @togetherlink/cli exec togetherlink pi
+pnpm -F @togetherlink/cli exec togetherlink picode
+tpi
+```
+
+Run Pi Code headlessly through Together:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink pi -- -p "Say hi"
+tpi -- -p "Say hi"
+```
+
+Check the ephemeral defaults without launching Pi:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink pi status --json
 ```

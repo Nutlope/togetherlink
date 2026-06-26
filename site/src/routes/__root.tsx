@@ -15,12 +15,12 @@ export const Route = createRootRoute({
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       {
         title:
-          'togetherlink - Together AI models in OpenCode, Claude Code & Codex',
+          'togetherlink - Together AI models in OpenCode, Claude Code, Codex & Pi Code',
       },
       {
         name: 'description',
         content:
-          'A single self-updating binary that routes OpenCode, Claude Code, and Codex through Together AI models like GLM 5.2.',
+          'A single self-updating binary that routes OpenCode, Claude Code, Codex, and Pi Code through Together AI models.',
       },
     ],
     links: [
