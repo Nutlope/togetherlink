@@ -12,6 +12,8 @@ import { stableHash, stableStringify } from "../stable-hash.js";
 type ResponsesContentPart = {
   type?: string;
   text?: string;
+  image_url?: string;
+  detail?: string;
 };
 
 type ResponsesInputItem = {
@@ -50,11 +52,15 @@ type ResponsesRequest = {
 
 type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?: string | ChatContentPart[] | null;
   reasoning_content?: string;
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
 };
+
+type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: string } };
 
 type ChatResponse = {
   id?: string;
@@ -386,6 +392,9 @@ async function callTogetherWithNativeTools(
     if (nativeToolCalls.length === 0) {
       return json;
     }
+    if (nativeToolCalls.length !== toolCalls.length) {
+      return json;
+    }
 
     const reasoning = json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
     messages.push({
@@ -490,7 +499,7 @@ function toChatPayload(
   stream: boolean,
   toolTranslation: CodexToolTranslation,
 ): Record<string, unknown> {
-  const messages = toChatMessages(body, options);
+  const messages = toChatMessages(body, options, toolTranslation);
   const translatedReasoningEffort = reasoningEffort(body, options);
   const messagesWithNativePrompt =
     toolTranslation.nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, toolTranslation.nativeTools) : messages;
@@ -500,7 +509,7 @@ function toChatPayload(
     max_tokens: body.max_output_tokens,
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
-    tool_choice: toChatToolChoice(body.tool_choice),
+    tool_choice: toChatToolChoice(body.tool_choice, toolTranslation),
     ...(translatedReasoningEffort ? { reasoning_effort: translatedReasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },
     stream,
@@ -542,7 +551,11 @@ function byteLength(value: unknown): number {
   return Buffer.byteLength(stableStringify(value), "utf8");
 }
 
-function toChatMessages(body: ResponsesRequest, options: CodexProxyOptions): ChatMessage[] {
+function toChatMessages(
+  body: ResponsesRequest,
+  options: CodexProxyOptions,
+  toolTranslation: CodexToolTranslation,
+): ChatMessage[] {
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -556,35 +569,41 @@ function toChatMessages(body: ResponsesRequest, options: CodexProxyOptions): Cha
     messages.push({ role: "user", content: body.input });
     return messages;
   }
+  const pendingToolCalls: NonNullable<ChatMessage["tool_calls"]> = [];
+  const flushPendingToolCalls = () => {
+    if (pendingToolCalls.length === 0) {
+      return;
+    }
+    messages.push({
+      role: "assistant",
+      content: null,
+      tool_calls: pendingToolCalls.splice(0),
+    });
+  };
   for (const item of body.input ?? []) {
     if (item.type === "function_call") {
-      messages.push({
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          {
-            id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
-            type: "function",
-            function: { name: item.name ?? "tool", arguments: item.arguments ?? "{}" },
-          },
-        ],
+      pendingToolCalls.push({
+        id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: toChatHistoryToolName(item, toolTranslation, "function"),
+          arguments: item.arguments ?? "{}",
+        },
       });
       continue;
     }
     if (item.type === "custom_tool_call") {
-      messages.push({
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          {
-            id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
-            type: "function",
-            function: { name: item.name ?? "tool", arguments: JSON.stringify({ input: item.input ?? "" }) },
-          },
-        ],
+      pendingToolCalls.push({
+        id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: toChatHistoryToolName(item, toolTranslation, "custom"),
+          arguments: JSON.stringify({ input: item.input ?? "" }),
+        },
       });
       continue;
     }
+    flushPendingToolCalls();
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       messages.push({
         role: "tool",
@@ -595,10 +614,28 @@ function toChatMessages(body: ResponsesRequest, options: CodexProxyOptions): Cha
     }
     if (item.type === "message" || item.role) {
       const role = toChatRole(item.role);
-      messages.push({ role, content: stringifyResponsesContent(item.content) });
+      messages.push({ role, content: toChatMessageContent(item.content) });
     }
   }
+  flushPendingToolCalls();
   return messages;
+}
+
+function toChatHistoryToolName(
+  item: ResponsesInputItem,
+  toolTranslation: CodexToolTranslation,
+  preferredKind: "function" | "custom",
+): string {
+  const sourceName = item.name ?? "tool";
+  for (const mapping of toolTranslation.mappings.values()) {
+    if (item.namespace && mapping.kind === "namespace" && mapping.namespace === item.namespace && mapping.sourceName === sourceName) {
+      return mapping.modelName;
+    }
+    if (!item.namespace && mapping.kind === preferredKind && mapping.sourceName === sourceName) {
+      return mapping.modelName;
+    }
+  }
+  return item.namespace ? `${sanitizeToolName(item.namespace)}__${sanitizeToolName(sourceName)}` : sourceName;
 }
 
 function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTranslation {
@@ -857,7 +894,34 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
     .join("\n");
 }
 
-function toChatToolChoice(toolChoice: unknown): unknown {
+function toChatMessageContent(content: ResponsesInputItem["content"]): string | ChatContentPart[] | null {
+  if (typeof content === "string") {
+    return content;
+  }
+  const parts = content ?? [];
+  if (!parts.some((part) => part.type === "input_image" || part.type === "image_url")) {
+    return stringifyResponsesContent(parts);
+  }
+  return parts
+    .map((part): ChatContentPart | undefined => {
+      if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+        return part.text ? { type: "text", text: part.text } : undefined;
+      }
+      if ((part.type === "input_image" || part.type === "image_url") && typeof part.image_url === "string") {
+        return {
+          type: "image_url",
+          image_url: {
+            url: part.image_url,
+            ...(part.detail ? { detail: part.detail } : {}),
+          },
+        };
+      }
+      return undefined;
+    })
+    .filter((part): part is ChatContentPart => part !== undefined);
+}
+
+function toChatToolChoice(toolChoice: unknown, toolTranslation: CodexToolTranslation): unknown {
   if (!toolChoice || typeof toolChoice !== "object") {
     return undefined;
   }
@@ -869,9 +933,21 @@ function toChatToolChoice(toolChoice: unknown): unknown {
     return "required";
   }
   if (choice.type === "function" && typeof choice.name === "string") {
-    return { type: "function", function: { name: choice.name } };
+    return { type: "function", function: { name: toChatToolChoiceName(choice.name, toolTranslation) } };
   }
   return undefined;
+}
+
+function toChatToolChoiceName(name: string, toolTranslation: CodexToolTranslation): string {
+  if (toolTranslation.mappings.has(name)) {
+    return name;
+  }
+  for (const mapping of toolTranslation.mappings.values()) {
+    if (mapping.sourceName === name) {
+      return mapping.modelName;
+    }
+  }
+  return name;
 }
 
 function reasoningEffort(body: ResponsesRequest, options: CodexProxyOptions): string | undefined {
