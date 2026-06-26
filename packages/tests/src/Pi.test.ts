@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, test } from "vitest";
-import { createTestContext, resetTmpDir } from "./context.js";
+import { cleanupTmpDir, createTestContext, resetTmpDir } from "./context.js";
 import { piScenarios } from "./harnesses/pi.js";
 import type { TestContext } from "./types.js";
 
@@ -12,7 +12,7 @@ describe("Pi Code live headless gauntlet", () => {
   });
 
   afterAll(async () => {
-    await resetTmpDir(context);
+    await cleanupTmpDir(context);
   });
 
   for (const scenario of piScenarios()) {

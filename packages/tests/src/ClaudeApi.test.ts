@@ -85,6 +85,9 @@ describe("Claude proxy compatibility API", () => {
     const secondContent = firstUserContent(upstreamBodies[1]);
     expect(typeof firstContent).toBe("string");
     expect(typeof secondContent).toBe("string");
+    if (typeof firstContent !== "string" || typeof secondContent !== "string") {
+      throw new Error("expected upstream user content to be strings");
+    }
     expect(secondContent.length).toBeLessThan(firstContent.length);
     expect(secondContent).toContain("[togetherlink trimmed older context to fit the model window]");
   });
