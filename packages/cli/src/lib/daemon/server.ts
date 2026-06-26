@@ -1,8 +1,10 @@
 import http, { type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { once } from "node:events";
+import { statSync } from "node:fs";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { VERSION } from "../version.js";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
 import {
   handleProxyRequest,
@@ -34,6 +36,17 @@ const COST_ROUTE = /^\/internal\/sessions\/([^/]+)\/cost$/;
 const PID_ROUTE = /^\/internal\/sessions\/([^/]+)\/pid$/;
 const USAGE_ROUTE = /^\/internal\/sessions\/([^/]+)\/usage$/;
 const SESSION_ROUTE = /^\/internal\/sessions\/([^/]+)$/;
+const RUNNING_DAEMON_IDENTITY = daemonIdentityAtStartup();
+
+export type DaemonHealth = {
+  ok: true;
+  pid: number;
+  version: string;
+  scriptPath: string | null;
+  scriptSize: number | null;
+  scriptMtimeMs: number | null;
+  activeSessionCount: number;
+};
 
 /**
  * Where the launcher and daemon agree the daemon's pid file lives. Honors
@@ -187,7 +200,15 @@ async function handleDaemonRequest(
     return;
   }
   if (req.method === "GET" && path_ === "/healthz") {
-    writeJson(res, 200, { ok: true });
+    writeJson(res, 200, {
+      ok: true,
+      pid: process.pid,
+      version: VERSION,
+      scriptPath: RUNNING_DAEMON_IDENTITY.scriptPath,
+      scriptSize: RUNNING_DAEMON_IDENTITY.scriptSize,
+      scriptMtimeMs: RUNNING_DAEMON_IDENTITY.scriptMtimeMs,
+      activeSessionCount: sessions.size,
+    } satisfies DaemonHealth);
     return;
   }
 
@@ -818,13 +839,45 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
  * timeout, non-200) rather than rejecting.
  */
 export async function probeHealthz(port: number): Promise<boolean> {
+  return (await probeDaemonHealth(port)) !== undefined;
+}
+
+export async function probeDaemonHealth(port: number): Promise<DaemonHealth | undefined> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 300);
     const response = await fetch(`${daemonUrl(port)}/healthz`, { signal: controller.signal });
     clearTimeout(timer);
-    return response.ok;
+    if (!response.ok) {
+      return undefined;
+    }
+    const body = (await response.json().catch(() => undefined)) as Partial<DaemonHealth> | undefined;
+    if (body?.ok !== true) {
+      return undefined;
+    }
+    return {
+      ok: true,
+      pid: typeof body.pid === "number" ? body.pid : 0,
+      version: typeof body.version === "string" ? body.version : "",
+      scriptPath: typeof body.scriptPath === "string" ? body.scriptPath : null,
+      scriptSize: typeof body.scriptSize === "number" ? body.scriptSize : null,
+      scriptMtimeMs: typeof body.scriptMtimeMs === "number" ? body.scriptMtimeMs : null,
+      activeSessionCount: typeof body.activeSessionCount === "number" ? body.activeSessionCount : -1,
+    };
   } catch {
-    return false;
+    return undefined;
+  }
+}
+
+function daemonIdentityAtStartup(): Pick<DaemonHealth, "scriptPath" | "scriptSize" | "scriptMtimeMs"> {
+  const scriptPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+  if (!scriptPath) {
+    return { scriptPath: null, scriptSize: null, scriptMtimeMs: null };
+  }
+  try {
+    const stat = statSync(scriptPath);
+    return { scriptPath, scriptSize: stat.size, scriptMtimeMs: stat.mtimeMs };
+  } catch {
+    return { scriptPath, scriptSize: null, scriptMtimeMs: null };
   }
 }

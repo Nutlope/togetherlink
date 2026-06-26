@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
-import { probeHealthz, resolveDaemonPort, daemonUrl, daemonPidPath } from "./server.js";
+import { probeHealthz, probeDaemonHealth, resolveDaemonPort, daemonUrl, daemonPidPath, type DaemonHealth } from "./server.js";
 import type { RegisterSessionRequest } from "./state.js";
 
 const HEALTH_POLL_INTERVAL_MS = 200;
@@ -29,9 +29,21 @@ const LOCAL_PROXY_TOKEN_FILE = "local-proxy-token";
 export async function ensureDaemon(): Promise<{ url: string }> {
   const port = resolveDaemonPort();
   const url = daemonUrl(port);
+  const scriptIdentity = await currentScriptIdentity();
 
-  if (await probeHealthz(port)) {
+  const health = await probeDaemonHealth(port);
+  if (health && daemonMatchesCurrentScript(health, scriptIdentity)) {
     return { url };
+  }
+  if (health) {
+    const activeSessionCount = health.activeSessionCount >= 0 ? health.activeSessionCount : await activeSessionCountFor(url);
+    const daemonPid = health.pid > 0 ? health.pid : await readDaemonPid();
+    if (activeSessionCount === 0 && daemonPid !== undefined) {
+      await stopDaemonPid(daemonPid);
+      await waitForDaemonToExit(port);
+    } else {
+      return { url };
+    }
   }
 
   // The probe failed. If a pid file points at a dead process, clean it up so
@@ -71,6 +83,78 @@ export async function ensureDaemon(): Promise<{ url: string }> {
     `togetherlink daemon did not become healthy on ${url} within ${HEALTH_POLL_TIMEOUT_MS / 1000}s. ` +
       `Set TOGETHERLINK_PORT to use a different port.`,
   );
+}
+
+type ScriptIdentity = {
+  scriptPath: string;
+  scriptSize: number | null;
+  scriptMtimeMs: number | null;
+};
+
+async function currentScriptIdentity(): Promise<ScriptIdentity> {
+  const scriptPath = currentScriptPath();
+  try {
+    const info = await stat(scriptPath);
+    return { scriptPath, scriptSize: info.size, scriptMtimeMs: info.mtimeMs };
+  } catch {
+    return { scriptPath, scriptSize: null, scriptMtimeMs: null };
+  }
+}
+
+function daemonMatchesCurrentScript(health: DaemonHealth, current: ScriptIdentity): boolean {
+  if (health.scriptPath !== current.scriptPath) {
+    return false;
+  }
+  if (health.scriptSize === null || current.scriptSize === null || health.scriptMtimeMs === null || current.scriptMtimeMs === null) {
+    return health.version !== "";
+  }
+  return health.scriptSize === current.scriptSize && health.scriptMtimeMs === current.scriptMtimeMs;
+}
+
+async function activeSessionCountFor(url: string): Promise<number | undefined> {
+  try {
+    const response = await daemonFetch(`${url}/internal/sessions`);
+    if (!response.ok) {
+      return undefined;
+    }
+    const body = (await response.json()) as { count?: unknown; sessions?: unknown[] };
+    if (typeof body.count === "number") {
+      return body.count;
+    }
+    return Array.isArray(body.sessions) ? body.sessions.length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readDaemonPid(): Promise<number | undefined> {
+  try {
+    const raw = (await readFile(daemonPidPath(), "utf8")).trim();
+    const pid = raw ? Number.parseInt(raw, 10) : NaN;
+    return Number.isFinite(pid) ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function stopDaemonPid(pid: number): Promise<void> {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw err;
+    }
+  }
+}
+
+async function waitForDaemonToExit(port: number): Promise<void> {
+  const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (!(await probeHealthz(port))) {
+      return;
+    }
+    await sleep(HEALTH_POLL_INTERVAL_MS);
+  }
 }
 
 /**
