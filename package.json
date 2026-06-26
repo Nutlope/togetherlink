@@ -1,7 +1,7 @@
 {
   "name": "togetherlink",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Use Together AI models in Claude Code, OpenCode, Codex, and Pi Code",
   "type": "module",
   "scripts": {
