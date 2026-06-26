@@ -13,19 +13,19 @@ export function printHelp() {
 
 Usage:
   togetherlink configure                Detect installed tools and set your Together API key
-  togetherlink claude [run] [-- ...]    Launch Claude Code through a local Together proxy (ephemeral)
+  togetherlink claude [run] [-- ...]    Launch Claude Code through a local Together proxy
   tclaude [-- ...]                      Alias for: togetherlink claude
   togetherlink claude --main together-kimi-k2-7-code
                                       Launch Claude Code with Kimi K2.7 Code
   togetherlink claude status            Show Claude Code local proxy defaults
-  togetherlink opencode [run] [-- ...]  Launch OpenCode with Together GLM 5.2 (ephemeral)
+  togetherlink opencode [run] [-- ...]  Launch OpenCode with Together GLM 5.2
   topencode [-- ...]                    Alias for: togetherlink opencode
-  togetherlink opencode status          Show OpenCode ephemeral defaults
-  togetherlink codex [run] [-- ...]     Launch Codex through a local Responses proxy (ephemeral)
+  togetherlink opencode status          Show OpenCode runtime defaults
+  togetherlink codex [run] [-- ...]     Launch Codex through a local Responses proxy
   tcodex [-- ...]                       Alias for: togetherlink codex
   togetherlink codex -- exec "Say hi"   Run Codex headlessly through Together
   togetherlink codex benchmark          Compare direct Codex vs togetherlink Codex latency
-  togetherlink pi|picode [run] [-- ...] Launch Pi Code with Together AI (ephemeral)
+  togetherlink pi|picode [run] [-- ...] Launch Pi Code with Together AI
   tpi [-- ...]                          Alias for: togetherlink pi
   togetherlink daemon status            Show the shared proxy daemon status
   togetherlink daemon profile           Summarize recent Codex proxy speed traces
@@ -46,7 +46,7 @@ export async function runConfigure() {
 
   const lines = ALL_HARNESSES.map((h) => {
     const found = detected[h].installed ? "found" : "not found";
-    const support = isHarnessImplemented(h) ? " (ephemeral launcher)" : " (support coming later)";
+    const support = isHarnessImplemented(h) ? " (ephemeral settings)" : " (support coming later)";
     return `  ${HARNESS_LABEL[h]}: ${found}${support}`;
   });
   clack.log.info(`Detected tools:\n${lines.join("\n")}`);

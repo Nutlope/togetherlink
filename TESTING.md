@@ -147,7 +147,7 @@ GLM-5.2 returns preserved reasoning in `choices[0].message.reasoning`. Keep that
 
 ## Notes
 
-The Claude proxy intentionally runs as an ephemeral local process. It should not write Claude Code config files, and tests should use `--no-session-persistence` unless the behavior under test specifically needs session state.
+The Claude/Codex proxy and per-run Together settings are intentionally temporary. They should not write agent config files. Smoke tests should pass each agent's no-session flag, such as Claude's `--no-session-persistence` or Pi's `--no-session`, unless the behavior under test specifically needs persisted session state.
 
 ## Live Agent Gauntlet
 

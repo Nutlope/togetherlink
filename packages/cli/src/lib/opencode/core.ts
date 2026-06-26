@@ -58,7 +58,7 @@ type OpencodeProviderConfig = {
  * self-branding, and a `vision` subagent is added on a vision-capable Together
  * model so pasted images can be described (GLM-5.2 is text-only — this is the
  * OpenCode-native equivalent of the Claude proxy's image interception).
- * Highest precedence, no files — fully ephemeral.
+ * Highest precedence for settings, with no OpenCode config files written.
  */
 export function buildOpencodeConfigJson({
   modelId = OPENCODE_DEFAULT_MODEL,
@@ -133,9 +133,9 @@ export function buildOpencodeConfigJson({
 }
 
 /**
- * Env for the spawned `opencode` process: inline config (highest precedence,
- * never persisted) plus the resolved Together key so `{env:TOGETHER_API_KEY}`
- * substitution resolves inside the config.
+ * Env for the spawned `opencode` process: inline settings config (highest
+ * precedence, never persisted) plus the resolved Together key so
+ * `{env:TOGETHER_API_KEY}` substitution resolves inside the config.
  */
 export function buildOpencodeEnv({
   apiKey,

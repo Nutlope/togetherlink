@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_DEFAULT_MODEL, CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
 import { HARNESS } from "../harness.js";
@@ -15,18 +15,6 @@ const VALUE_FLAGS = new Set([
   "--provider",
   "--model",
   "--models",
-  "--session",
-  "--session-id",
-  "--session-dir",
-  "--fork",
-]);
-
-const BOOLEAN_FLAGS = new Set([
-  "--continue",
-  "-c",
-  "--resume",
-  "-r",
-  "--no-session",
 ]);
 
 function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
@@ -44,15 +32,8 @@ function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
       arg.startsWith("--api-key=") ||
       arg.startsWith("--provider=") ||
       arg.startsWith("--model=") ||
-      arg.startsWith("--models=") ||
-      arg.startsWith("--session=") ||
-      arg.startsWith("--session-id=") ||
-      arg.startsWith("--session-dir=") ||
-      arg.startsWith("--fork=")
+      arg.startsWith("--models=")
     ) {
-      continue;
-    }
-    if (BOOLEAN_FLAGS.has(arg)) {
       continue;
     }
     sanitized.push(arg);
@@ -104,6 +85,7 @@ export default defineHarness({
     }
 
     const agentDir = mkdtempSync(join(tmpdir(), "togetherlink-pi-"));
+    const sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR ?? join(ctx.home || homedir(), ".pi", "agent", "sessions");
     writePiModelsJson(agentDir, apiKey);
     const selectedModel = resolveCodexModel(ctx.main);
     const args = [
@@ -115,7 +97,6 @@ export default defineHarness({
       PI_SUPPORTED_MODELS,
       "--api-key",
       apiKey,
-      "--no-session",
       "--no-approve",
       "--no-extensions",
       "--no-skills",
@@ -128,7 +109,8 @@ export default defineHarness({
       process.stderr.write(`[togetherlink pi] provider: ${PI_PROVIDER_ID}\n`);
       process.stderr.write(`[togetherlink pi] model: ${selectedModel.id}\n`);
       process.stderr.write(`[togetherlink pi] models: ${PI_SUPPORTED_MODELS}\n`);
-      process.stderr.write(`[togetherlink pi] agent dir: ${agentDir}\n`);
+      process.stderr.write(`[togetherlink pi] temp config dir: ${agentDir}\n`);
+      process.stderr.write(`[togetherlink pi] session dir: ${sessionDir}\n`);
     }
 
     process.stderr.write(`togetherlink ▸ Launching Pi Code with Together AI.\n`);
@@ -136,6 +118,7 @@ export default defineHarness({
       env: {
         ...process.env,
         PI_CODING_AGENT_DIR: agentDir,
+        PI_CODING_AGENT_SESSION_DIR: sessionDir,
         TOGETHER_API_KEY: apiKey,
       },
       stdio: "inherit",
@@ -171,7 +154,8 @@ export default defineHarness({
         currentModel: CODEX_DEFAULT_MODEL,
         targetModel: CODEX_DEFAULT_MODEL,
         supportedModels: PI_SUPPORTED_MODELS,
-        sessionMode: "ephemeral",
+        sessionMode: "persistent",
+        configMode: "ephemeral",
       },
     };
   },

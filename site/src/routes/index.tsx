@@ -12,8 +12,8 @@ const features = [
     body: (
       <>
         Run <code>topencode</code> and OpenCode launches with Together GLM 5.2
-        wired in - config injected into an ephemeral session, nothing written
-        to disk. Close it and your OpenCode setup is exactly as it was.
+        wired in - config injected only for that launch. Close it and your
+        OpenCode setup is exactly as it was, while sessions can still resume.
       </>
     ),
     supportLabel: 'Status',
@@ -42,8 +42,8 @@ const features = [
     body: (
       <>
         Run <code>tcodex</code> and Codex talks to Together through a local
-        Responses-to-chat proxy. Terminal sessions stay ephemeral, with
-        headless <code>exec</code> support for fast checks.
+        Responses-to-chat proxy. Settings are injected per run, with headless{' '}
+        <code>exec</code> support for fast checks.
       </>
     ),
     icon: <CodexMark />,
@@ -56,7 +56,8 @@ const features = [
     body: (
       <>
         Run <code>tpi</code> and Pi Code launches with Pi's official Together
-        provider, an ephemeral session, and a temporary Pi config directory.
+        provider, a temporary Pi config directory, and normal local session
+        persistence.
       </>
     ),
     supportLabel: 'Status',
@@ -163,7 +164,7 @@ function Home() {
           <code className="text-ink">tclaude</code> or{' '}
           <code className="text-ink">tcodex</code> or{' '}
           <code className="text-ink">tpi</code> and your existing tools route
-          through Together AI models - no proxy to run, no config to write.
+          through Together AI models - no proxy to run, no agent config to write.
         </p>
 
         <div className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]">
@@ -202,14 +203,14 @@ function Home() {
               <strong className="font-semibold text-ink">
                 Non-destructive by design.
               </strong>{' '}
-              Every change happens in an ephemeral session - nothing is saved to
-              disk, no files are rewritten. Your subscriptions and your existing
-              OpenCode, Claude Code, Codex, or Pi Code config are never touched. Install
-              and drop it any time; everything goes back exactly as it was.
+              Together settings are injected per run - no agent config files are
+              rewritten. Your subscriptions and your existing OpenCode, Claude
+              Code, Codex, or Pi Code config are never touched, while each tool's
+              normal local sessions can still persist.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted max-[620px]:justify-start max-[620px]:gap-x-4">
-            <Guarantee icon={<NoDiskMark />} label="Nothing written to disk" />
+            <Guarantee icon={<NoDiskMark />} label="Sessions can persist" />
             <Guarantee icon={<NoDiskMark />} label="No config overwritten" />
             <Guarantee icon={<NoDiskMark />} label="Auto-updates atomically" />
             <Guarantee icon={<NoDiskMark />} label="Keep your subscription" />
@@ -277,9 +278,9 @@ function Home() {
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date
-          on its own. Change your mind? Just stop using it - nothing was saved,
-          so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code config are
-          untouched.
+          on its own. Change your mind? Just stop using it - no agent config was
+          saved, so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code
+          config are untouched.
         </Step>
         <p className="m-0 border-t border-line pt-[18px] text-[15px] leading-relaxed text-muted [&_code]:rounded-md [&_code]:border [&_code]:border-line-strong [&_code]:bg-code [&_code]:px-[7px] [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_code]:text-ink">
           Prefer explicit commands? Use <code>togetherlink opencode</code>,{' '}

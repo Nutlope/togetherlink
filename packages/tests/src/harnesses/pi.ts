@@ -18,6 +18,8 @@ export function piScenarios(): Scenario[] {
         const status = asRecord(JSON.parse(result.stdout));
         assert(status.provider === "together", "expected Together provider");
         assert(status.currentModel === "zai-org/GLM-5.2", "expected Codex default model");
+        assert(status.sessionMode === "persistent", "expected persistent Pi sessions");
+        assert(status.configMode === "ephemeral", "expected ephemeral Pi config");
         const supportedModels = String(status.supportedModels ?? "").split(",");
         for (const model of [
           "zai-org/GLM-5.2",
@@ -42,6 +44,7 @@ export function piScenarios(): Scenario[] {
           "--mode",
           "json",
           "--no-tools",
+          "--no-session",
           "-p",
           "Reply with exactly: hi",
         ]);
@@ -65,6 +68,7 @@ export function piScenarios(): Scenario[] {
           "--",
           "--mode",
           "json",
+          "--no-session",
           "-p",
           "Run pwd and answer with the directory only.",
         ], { timeoutMs: 180_000 });

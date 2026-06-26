@@ -74,7 +74,7 @@ pnpm -F @togetherlink/cli test
 
 ## Testing OpenCode
 
-OpenCode is ephemeral only: `togetherlink opencode` launches OpenCode with a Together config for that session — there's no `on`/`off` flow to remember.
+OpenCode uses ephemeral Together settings: `togetherlink opencode` injects the Together provider config only for that launch, so there is no `on`/`off` flow and no OpenCode config rewrite. OpenCode's own local session history can still persist normally.
 
 ```bash
 export TOGETHER_API_KEY="..."
@@ -158,7 +158,7 @@ That's all you'll see in `/models`. The curated set lives in
 
 ## Testing Claude Code
 
-Claude Code is ephemeral only. `togetherlink` does not write `~/.claude/settings.json` and there is no `claude on/off` flow to remember.
+Claude Code uses ephemeral Together settings. `togetherlink` does not write `~/.claude/settings.json` and there is no `claude on/off` flow to remember; Claude Code's own session/history behavior is left intact.
 
 Launch Claude Code through the local Together proxy:
 
@@ -183,7 +183,7 @@ pnpm -F @togetherlink/cli exec togetherlink claude --main together-glm-5-2
 pnpm -F @togetherlink/cli exec togetherlink claude --main together-kimi-k2-7-code
 ```
 
-Check the ephemeral defaults without launching Claude:
+Check the runtime defaults without launching Claude:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink claude status --json
@@ -191,7 +191,7 @@ pnpm -F @togetherlink/cli exec togetherlink claude status --json
 
 ## Testing Codex
 
-Codex is ephemeral only. `togetherlink` launches the terminal `codex` CLI with a local Responses-compatible proxy that translates Codex traffic to Together chat completions.
+Codex uses ephemeral Together settings. `togetherlink` launches the terminal `codex` CLI with per-run config flags and a local Responses-compatible proxy that translates Codex traffic to Together chat completions, while leaving Codex's own session/history behavior intact.
 
 Launch Codex through Together:
 
@@ -214,7 +214,7 @@ Compare direct Codex/OpenAI elapsed time with togetherlink Codex/Together:
 pnpm -F @togetherlink/cli exec togetherlink codex benchmark
 ```
 
-Check the ephemeral defaults without launching Codex:
+Check the runtime defaults without launching Codex:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink codex status --json
@@ -228,7 +228,7 @@ pnpm -F @togetherlink/cli exec togetherlink daemon profile
 
 ## Testing Pi Code
 
-Pi Code is ephemeral only. `togetherlink pi` uses Pi's official Together provider (`together`) with `--no-session` and a temporary `PI_CODING_AGENT_DIR`; it does not write Pi config or sessions.
+Pi Code uses ephemeral Together settings with persistent sessions. `togetherlink pi` uses Pi's official Together provider (`together`) and a temporary `PI_CODING_AGENT_DIR` for per-run model config, while pointing `PI_CODING_AGENT_SESSION_DIR` at the normal local Pi sessions folder. It does not write Pi config, and Pi sessions can still be resumed normally.
 
 Launch Pi Code through Together:
 
@@ -247,7 +247,7 @@ pnpm -F @togetherlink/cli exec togetherlink pi -- -p "Say hi"
 tpi -- -p "Say hi"
 ```
 
-Check the ephemeral defaults without launching Pi:
+Check the runtime defaults without launching Pi:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink pi status --json
