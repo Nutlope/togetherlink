@@ -17,6 +17,7 @@ const options: CodexProxyOptions = {
 describe("Codex Responses proxy tool compatibility", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.stubEnv("TOGETHERLINK_CODEX_UPSTREAM_STREAMING", "1");
   });
 
   afterEach(() => {
@@ -532,6 +533,103 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
+  test("falls back to non-streaming native web_search completion when upstream SSE goes idle", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url, body });
+      if (url.includes("api.exa.ai")) {
+        return jsonResponse({
+          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
+        });
+      }
+      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
+        return hangingSseResponse([{ choices: [{ delta: {} }] }]);
+      }
+      return jsonResponse({
+        choices: [{ message: { content: "Recovered without streaming." } }],
+        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+      });
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("Recovered without streaming.");
+    expect(response).toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+    expect(requests[1]?.body.stream).toBe(false);
+  });
+
+  test("falls back when upstream SSE keepalives make no Codex progress", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ url, body: JSON.parse(String(init?.body)) });
+      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
+        return noProgressSseResponse();
+      }
+      return jsonResponse({
+        choices: [{ message: { content: "Recovered after keepalives." } }],
+        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+      });
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("Recovered after keepalives.");
+    expect(response).toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+  });
+
+  test("falls back when native stream emits reasoning but never final output", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS", "100");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ url, body: JSON.parse(String(init?.body)) });
+      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
+        return reasoningOnlySseResponse();
+      }
+      return jsonResponse({
+        choices: [{ message: { content: "Recovered after reasoning timeout." } }],
+        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+      });
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("response.reasoning_text.delta");
+    expect(response).toContain("response.reasoning_text.done");
+    expect(response).toContain("Recovered after reasoning timeout.");
+    expect(response).toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+  });
+
   test("does not leak native web_search when a client tool call is returned in the same group", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
@@ -866,6 +964,65 @@ function sseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } 
   const separator = `${lineEnding}${lineEnding}`;
   const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}${separator}`).join("") + `data: [DONE]${separator}`;
   return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function hangingSseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } = {}): Response {
+  const encoder = new TextEncoder();
+  const lineEnding = options.lineEnding ?? "\n";
+  const separator = `${lineEnding}${lineEnding}`;
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
+      }
+    },
+    cancel() {
+      // The proxy should cancel this stream once the idle timeout fires.
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function noProgressSseResponse(): Response {
+  const encoder = new TextEncoder();
+  let interval: NodeJS.Timeout | undefined;
+  return new Response(new ReadableStream({
+    start(controller) {
+      interval = setInterval(() => {
+        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{}}]}\n\n"));
+      }, 20);
+    },
+    cancel() {
+      if (interval) {
+        clearInterval(interval);
+      }
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function reasoningOnlySseResponse(): Response {
+  const encoder = new TextEncoder();
+  let interval: NodeJS.Timeout | undefined;
+  return new Response(new ReadableStream({
+    start(controller) {
+      interval = setInterval(() => {
+        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking \"}}]}\n\n"));
+      }, 20);
+    },
+    cancel() {
+      if (interval) {
+        clearInterval(interval);
+      }
+    },
+  }), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });

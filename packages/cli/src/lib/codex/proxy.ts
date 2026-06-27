@@ -185,6 +185,15 @@ type StreamTurnResult =
     }
   | { ok: false; status: number; error: string };
 
+type SseChunkReadResult = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>;
+
+class SseIdleTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Together stream produced no SSE event for ${timeoutMs}ms.`);
+    this.name = "SseIdleTimeoutError";
+  }
+}
+
 export type CodexProxyOptions = {
   apiKey: string;
   modelId: string;
@@ -1161,6 +1170,21 @@ async function streamResponseFromTogether(
     text: "",
   };
 
+  if (!codexUpstreamStreamingEnabled()) {
+    return completeNativeToolsWithoutStreaming(
+      res,
+      body,
+      options,
+      payload,
+      toolTranslation,
+      modelDefinition,
+      outputState,
+      responseId,
+      signal,
+      hooks,
+    );
+  }
+
   if (toolTranslation.nativeTools.length > 0) {
     return streamResponseWithNativeTools(
       res,
@@ -1176,7 +1200,15 @@ async function streamResponseFromTogether(
     );
   }
 
-  const turn = await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal, hooks);
+  let turn: StreamTurnResult;
+  try {
+    turn = await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal, hooks);
+  } catch (err) {
+    if (err instanceof SseIdleTimeoutError) {
+      return failStream(res, responseId, 504, err.message);
+    }
+    throw err;
+  }
   if (!turn.ok) {
     return failStream(res, responseId, turn.status, turn.error);
   }
@@ -1209,9 +1241,14 @@ async function streamTogetherTurn(
   let usage: ChatResponse["usage"] | undefined;
   let reasoningText = "";
   let text = "";
+  const turnStartedAt = Date.now();
+  let lastProgressAt = Date.now();
+  const progressTimeoutMs = codexStreamIdleTimeoutMs();
+  const turnTimeoutMs = codexStreamTurnTimeoutMs();
 
   for await (const chunk of parseSseChunks(upstream.body)) {
     hooks?.onFirstByte?.();
+    assertStreamTurnDuration(turnStartedAt, turnTimeoutMs);
     if (chunk === "[DONE]") {
       break;
     }
@@ -1221,15 +1258,19 @@ async function streamTogetherTurn(
     } catch {
       continue;
     }
+    let madeProgress = false;
     if (parsed.usage) {
       usage = parsed.usage;
+      madeProgress = true;
     }
     const delta = parsed.choices?.[0]?.delta;
     if (!delta) {
+      assertStreamProgress(lastProgressAt, progressTimeoutMs);
       continue;
     }
     const reasoningDelta = delta.reasoning ?? delta.reasoning_content;
     if (reasoningDelta) {
+      madeProgress = true;
       openReasoningOutputItem(res, outputState);
       outputState.reasoningText += reasoningDelta;
       reasoningText += reasoningDelta;
@@ -1242,6 +1283,7 @@ async function streamTogetherTurn(
       });
     }
     if (delta.content) {
+      madeProgress = true;
       openTextOutputItem(res, outputState);
       outputState.text += delta.content;
       text += delta.content;
@@ -1254,6 +1296,9 @@ async function streamTogetherTurn(
       });
     }
     for (const toolCall of delta.tool_calls ?? []) {
+      if (toolCall.id || toolCall.function?.name || toolCall.function?.arguments) {
+        madeProgress = true;
+      }
       const index = toolCall.index ?? 0;
       const current = toolCalls.get(index) ?? {
         id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
@@ -1271,9 +1316,26 @@ async function streamTogetherTurn(
       }
       toolCalls.set(index, current);
     }
+    if (madeProgress) {
+      lastProgressAt = Date.now();
+    } else {
+      assertStreamProgress(lastProgressAt, progressTimeoutMs);
+    }
   }
 
   return { ok: true, toolCalls: [...toolCalls.values()], usage, reasoningText, text };
+}
+
+function assertStreamProgress(lastProgressAt: number, timeoutMs: number): void {
+  if (Date.now() - lastProgressAt > timeoutMs) {
+    throw new SseIdleTimeoutError(timeoutMs);
+  }
+}
+
+function assertStreamTurnDuration(startedAt: number, timeoutMs: number): void {
+  if (Date.now() - startedAt > timeoutMs) {
+    throw new SseIdleTimeoutError(timeoutMs);
+  }
 }
 
 async function streamResponseWithNativeTools(
@@ -1294,17 +1356,41 @@ async function streamResponseWithNativeTools(
   let usage: ChatResponse["usage"] | undefined;
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
-    const turn = await streamTogetherTurn(
-      res,
-      body,
-      options,
-      { ...payload, messages, stream: true, stream_options: { include_usage: true } },
-      toolTranslation,
-      modelDefinition,
-      outputState,
-      signal,
-      hooks,
-    );
+    let turn: StreamTurnResult;
+    try {
+      turn = await streamTogetherTurn(
+        res,
+        body,
+        options,
+        { ...payload, messages, stream: true, stream_options: { include_usage: true } },
+        toolTranslation,
+        modelDefinition,
+        outputState,
+        signal,
+        hooks,
+      );
+    } catch (err) {
+      if (err instanceof SseIdleTimeoutError && outputState.textItemId === undefined) {
+        debugLog(options, "native tool stream went idle; falling back to non-streaming responses completion", {
+          timeoutMs: err.timeoutMs,
+          model: payload.model,
+          toolCount: toolTranslation.mappings.size,
+        });
+        return completeNativeToolsWithoutStreaming(
+          res,
+          body,
+          options,
+          payload,
+          toolTranslation,
+          modelDefinition,
+          outputState,
+          responseId,
+          signal,
+          hooks,
+        );
+      }
+      throw err;
+    }
     if (!turn.ok) {
       return failStream(res, responseId, turn.status, turn.error);
     }
@@ -1366,6 +1452,60 @@ async function streamResponseWithNativeTools(
     delta: fallback,
   });
   return completeStreamResponse(res, body, options, responseId, outputState, [], usage, modelDefinition, toolTranslation);
+}
+
+async function completeNativeToolsWithoutStreaming(
+  res: ServerResponse,
+  body: ResponsesRequest,
+  options: CodexProxyOptions,
+  payload: Record<string, unknown>,
+  toolTranslation: CodexToolTranslation,
+  modelDefinition: ModelDefinition,
+  outputState: StreamOutputState,
+  responseId: string,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
+): Promise<StreamProxyResult> {
+  const nativePayload = { ...payload, stream: false };
+  delete (nativePayload as { stream_options?: unknown }).stream_options;
+  const chatResponse = await callTogetherWithNativeTools(nativePayload, toolTranslation, options, modelDefinition, signal, hooks);
+  recordUsage(chatResponse.usage, options, modelDefinition);
+  const output = toResponsesOutput(chatResponse, toolTranslation);
+  completeOpenOutputItems(res, outputState);
+  let outputIndex = outputState.nextOutputIndex;
+  for (const item of output) {
+    writeResponsesSse(res, "response.output_item.added", {
+      type: "response.output_item.added",
+      output_index: outputIndex,
+      item: { ...item, status: item.status ?? "completed" },
+    });
+    writeResponsesSse(res, "response.output_item.done", {
+      type: "response.output_item.done",
+      output_index: outputIndex,
+      item,
+    });
+    outputIndex += 1;
+  }
+  writeResponsesSse(res, "response.completed", {
+    type: "response.completed",
+    response: {
+      id: responseId,
+      object: "response",
+      created_at: Math.floor(Date.now() / 1000),
+      status: "completed",
+      model: body.model ?? options.modelId,
+      output: [
+        ...(outputState.reasoningItemId !== undefined
+          ? [reasoningOutputItem(outputState.reasoningText, outputState.reasoningItemId)]
+          : []),
+        ...(outputState.textItemId !== undefined ? [messageOutputItem(outputState.text, outputState.textItemId)] : []),
+        ...output,
+      ],
+      usage: toResponsesUsage(chatResponse.usage),
+    },
+  });
+  res.end();
+  return { ok: true, status: res.statusCode };
 }
 
 async function runNativeToolCalls(
@@ -1634,15 +1774,30 @@ function customToolInput(parsed: unknown, rawArguments: string): string {
 
 async function* parseSseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder();
+  const reader = body.getReader();
+  const idleTimeoutMs = codexStreamIdleTimeoutMs();
   let buffer = "";
-  for await (const rawChunk of body) {
-    buffer += decoder.decode(rawChunk, { stream: true });
-    for (const data of takeSseEvents(buffer)) {
-      buffer = data.remaining;
-      if (data.payload) {
-        yield data.payload;
+  try {
+    while (true) {
+      const read = await readSseChunk(reader, idleTimeoutMs);
+      if (read.done) {
+        break;
+      }
+      buffer += decoder.decode(read.value, { stream: true });
+      for (const data of takeSseEvents(buffer)) {
+        buffer = data.remaining;
+        if (data.payload) {
+          yield data.payload;
+        }
       }
     }
+  } catch (err) {
+    if (err instanceof SseIdleTimeoutError) {
+      await reader.cancel(err).catch(() => undefined);
+    }
+    throw err;
+  } finally {
+    reader.releaseLock();
   }
 
   buffer += decoder.decode();
@@ -1653,6 +1808,42 @@ async function* parseSseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator
       yield payload;
     }
   }
+}
+
+async function readSseChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number,
+): Promise<SseChunkReadResult> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<SseChunkReadResult>((_, reject) => {
+        timeout = setTimeout(() => reject(new SseIdleTimeoutError(idleTimeoutMs)), idleTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function codexStreamIdleTimeoutMs(): number {
+  const raw = process.env.TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 20_000;
+}
+
+function codexStreamTurnTimeoutMs(): number {
+  const raw = process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 30_000;
+}
+
+function codexUpstreamStreamingEnabled(): boolean {
+  const raw = process.env.TOGETHERLINK_CODEX_UPSTREAM_STREAMING?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
 }
 
 function* takeSseEvents(buffer: string): Generator<{ payload: string; remaining: string }> {
