@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { buildCodexAppConfig } from "../../cli/src/lib/codex-app.js";
+import { buildCodexAppConfig, codexAppModelCatalogJson } from "../../cli/src/lib/codex-app.js";
 
 describe("Codex App alpha config", () => {
-  test("adds the managed provider block without dropping existing tables", () => {
+  test("patches the built-in OpenAI app provider without dropping existing tables", () => {
     const config = buildCodexAppConfig(
       [
         'model = "gpt-5.5"',
@@ -15,27 +15,30 @@ describe("Codex App alpha config", () => {
       {
         modelId: "zai-org/GLM-5.2",
         providerId: "togetherlink_codex_app",
-        providerName: "Togetherlink Codex App (alpha)",
+        providerName: "Togetherlink",
         baseUrl: "http://127.0.0.1:7878/session/local-secret/v1",
         bearerToken: "local-secret",
         catalogPath: "/tmp/models.json",
+        contextWindow: 196_608,
       },
     );
 
-    expect(config).toContain('model = "zai-org/GLM-5.2"');
-    expect(config).toContain('model_provider = "togetherlink_codex_app"');
+    expect(config).toContain('model = "gpt-5.5"');
+    expect(config).toContain('model_provider = "openai"');
+    expect(config).toContain('openai_base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
     expect(config).toContain('model_catalog_json = "/tmp/models.json"');
+    expect(config).toContain("model_context_window = 196608");
+    expect(config).toContain("model_auto_compact_token_limit = 137625");
+    expect(config).not.toContain("model_reasoning_effort");
     expect(config).toContain('[projects."/repo"]');
-    expect(config).toContain("[model_providers.togetherlink_codex_app]");
-    expect(config).toContain('base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
-    expect(config).toContain('experimental_bearer_token = "local-secret"');
+    expect(config).not.toContain("[model_providers.togetherlink_codex_app]");
   });
 
   test("replaces an existing managed block instead of appending duplicates", () => {
     const first = buildCodexAppConfig("", {
       modelId: "zai-org/GLM-5.2",
       providerId: "togetherlink_codex_app",
-      providerName: "Togetherlink Codex App (alpha)",
+      providerName: "Togetherlink",
       baseUrl: "http://127.0.0.1:7878/session/old/v1",
       bearerToken: "old",
       catalogPath: "/tmp/old.json",
@@ -43,7 +46,7 @@ describe("Codex App alpha config", () => {
     const second = buildCodexAppConfig(first, {
       modelId: "moonshotai/Kimi-K2.7-Code",
       providerId: "togetherlink_codex_app",
-      providerName: "Togetherlink Codex App (alpha)",
+      providerName: "Togetherlink",
       baseUrl: "http://127.0.0.1:7878/session/new/v1",
       bearerToken: "new",
       catalogPath: "/tmp/new.json",
@@ -52,7 +55,24 @@ describe("Codex App alpha config", () => {
     expect(second.match(/>>> togetherlink codex-app alpha >>>/g)).toHaveLength(1);
     expect(second).not.toContain("/tmp/old.json");
     expect(second).not.toContain("/session/old/v1");
-    expect(second).toContain('model = "moonshotai/Kimi-K2.7-Code"');
+    expect(second).toContain('model = "gpt-5.5"');
+    expect(second).toContain('model_provider = "openai"');
+    expect(second).toContain('openai_base_url = "http://127.0.0.1:7878/session/new/v1"');
     expect(second).toContain("/session/new/v1");
+  });
+
+  test("uses app-friendly model entries without reasoning effort clutter", () => {
+    const catalog = JSON.parse(codexAppModelCatalogJson()) as { models: Array<Record<string, unknown>> };
+    const first = catalog.models[0];
+
+    expect(first).toBeDefined();
+    expect(first?.display_name).toBe("GLM 5.2 · default");
+    expect(first?.shell_type).toBe("default");
+    expect(first?.default_reasoning_level).toBeNull();
+    expect(first?.supported_reasoning_levels).toEqual([]);
+    expect(first?.supports_reasoning_summaries).toBe(true);
+    expect(first?.default_reasoning_summary).toBe("auto");
+    expect(first?.support_verbosity).toBe(false);
+    expect(first?.supports_parallel_tool_calls).toBe(false);
   });
 });

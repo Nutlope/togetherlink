@@ -19,7 +19,7 @@ Usage:
   togetherlink opencode [...]    (alias: topencode)
 
 Extra args after codex/claude/pi/opencode are passed through.
-Codex App support is alpha and writes reversible app config backups.
+Codex App support is alpha; keep its terminal session open so config restores on exit.
 `);
 }
 
