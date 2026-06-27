@@ -21,7 +21,7 @@ Extra args after codex/claude/pi/opencode are passed through.
 `);
 }
 
-export async function runConfigure() {
+export async function runConfigure(): Promise<boolean> {
   const home = os.homedir();
   clack.intro("togetherlink configure");
 
@@ -44,7 +44,7 @@ export async function runConfigure() {
     });
     if (clack.isCancel(entered)) {
       clack.cancel("Cancelled.");
-      return;
+      return false;
     }
     apiKey = entered.trim();
   }
@@ -62,7 +62,7 @@ export async function runConfigure() {
     });
     if (clack.isCancel(enteredExa)) {
       clack.cancel("Cancelled.");
-      return;
+      return false;
     }
     exaApiKey = enteredExa.trim();
   }
@@ -96,5 +96,6 @@ export async function runConfigure() {
     );
   }
 
-  clack.outro("Done. Run `togetherlink help` to see everything available.");
+  clack.outro("Done.");
+  return true;
 }

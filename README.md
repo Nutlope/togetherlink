@@ -10,18 +10,34 @@ One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, and
 curl -fsSL https://togetherlink.vercel.app/install.sh | sh
 ```
 
-Then run your tool through Together models:
+Then run `togetherlink` and pick the coding tool you want to start:
 
 ```bash
-topencode            # OpenCode with Together GLM 5.2 (officially supported)
-tclaude              # Claude Code through a local Together proxy
-tcodex               # Codex through a local Responses proxy
-tpi                  # Pi Code with Pi's official Together provider
+togetherlink
 ```
 
-On first launch, togetherlink asks once for your Together API key (press Enter to skip — the key is optional and can be added later with `togetherlink configure` or `TOGETHER_API_KEY`). The binary keeps itself up to date automatically from `togetherlink.vercel.app`.
+Or launch a tool directly:
+
+```bash
+togetherlink codex        # alias: tcodex
+togetherlink claude       # alias: tclaude
+togetherlink pi           # alias: tpi
+togetherlink opencode     # alias: topencode
+```
+
+If no Together API key is configured yet, an interactive launch automatically runs `togetherlink configure` first. You can also run `togetherlink configure` directly, or set `TOGETHER_API_KEY`. The installed binary keeps itself up to date automatically from `togetherlink.vercel.app`.
 
 If the underlying agent CLI is missing, togetherlink does not install it automatically. It prints the official install command and docs link for the selected tool, then exits.
+
+The compact CLI guide is:
+
+```text
+togetherlink configure
+togetherlink codex [...]       (alias: tcodex)
+togetherlink claude [...]      (alias: tclaude)
+togetherlink pi [...]          (alias: tpi)
+togetherlink opencode [...]    (alias: topencode)
+```
 
 ## Local Development
 
@@ -48,6 +64,7 @@ Leave that running in one terminal, then run `togetherlink` commands from anothe
 Run the built CLI directly:
 
 ```bash
+node packages/cli/dist/bin/togetherlink.js
 node packages/cli/dist/bin/togetherlink.js help
 node packages/cli/dist/bin/togetherlink.js --json status opencode
 node packages/cli/dist/bin/togetherlink.js --json status claude
@@ -58,6 +75,7 @@ node packages/cli/dist/bin/togetherlink.js --json status pi
 Run through the workspace bin, which is closest to how users will invoke it:
 
 ```bash
+pnpm -F @togetherlink/cli exec togetherlink
 pnpm -F @togetherlink/cli exec togetherlink help
 pnpm -F @togetherlink/cli exec togetherlink --json status opencode
 pnpm -F @togetherlink/cli exec togetherlink --json status claude

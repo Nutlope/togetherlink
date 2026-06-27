@@ -24,46 +24,67 @@ async function loadStoredExaKey(): Promise<void> {
   }
 }
 
-/**
- * On the first harness run after install, if no API
- * key is configured anywhere, prompt for it once. Enter = skip (optional): a
- * skipped key just means the harness throws a clear "set a key" message later,
- * and the user can run `togetherlink configure` or set the env var. This makes
- * the post-install flow require zero extra steps for the eager user.
- */
-async function maybePromptApiKey(): Promise<void> {
+async function hasTogetherApiKey(): Promise<boolean> {
   try {
     const home = process.env.HOME;
     if (!home) {
-      return;
+      return Boolean(process.env.TOGETHER_API_KEY?.trim());
     }
     const existing = resolveStoredApiKey((await readGlobalConfig(home)).apiKey);
-    if (existing || process.env.TOGETHER_API_KEY) {
-      return;
-    }
-    const clack = await import("@clack/prompts");
-    clack.intro("togetherlink — first-run setup");
-    const entered = await clack.password({
-      message: "Together API key (from https://api.together.ai/settings/api-keys)\n  press Enter to skip — you can add it later with `togetherlink configure`:",
-      validate: () => undefined, // empty is allowed
-    });
-    if (clack.isCancel(entered)) {
-      clack.cancel("Cancelled.");
-      return;
-    }
-    const key = entered.trim();
-    if (!key) {
-      clack.log.info("Skipped — set a key later with `togetherlink configure` or TOGETHER_API_KEY.");
-      clack.outro("Ready. Re-run your command to start.");
-      return;
-    }
-    const { setGlobalApiKey } = await import("../lib/global-config.js");
-    await setGlobalApiKey(home, key);
-    clack.log.success("API key saved to ~/.togetherlink/config.json");
-    clack.outro("Ready. Re-run your command to start.");
+    return Boolean(existing || process.env.TOGETHER_API_KEY?.trim());
   } catch {
-    // Setup prompt is best-effort; never block the command on it.
+    return Boolean(process.env.TOGETHER_API_KEY?.trim());
   }
+}
+
+async function ensureConfiguredForInteractiveLaunch(): Promise<boolean> {
+  if (await hasTogetherApiKey()) {
+    return true;
+  }
+  if (!isInteractive()) {
+    return false;
+  }
+
+  const configured = await runConfigure();
+  await loadStoredExaKey();
+  return configured && (await hasTogetherApiKey());
+}
+
+async function runInteractiveLauncher(): Promise<void> {
+  if (!isInteractive()) {
+    printHelp();
+    return;
+  }
+
+  if (!(await ensureConfiguredForInteractiveLaunch())) {
+    return;
+  }
+
+  const clack = await import("@clack/prompts");
+  const choice = await clack.select({
+    message: "What do you want to run?",
+    options: [
+      { value: "codex", label: "Codex", hint: "tcodex" },
+      { value: "claude", label: "Claude Code", hint: "tclaude" },
+      { value: "pi", label: "Pi Code", hint: "tpi" },
+      { value: "opencode", label: "OpenCode", hint: "topencode" },
+      { value: "configure", label: "Configure", hint: "API keys and detected tools" },
+    ],
+  });
+  if (clack.isCancel(choice)) {
+    clack.cancel("Cancelled.");
+    return;
+  }
+  if (choice === "configure") {
+    await runConfigure();
+    return;
+  }
+
+  await dispatchHarnessCommand(choice, undefined, {});
+}
+
+function isInteractive(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
 async function main() {
@@ -87,7 +108,12 @@ async function main() {
   const [rawCommand, rawVerb] = parsed.positional;
   const command = rawCommand === "picode" ? "pi" : rawCommand;
 
-  if (!command || command === "help" || command === "--help") {
+  if (!command) {
+    await runInteractiveLauncher();
+    return;
+  }
+
+  if (command === "help" || command === "--help") {
     printHelp();
     return;
   }
@@ -152,7 +178,9 @@ async function main() {
       invocation.command === "pi") &&
     invocation.command !== undefined
   ) {
-    await maybePromptApiKey();
+    if (!(await ensureConfiguredForInteractiveLaunch())) {
+      throw new Error("No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.");
+    }
   }
 
   await dispatchHarnessCommand(invocation.command, undefined, invocation.flags);
