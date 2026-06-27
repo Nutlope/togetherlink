@@ -235,6 +235,44 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
   });
 
+  test("coalesces Claude title-generation system prompts for Qwen Haiku requests", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      return sseResponse([
+        {
+          choices: [{ delta: { content: "{\"title\":\"Debug title generation\"}" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 80, completion_tokens: 8, total_tokens: 88 },
+        },
+      ]);
+    }));
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: EXPECTED_HAIKU_MODEL_ID,
+        stream: true,
+        max_tokens: 32_000,
+        system:
+          "You are a Claude agent, built on Anthropic's Claude Agent SDK. Generate a concise, sentence-case title. Return JSON with a single title field.",
+        messages: [{ role: "user", content: "<session>Debug Qwen title generation</session>" }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    const messages = upstreamMessages(upstreamBodies[0]);
+    expect(messages.filter((message) => message.role === "system")).toHaveLength(1);
+    expect(messages[0]?.content).toContain("Together AI model routed through togetherlink");
+    expect(messages[0]?.content).toContain("Generate a concise, sentence-case title");
+    expect(upstreamBodies[0]).toMatchObject({
+      model: CLAUDE_HAIKU_MODEL.id,
+      stream: true,
+    });
+  });
+
   test("keeps normal Claude requests on the selected GLM reasoning profile", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
@@ -280,6 +318,10 @@ function firstUserContent(body: Record<string, unknown> | undefined): unknown {
     return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "user";
   });
   return typeof userMessage === "object" && userMessage !== null ? (userMessage as { content?: unknown }).content : undefined;
+}
+
+function upstreamMessages(body: Record<string, unknown> | undefined): Array<{ role?: unknown; content?: unknown }> {
+  return Array.isArray(body?.messages) ? body.messages as Array<{ role?: unknown; content?: unknown }> : [];
 }
 
 async function callClaudeProxy({
