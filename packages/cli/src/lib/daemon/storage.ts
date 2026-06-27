@@ -67,9 +67,14 @@ export async function createDashboardStore(home = resolveTogetherlinkHome()): Pr
   const sqlite = await openSqlite(path.join(home, DATABASE_FILE));
   if (sqlite) {
     await chmod(path.join(home, DATABASE_FILE), 0o600).catch(() => {});
-    return new SqliteDashboardStore(sqlite);
+    try {
+      return new ResilientDashboardStore(new SqliteDashboardStore(sqlite));
+    } catch (err) {
+      sqlite.close?.();
+      warnStoreError("initialize sqlite dashboard store", err);
+    }
   }
-  return new JsonDashboardStore(path.join(home, LEGACY_SESSION_STORE_FILE));
+  return new ResilientDashboardStore(new JsonDashboardStore(path.join(home, LEGACY_SESSION_STORE_FILE)));
 }
 
 export function resolveDashboardDatabasePath(home = resolveTogetherlinkHome()): string {
@@ -141,6 +146,75 @@ class NodeSqliteDatabase implements SqliteDatabase {
   close(): void {
     (this.db as { close?: () => void }).close?.();
   }
+}
+
+class ResilientDashboardStore implements DashboardStore {
+  readonly kind: DashboardStore["kind"];
+
+  constructor(private readonly inner: DashboardStore) {
+    this.kind = inner.kind;
+  }
+
+  restoreActiveSessions(): StoredSession[] {
+    try {
+      return this.inner.restoreActiveSessions();
+    } catch (err) {
+      warnStoreError("restore dashboard sessions", err);
+      return [];
+    }
+  }
+
+  upsertSession(session: SessionPersistInput): void {
+    this.write("persist dashboard session", () => this.inner.upsertSession(session));
+  }
+
+  markSessionEnded(token: string, endedAt: number, costSummary: string, costTotals: TokenUsage): void {
+    this.write("mark dashboard session ended", () => this.inner.markSessionEnded(token, endedAt, costSummary, costTotals));
+  }
+
+  updateSessionPid(token: string, pid: number): void {
+    this.write("update dashboard session pid", () => this.inner.updateSessionPid(token, pid));
+  }
+
+  updateSessionUsage(token: string, costSummary: string, costTotals: TokenUsage, externalSummary?: string): void {
+    this.write("update dashboard session usage", () => (
+      this.inner.updateSessionUsage(token, costSummary, costTotals, externalSummary)
+    ));
+  }
+
+  upsertTrace(token: string, trace: ProxyTraceEvent): void {
+    this.write("persist dashboard trace", () => this.inner.upsertTrace(token, trace));
+  }
+
+  recentSessions(excludingTokens: Set<string>, limit?: number): SessionPublicView[] {
+    try {
+      return this.inner.recentSessions(excludingTokens, limit);
+    } catch (err) {
+      warnStoreError("read recent dashboard sessions", err);
+      return [];
+    }
+  }
+
+  close(): void {
+    try {
+      this.inner.close();
+    } catch (err) {
+      warnStoreError("close dashboard store", err);
+    }
+  }
+
+  private write(action: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      warnStoreError(action, err);
+    }
+  }
+}
+
+function warnStoreError(action: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`[togetherlink daemon] Could not ${action}: ${message}\n`);
 }
 
 class SqliteDashboardStore implements DashboardStore {
