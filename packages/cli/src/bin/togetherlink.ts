@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import os from "node:os";
 import { loadEnvFile } from "../lib/load-env.js";
 import { parseArgs } from "../lib/parse-args.js";
 import { printHelp, runConfigure } from "../lib/commands/global.js";
@@ -146,6 +147,21 @@ async function main() {
     }
     const { runDaemonCommand } = await import("../lib/daemon/cli.js");
     await runDaemonCommand(rawVerb);
+    return;
+  }
+
+  if (command === "codex-app") {
+    if (!parsed.flags.restore && !(await ensureConfiguredForInteractiveLaunch())) {
+      throw new Error("No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.");
+    }
+    const { runCodexAppCommand } = await import("../lib/codex-app.js");
+    const result = await runCodexAppCommand({ home: os.homedir(), ...parsed.flags });
+    if (result.message) {
+      console.log(result.message);
+    }
+    if (result.payload) {
+      console.log(JSON.stringify(result.payload, null, 2));
+    }
     return;
   }
 

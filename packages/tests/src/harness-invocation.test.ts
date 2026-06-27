@@ -63,4 +63,12 @@ describe("harness invocation parsing", () => {
     expect(invocation.flags.main).toBeUndefined();
     expect(invocation.flags.passthrough).toEqual(["--main", "real-claude-value"]);
   });
+
+  test("parses codex-app model and restore flags before dispatch", () => {
+    const parsed = parseArgs(["codex-app", "--model", "moonshotai/Kimi-K2.7-Code", "--restore"]);
+
+    expect(parsed.positional).toEqual(["codex-app"]);
+    expect(parsed.flags.main).toBe("moonshotai/Kimi-K2.7-Code");
+    expect(parsed.flags.restore).toBe(true);
+  });
 });

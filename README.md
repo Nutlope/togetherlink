@@ -20,6 +20,7 @@ Or launch a tool directly:
 
 ```bash
 togetherlink codex        # alias: tcodex
+togetherlink codex-app    # alpha: persistent Codex App config
 togetherlink claude       # alias: tclaude
 togetherlink pi           # alias: tpi
 togetherlink opencode     # alias: topencode
@@ -33,6 +34,7 @@ The compact CLI guide is:
 
 ```text
 togetherlink configure
+togetherlink codex-app [--model <model>] [--restore]  (alpha)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
 togetherlink pi [...]          (alias: tpi)
@@ -237,6 +239,25 @@ Inspect recent Codex proxy speed traces:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink daemon profile
 ```
+
+## Testing Codex App
+
+Codex App support is an alpha feature. Unlike `togetherlink codex`, it persistently rewrites Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. The command saves a restore backup before writing. If Codex App is already open, togetherlink asks before restarting it so the new config can take effect.
+
+```bash
+export TOGETHER_API_KEY="..."
+
+pnpm -F @togetherlink/cli exec togetherlink codex-app
+pnpm -F @togetherlink/cli exec togetherlink codex-app --model moonshotai/Kimi-K2.7-Code
+```
+
+Restore the previous Codex config:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink codex-app --restore
+```
+
+Backups live under `~/.togetherlink/backup/codex-app/`. The managed model catalog lives under `~/.togetherlink/codex-app/models.json`.
 
 ## Testing Pi Code
 

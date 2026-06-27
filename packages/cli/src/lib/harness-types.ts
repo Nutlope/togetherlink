@@ -7,6 +7,7 @@ export type HarnessContext = {
   main?: string;
   passthrough?: string[];
   json?: boolean;
+  restore?: boolean;
   search?: string;
   slot?: string;
 };
