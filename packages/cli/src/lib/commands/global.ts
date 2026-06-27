@@ -19,7 +19,7 @@ Usage:
   togetherlink opencode [...]    (alias: topencode)
 
 Extra args after codex/claude/pi/opencode are passed through.
-Codex App support is alpha; keep its terminal session open so config restores on exit.
+Codex App support is alpha; run \`togetherlink codex-app --restore\` to restore the previous desktop config.
 `);
 }
 

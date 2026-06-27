@@ -39,9 +39,6 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     return restoreCodexApp(ctx.home);
   }
 
-  const recovered = await recoverInterruptedCodexApp(ctx.home);
-  await assertNoLiveCodexAppSession(ctx.home);
-
   const apiKey = await resolveTogetherApiKey({
     apiKey: ctx.apiKey,
     home: ctx.home,
@@ -61,7 +58,6 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     token: sessionToken,
     authToken,
     agent: "codex",
-    pid: process.pid,
     apiKey,
     modelLabel: `${selectedModel.definition.name} (Codex App alpha)`,
     modelId: selectedModel.definition.id,
@@ -72,7 +68,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   });
 
   const configPath = codexConfigPath(ctx.home);
-  const backup = await backupFiles(ctx.home, [configPath]);
+  const backup = await backupCodexAppConfig(ctx.home, configPath);
   const existing = await readTextIfExists(configPath);
   const next = buildCodexAppConfig(existing ?? "", {
     modelId: selectedModel.definition.id,
@@ -95,36 +91,14 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const launch = await launchCodexApp();
   const intro = [
     "togetherlink codex-app is alpha: Codex App support is not stable yet.",
-    recovered ? "Recovered and restored a previous interrupted Codex App session before starting this one." : undefined,
     `Codex App is configured for Together AI (${selectedModel.definition.name}).`,
+    "This config stays active until you run: togetherlink codex-app --restore",
     `Backup: ${backup}`,
     codexAppLaunchMessage(launch),
-    "Keep this terminal open while using Codex Desktop. Press Ctrl+C to restore Codex config.",
-    "If the terminal crashes, run: togetherlink codex-app --restore",
+    "If Codex App was already open, quit and reopen it when you are ready so it reloads the Togetherlink profile.",
   ].filter(Boolean).join("\n");
 
-  if (!isInteractive()) {
-    return { message: intro };
-  }
-
-  process.stderr.write(`${intro}\n`);
-  try {
-    await waitForCodexAppShutdown();
-    if (await isCodexAppRunning()) {
-      await quitCodexApp();
-    }
-    const restored = await restoreCodexApp(ctx.home);
-    return {
-      message: `Codex App session ended.\n${restored.message ?? ""}`.trim(),
-    };
-  } catch (err) {
-    try {
-      await restoreCodexApp(ctx.home);
-    } catch {
-      // Preserve the original error if shutdown cleanup also failed.
-    }
-    throw err;
-  }
+  return { message: intro };
 }
 
 export function buildCodexAppConfig(
@@ -140,22 +114,30 @@ export function buildCodexAppConfig(
   },
 ): string {
   const withoutManagedBlock = removeManagedBlock(rawConfig);
-  const [preamble, rest] = splitTomlPreamble(withoutManagedBlock);
+  const withoutLegacyTables = removeTomlSections(withoutManagedBlock, [
+    `profiles.${options.providerId}`,
+    `profiles."${options.providerId}"`,
+    `model_providers.${options.providerId}`,
+    `model_providers."${options.providerId}"`,
+  ]);
+  const [preamble, rest] = splitTomlPreamble(withoutLegacyTables);
   const managedPreamble = upsertTopLevelTomlKeys(preamble, {
     model: tomlString(options.modelId),
-    model_provider: tomlString("openai"),
-    openai_base_url: tomlString(options.baseUrl),
+    model_provider: tomlString(options.providerId),
     model_catalog_json: tomlString(options.catalogPath),
     ...(options.contextWindow ? {
       model_context_window: String(options.contextWindow),
       model_auto_compact_token_limit: String(Math.floor(options.contextWindow * 0.7)),
     } : {}),
   });
-  const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, ["model_reasoning_effort"]);
+  const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, ["model_reasoning_effort", "openai_base_url", "profile"]);
   const providerBlock = [
     CODEX_APP_CONFIG_MARKER_START,
-    '# togetherlink codex-app keeps model_provider = "openai" so Codex Desktop history stays visible.',
-    "# Traffic is routed through openai_base_url above to the local togetherlink Responses proxy.",
+    "# togetherlink codex-app configures a dedicated alpha provider for Codex Desktop.",
+    `[model_providers.${options.providerId}]`,
+    `name = ${tomlString(options.providerName)}`,
+    `base_url = ${tomlString(options.baseUrl)}`,
+    'wire_api = "responses"',
     CODEX_APP_CONFIG_MARKER_END,
     "",
   ].join("\n");
@@ -223,6 +205,24 @@ async function backupFiles(home: string, files: string[]): Promise<string> {
   return snapshotDir;
 }
 
+async function backupCodexAppConfig(home: string, configPath: string): Promise<string> {
+  const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
+  if (await isManagedCodexAppConfig(home)) {
+    const existing = await readTextIfExists(manifestPath);
+    if (existing) {
+      try {
+        const manifest = JSON.parse(existing) as BackupManifest;
+        if (manifest.files.some((entry) => entry.path === configPath)) {
+          return path.dirname(manifest.files.find((entry) => entry.path === configPath)?.backupPath ?? manifestPath);
+        }
+      } catch {
+        // Fall through and create a fresh backup if the manifest is invalid.
+      }
+    }
+  }
+  return backupFiles(home, [configPath]);
+}
+
 async function writePersistentModelCatalog(home: string): Promise<string> {
   const file = modelCatalogPath(home);
   await writeTextAtomic(file, `${codexAppModelCatalogJson()}\n`);
@@ -277,106 +277,24 @@ function codexAppBaseInstructions(): string {
 type CodexAppLaunchResult = {
   launched: boolean;
   wasRunning: boolean;
-  restarted: boolean;
-  restartDeclined: boolean;
-  restartUnsupported: boolean;
 };
 
 async function launchCodexApp(): Promise<CodexAppLaunchResult> {
   const wasRunning = await isCodexAppRunning();
-  let restarted = false;
-  let restartDeclined = false;
-  let restartUnsupported = false;
-
   if (wasRunning) {
-    if (await shouldRestartCodexApp()) {
-      restarted = await quitCodexApp();
-      restartUnsupported = !restarted;
-    } else {
-      restartDeclined = true;
-    }
+    return { launched: false, wasRunning };
   }
-
-  const launched = restartDeclined ? false : await openCodexApp();
-  return { launched, wasRunning, restarted, restartDeclined, restartUnsupported };
+  const launched = await openCodexApp();
+  return { launched, wasRunning };
 }
 
 function codexAppLaunchMessage(result: CodexAppLaunchResult): string {
-  if (result.wasRunning && result.restarted && result.launched) {
-    return "Codex App was already open; restart was approved and relaunch was requested.";
-  }
-  if (result.wasRunning && result.restartDeclined) {
-    return "Codex App is already open. Config written; quit and reopen Codex App to use the new Togetherlink profile.";
-  }
-  if (result.wasRunning && result.restartUnsupported) {
-    return "Config written, but togetherlink could not quit the running Codex App. Quit and reopen Codex App to use the new Togetherlink profile.";
+  if (result.wasRunning) {
+    return "Codex App is already open. Config written; togetherlink did not restart it.";
   }
   return result.launched
     ? "Codex App launch requested."
     : "Config written, but Codex App could not be launched automatically. Open Codex App manually.";
-}
-
-async function shouldRestartCodexApp(): Promise<boolean> {
-  if (!isInteractive()) {
-    return false;
-  }
-  const clack = await import("@clack/prompts");
-  const restart = await clack.confirm({
-    message: "Codex App is already open. Restart it now so the Togetherlink Codex App alpha config takes effect?",
-    initialValue: true,
-  });
-  return restart === true;
-}
-
-async function waitForCodexAppShutdown(): Promise<void> {
-  for (;;) {
-    const signal = await waitForSignal();
-    if (signal !== "SIGINT") {
-      return;
-    }
-    const close = await shouldCloseCodexAppOnShutdown();
-    if (close) {
-      return;
-    }
-    process.stderr.write("togetherlink codex-app is still running. Press Ctrl+C again when you want to restore.\n");
-  }
-}
-
-function waitForSignal(): Promise<NodeJS.Signals> {
-  return new Promise((resolve) => {
-    const cleanup = () => {
-      process.removeListener("SIGINT", onSigint);
-      process.removeListener("SIGTERM", onSigterm);
-      process.removeListener("SIGHUP", onSighup);
-    };
-    const onSigint = () => {
-      cleanup();
-      resolve("SIGINT");
-    };
-    const onSigterm = () => {
-      cleanup();
-      resolve("SIGTERM");
-    };
-    const onSighup = () => {
-      cleanup();
-      resolve("SIGHUP");
-    };
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
-    process.once("SIGHUP", onSighup);
-  });
-}
-
-async function shouldCloseCodexAppOnShutdown(): Promise<boolean> {
-  if (!isInteractive()) {
-    return true;
-  }
-  const clack = await import("@clack/prompts");
-  const close = await clack.confirm({
-    message: "Close Codex Desktop and restore your Codex config?",
-    initialValue: true,
-  });
-  return close !== false;
 }
 
 async function openCodexApp(): Promise<boolean> {
@@ -413,37 +331,6 @@ async function isCodexAppRunning(): Promise<boolean> {
   return false;
 }
 
-async function quitCodexApp(): Promise<boolean> {
-  if (process.platform === "darwin") {
-    try {
-      await execFileAsync("/usr/bin/osascript", ["-e", 'tell application "Codex" to quit']);
-      return waitForCodexAppExit();
-    } catch {
-      return false;
-    }
-  }
-  if (process.platform === "win32") {
-    try {
-      await execFileAsync("taskkill", ["/IM", "Codex.exe"]);
-      return waitForCodexAppExit();
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
-async function waitForCodexAppExit(): Promise<boolean> {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (!(await isCodexAppRunning())) {
-      return true;
-    }
-    await sleep(200);
-  }
-  return false;
-}
-
 async function spawnDetached(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -456,14 +343,6 @@ async function spawnDetached(command: string, args: string[]): Promise<boolean> 
       resolve(true);
     });
   });
-}
-
-function isInteractive(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function codexConfigPath(home: string): string {
@@ -596,6 +475,27 @@ function removeManagedBlock(raw: string): string {
   }
   const afterEnd = end + CODEX_APP_CONFIG_MARKER_END.length;
   return `${raw.slice(0, start).trimEnd()}\n${raw.slice(afterEnd).replace(/^\s*\n/, "")}`;
+}
+
+function removeTomlSections(raw: string, sectionNames: string[]): string {
+  if (sectionNames.length === 0 || raw.trim() === "") {
+    return raw;
+  }
+  const remove = new Set(sectionNames.map((section) => `[${section}]`));
+  const lines = raw.split("\n");
+  const kept: string[] = [];
+  let skipping = false;
+
+  for (const line of lines) {
+    if (/^\s*\[/.test(line)) {
+      skipping = remove.has(line.trim());
+    }
+    if (!skipping) {
+      kept.push(line);
+    }
+  }
+
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 function splitTomlPreamble(raw: string): [string, string] {

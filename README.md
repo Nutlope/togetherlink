@@ -242,7 +242,7 @@ pnpm -F @togetherlink/cli exec togetherlink daemon profile
 
 ## Testing Codex App
 
-Codex App support is an alpha feature. Unlike `togetherlink codex`, it temporarily patches Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. Keep the terminal open while using Codex Desktop; Ctrl+C asks whether to close the app and restores the previous config. If the terminal crashes, `--restore` recovers the saved backup. If Codex App is already open, togetherlink asks before restarting it so the new config can take effect.
+Codex App support is an alpha feature. Unlike `togetherlink codex`, it persistently patches Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. The config stays active until you run `--restore`, similar to `ollama launch codex-app`. If Codex App is already open, togetherlink will not close it; quit and reopen Codex Desktop when you are ready for it to reload the Togetherlink profile.
 
 ```bash
 export TOGETHER_API_KEY="..."

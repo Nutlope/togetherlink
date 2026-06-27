@@ -334,6 +334,32 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("streams ordinary Codex turns upstream by default", async () => {
+    const requests: Array<{ body: any }> = [];
+    vi.unstubAllEnvs();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ body: JSON.parse(String(init?.body)) });
+      return sseResponse([
+        { choices: [{ delta: { content: "hi" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+        { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(requests[0]?.body.stream).toBe(true);
+    expect(response).toContain("response.output_text.delta");
+    expect(response).toContain("response.completed");
+  });
+
   test("preserves namespace tool-call groups with more than five parallel calls", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {

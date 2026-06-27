@@ -1170,7 +1170,7 @@ async function streamResponseFromTogether(
     text: "",
   };
 
-  if (!codexUpstreamStreamingEnabled()) {
+  if (toolTranslation.nativeTools.length > 0 && !codexUpstreamStreamingEnabled()) {
     return completeNativeToolsWithoutStreaming(
       res,
       body,
