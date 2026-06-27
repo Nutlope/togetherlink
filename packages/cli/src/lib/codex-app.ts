@@ -12,7 +12,6 @@ import type { ModelDefinition } from "@togetherlink/models";
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
 const CODEX_APP_CONFIG_MARKER_START = "# >>> togetherlink codex-app alpha >>>";
 const CODEX_APP_CONFIG_MARKER_END = "# <<< togetherlink codex-app alpha <<<";
-const CODEX_APP_DISPLAY_MODEL = "gpt-5.5";
 const BACKUP_MANIFEST = "latest.json";
 const execFileAsync = promisify(execFile);
 
@@ -65,7 +64,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     pid: process.pid,
     apiKey,
     modelLabel: `${selectedModel.definition.name} (Codex App alpha)`,
-    modelId: CODEX_APP_DISPLAY_MODEL,
+    modelId: selectedModel.definition.id,
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
@@ -143,7 +142,7 @@ export function buildCodexAppConfig(
   const withoutManagedBlock = removeManagedBlock(rawConfig);
   const [preamble, rest] = splitTomlPreamble(withoutManagedBlock);
   const managedPreamble = upsertTopLevelTomlKeys(preamble, {
-    model: tomlString(CODEX_APP_DISPLAY_MODEL),
+    model: tomlString(options.modelId),
     model_provider: tomlString("openai"),
     openai_base_url: tomlString(options.baseUrl),
     model_catalog_json: tomlString(options.catalogPath),

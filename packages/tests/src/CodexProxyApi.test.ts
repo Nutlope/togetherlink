@@ -230,6 +230,109 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("keeps streamed client tool calls in Codex-compatible completed item events", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return sseResponse([
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_alpha",
+                    type: "function",
+                    function: { name: "multi_agent_v1__spawn_agent", arguments: "{\"task\":\"Say " },
+                  },
+                  {
+                    index: 1,
+                    id: "call_beta",
+                    type: "function",
+                    function: { name: "multi_agent_v1__spawn_agent", arguments: "{\"task\":\"Say " },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, function: { arguments: "alpha\"}" } },
+                  { index: 1, function: { arguments: "beta\"}" } },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "namespace",
+          name: "multi_agent_v1",
+          description: "Spawn and manage sub-agents.",
+          tools: [
+            {
+              type: "function",
+              name: "spawn_agent",
+              description: "Start a sub-agent.",
+              parameters: {
+                type: "object",
+                properties: { task: { type: "string" } },
+                required: ["task"],
+              },
+            },
+          ],
+        },
+      ],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Use two agents." }] }],
+    });
+
+    const firstAdded = response.indexOf('"call_id":"call_alpha"');
+    const secondAdded = response.indexOf('"call_id":"call_beta"');
+    const completed = response.indexOf("response.completed");
+    expect(firstAdded).toBeGreaterThan(-1);
+    expect(secondAdded).toBeGreaterThan(-1);
+    expect(completed).toBeGreaterThan(secondAdded);
+    expect(response).not.toContain("response.function_call_arguments.delta");
+    expect(response).not.toContain("response.function_call_arguments.done");
+    expect(response).toContain('"arguments":"{\\"task\\":\\"Say alpha\\"}"');
+    expect(response).toContain('"arguments":"{\\"task\\":\\"Say beta\\"}"');
+  });
+
+  test("parses CRLF-delimited upstream SSE streams", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return sseResponse([
+        { choices: [{ delta: { content: "hi" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+      ], { lineEnding: "\r\n" });
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("response.output_text.delta");
+    expect(response).toContain("hi");
+    expect(response).toContain("response.completed");
+  });
+
   test("preserves namespace tool-call groups with more than five parallel calls", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -358,6 +461,74 @@ describe("Codex Responses proxy tool compatibility", () => {
       type: "message",
       role: "assistant",
       content: [{ type: "output_text", text: "Codex docs: https://developers.openai.com/codex", annotations: [] }],
+    });
+  });
+
+  test("streams native web_search thinking and final answer deltas instead of buffering", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url, body });
+      if (url.includes("api.exa.ai")) {
+        return jsonResponse({
+          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
+        });
+      }
+      const togetherRequestCount = requests.filter((request) => request.url.includes("api.together.ai")).length;
+      if (togetherRequestCount === 1) {
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: "Need current docs. " } }] },
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_search",
+                      type: "function",
+                      function: { name: "web_search", arguments: JSON.stringify({ query: "Codex docs" }) },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ delta: { reasoning_content: "Found it. " } }] },
+        { choices: [{ delta: { content: "Codex docs: " } }] },
+        { choices: [{ delta: { content: "https://developers.openai.com/codex" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+        { usage: { prompt_tokens: 15, completion_tokens: 7, total_tokens: 22 } },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Search Codex docs." }] }],
+    });
+
+    const reasoningIndex = response.indexOf("response.reasoning_text.delta");
+    const textIndex = response.indexOf("response.output_text.delta");
+    const completedIndex = response.indexOf("response.completed");
+    expect(reasoningIndex).toBeGreaterThan(-1);
+    expect(textIndex).toBeGreaterThan(-1);
+    expect(completedIndex).toBeGreaterThan(textIndex);
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+    expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
+    expect(requests[2]?.body.messages.at(-1)).toMatchObject({
+      role: "tool",
+      tool_call_id: "call_search",
+      content: expect.stringContaining("Codex docs"),
     });
   });
 
@@ -690,8 +861,10 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function sseResponse(chunks: unknown[]): Response {
-  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+function sseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } = {}): Response {
+  const lineEnding = options.lineEnding ?? "\n";
+  const separator = `${lineEnding}${lineEnding}`;
+  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}${separator}`).join("") + `data: [DONE]${separator}`;
   return new Response(body, {
     status: 200,
     headers: { "content-type": "text/event-stream" },

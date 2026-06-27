@@ -23,7 +23,7 @@ describe("Codex App alpha config", () => {
       },
     );
 
-    expect(config).toContain('model = "gpt-5.5"');
+    expect(config).toContain('model = "zai-org/GLM-5.2"');
     expect(config).toContain('model_provider = "openai"');
     expect(config).toContain('openai_base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
     expect(config).toContain('model_catalog_json = "/tmp/models.json"');
@@ -55,7 +55,7 @@ describe("Codex App alpha config", () => {
     expect(second.match(/>>> togetherlink codex-app alpha >>>/g)).toHaveLength(1);
     expect(second).not.toContain("/tmp/old.json");
     expect(second).not.toContain("/session/old/v1");
-    expect(second).toContain('model = "gpt-5.5"');
+    expect(second).toContain('model = "moonshotai/Kimi-K2.7-Code"');
     expect(second).toContain('model_provider = "openai"');
     expect(second).toContain('openai_base_url = "http://127.0.0.1:7878/session/new/v1"');
     expect(second).toContain("/session/new/v1");

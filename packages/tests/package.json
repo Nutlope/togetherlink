@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts",
+    "test:live-smoke": "pnpm -F @togetherlink/cli build && TOGETHERLINK_LIVE_SMOKE=1 vitest run --config vitest.config.ts src/LiveSmoke.test.ts",
     "test:codex": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/Codex.test.ts",
     "test:claude": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/Claude.test.ts",
     "test:opencode": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/OpenCode.test.ts",
