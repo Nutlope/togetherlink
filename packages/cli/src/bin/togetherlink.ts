@@ -113,7 +113,7 @@ async function main() {
     return;
   }
 
-  if (command === "help" || command === "--help") {
+  if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     return;
   }
