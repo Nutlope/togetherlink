@@ -354,7 +354,7 @@ function backupDir(home: string): string {
 }
 
 function modelCatalogPath(home: string): string {
-  return path.join(process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink"), "codex-app", "models.json");
+  return path.join(home, ".codex", "togetherlink-codex-app-models.json");
 }
 
 function appSessionLockPath(home: string): string {

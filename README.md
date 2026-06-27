@@ -257,7 +257,7 @@ Restore the previous Codex config:
 pnpm -F @togetherlink/cli exec togetherlink codex-app --restore
 ```
 
-Backups live under `~/.togetherlink/backup/codex-app/`. The managed model catalog and session lock live under `~/.togetherlink/codex-app/`.
+Backups live under `~/.togetherlink/backup/codex-app/`. The managed model catalog lives under `~/.codex/` so Codex Desktop can load it, and the session lock lives under `~/.togetherlink/codex-app/`.
 
 ## Testing Pi Code
 

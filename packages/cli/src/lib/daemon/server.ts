@@ -42,6 +42,7 @@ export type DaemonHealth = {
   ok: true;
   pid: number;
   version: string;
+  home: string | null;
   scriptPath: string | null;
   scriptSize: number | null;
   scriptMtimeMs: number | null;
@@ -204,6 +205,7 @@ async function handleDaemonRequest(
       ok: true,
       pid: process.pid,
       version: VERSION,
+      home: resolveTogetherlinkHome(),
       scriptPath: RUNNING_DAEMON_IDENTITY.scriptPath,
       scriptSize: RUNNING_DAEMON_IDENTITY.scriptSize,
       scriptMtimeMs: RUNNING_DAEMON_IDENTITY.scriptMtimeMs,
@@ -855,13 +857,14 @@ export async function probeDaemonHealth(port: number): Promise<DaemonHealth | un
     if (body?.ok !== true) {
       return undefined;
     }
-    return {
-      ok: true,
-      pid: typeof body.pid === "number" ? body.pid : 0,
-      version: typeof body.version === "string" ? body.version : "",
-      scriptPath: typeof body.scriptPath === "string" ? body.scriptPath : null,
-      scriptSize: typeof body.scriptSize === "number" ? body.scriptSize : null,
-      scriptMtimeMs: typeof body.scriptMtimeMs === "number" ? body.scriptMtimeMs : null,
+      return {
+        ok: true,
+        pid: typeof body.pid === "number" ? body.pid : 0,
+        version: typeof body.version === "string" ? body.version : "",
+        home: typeof body.home === "string" ? body.home : null,
+        scriptPath: typeof body.scriptPath === "string" ? body.scriptPath : null,
+        scriptSize: typeof body.scriptSize === "number" ? body.scriptSize : null,
+        scriptMtimeMs: typeof body.scriptMtimeMs === "number" ? body.scriptMtimeMs : null,
       activeSessionCount: typeof body.activeSessionCount === "number" ? body.activeSessionCount : -1,
     };
   } catch {
