@@ -10,12 +10,10 @@ import { TOGETHER_BASE_URL, VISION_MODELS, VISION_PROMPT } from "@togetherlink/m
  * image it never saw.
  *
  * The vision model list and prompt come from @togetherlink/models (the shared
- * manifest) so they stay in sync with the OpenCode `@vision` subagent. See
- * scripts/bench-vision-results.md for the model selection rationale. The models
- * are fixed here — not user-configurable — with automatic failover if the
- * primary errors. Reasoning is disabled because image description is a
- * perception task, not a reasoning one (with reasoning on, hybrid models emit
- * empty `content`).
+ * manifest) so they stay in sync with the OpenCode `@vision` subagent. The
+ * models are fixed here — not user-configurable — with automatic failover if
+ * the primary errors. Reasoning is disabled because image description is a
+ * perception task, not a reasoning one.
  */
 
 export type ImageBlock = {

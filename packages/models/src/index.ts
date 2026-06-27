@@ -12,9 +12,7 @@
  *  - GLM-5.2: https://docs.together.ai/docs/glm-5.2-quickstart ($1.40/$0.26/$4.40)
  *    and the models.dev PR github.com/anomalyco/models.dev/pull/2663
  *    (context 262144, output 164000).
- *  - Vision models: scripts/bench-vision-results.md in the repo
- *    (moonshotai/Kimi-K2.7-Code $0.95/$0.19/$4.00 primary,
- *     Qwen/Qwen3.5-9B $0.17/$0.25 fallback).
+ *  - Vision models use Together's published model pricing and capabilities.
  */
 
 export const TOGETHER_BASE_URL = "https://api.together.ai/v1";
@@ -204,9 +202,8 @@ export const QWEN_3_5_9B: ModelDefinition = {
  * Curated vision models for image description, ordered primary-first. The
  * Claude proxy iterates this list with automatic failover; OpenCode wires only
  * the primary (VISION_MODELS[0]) into its `@vision` subagent since subagents
- * take a single model. See scripts/bench-vision-results.md for the selection
- * rationale. Reasoning is always disabled on these calls (perception, not
- * reasoning) — handled by callers, not encoded here.
+ * take a single model. Reasoning is always disabled on these calls
+ * (perception, not reasoning) — handled by callers, not encoded here.
  */
 export const VISION_MODELS: readonly ModelDefinition[] = [
   KIMI_K2_7_CODE,

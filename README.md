@@ -208,12 +208,6 @@ pnpm -F @togetherlink/cli exec togetherlink codex exec "Say hi"
 tcodex exec "Say hi"
 ```
 
-Compare direct Codex/OpenAI elapsed time with togetherlink Codex/Together:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink benchmark codex
-```
-
 Check the runtime defaults without launching Codex:
 
 ```bash

@@ -5,36 +5,19 @@ import { isHarnessImplemented } from "../harness-registry.js";
 import { detectInstalledHarnesses } from "../detect.js";
 import { readGlobalConfig, setGlobalApiKey, resolveStoredApiKey, resolveStoredExaApiKey, setGlobalExaApiKey } from "../global-config.js";
 import { EXA_API_KEY_ENV_REF } from "../together-core.js";
-import { UPDATE_ORIGIN } from "../autoupdate.js";
 import { VERSION } from "../version.js";
 
 export function printHelp() {
-  console.log(`togetherlink v${VERSION} — use Together AI models in OpenCode, Claude Code & Codex
+  console.log(`togetherlink v${VERSION} — Together AI for coding CLIs
 
 Usage:
-  togetherlink configure                Detect installed tools and set your Together API key
-  togetherlink claude [...]             Launch Claude Code through a local Together proxy
-  tclaude [...]                         Claude Code through Together; passes args to claude
-  togetherlink --main together-kimi-k2-7-code claude
-                                      Launch Claude Code with Kimi K2.7 Code
-  togetherlink status claude            Show Claude Code local proxy defaults
-  togetherlink opencode [...]           Launch OpenCode with Together GLM 5.2
-  topencode [...]                       OpenCode through Together; passes args to opencode
-  togetherlink status opencode          Show OpenCode runtime defaults
-  togetherlink codex [...]              Launch Codex through a local Responses proxy
-  tcodex [...]                          Codex through Together; passes args to codex
-  togetherlink codex exec "Say hi"      Run Codex headlessly through Together
-  togetherlink benchmark codex          Compare direct Codex vs togetherlink Codex latency
-  togetherlink pi|picode [...]          Launch Pi Code with Together AI
-  tpi [...]                             Pi Code through Together; passes args to pi
-  togetherlink status pi                Show Pi Code runtime defaults
-  togetherlink status daemon            Show the shared proxy daemon status
-  togetherlink daemon profile           Summarize recent Codex proxy speed traces
-  togetherlink daemon stop              Stop the shared proxy daemon
-  togetherlink --version                Show the CLI version
-  togetherlink help                     Show this message
+  togetherlink configure
+  togetherlink codex [...]       (alias: tcodex)
+  togetherlink claude [...]      (alias: tclaude)
+  togetherlink pi [...]          (alias: tpi)
+  togetherlink opencode [...]    (alias: topencode)
 
-The CLI always keeps itself up to date from ${UPDATE_ORIGIN}.
+Extra args after codex/claude/pi/opencode are passed through.
 `);
 }
 

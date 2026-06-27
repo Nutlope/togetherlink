@@ -137,12 +137,6 @@ async function main() {
     return;
   }
 
-  if (command === "benchmark" && rawVerb === "codex") {
-    const { runCodexBenchmark } = await import("../lib/codex/benchmark.js");
-    await runCodexBenchmark(parsed.flags);
-    return;
-  }
-
   const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
   if (isHarnessCommand(invocation.command) && isHarnessStatusInvocation(invocation.flags)) {
