@@ -2,6 +2,7 @@ import { CostTracker } from "../claude/cost.js";
 import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyTraceEvent } from "../proxy-trace.js";
+import { sendTelemetryEvent } from "../telemetry.js";
 import {
   createDashboardStore,
   readLegacyActiveSessions,
@@ -147,6 +148,7 @@ class SessionRegistry {
     this.recent.unshift(state);
     this.recent.length = Math.min(this.recent.length, MAX_RECENT_SESSIONS);
     this.store?.markSessionEnded(state.token, state.endedAt, state.costTracker.summarize(), state.costTracker.totals);
+    emitDaemonSessionEndedTelemetry(state);
     return true;
   }
 
@@ -406,4 +408,36 @@ function storedSessionToPersistInput(session: StoredSession): SessionPersistInpu
       costUsd: session.costUsd ?? 0,
     },
   };
+}
+
+function emitDaemonSessionEndedTelemetry(state: SessionState): void {
+  if (state.agent !== "codex-app" || state.endedAt === undefined) {
+    return;
+  }
+  const usageByModel = state.costTracker.totalsByModel;
+  const fallbackModel = state.options?.targetModelId ?? state.modelDefinition.id;
+  const finalModel = latestTargetModel(state.traces) ?? fallbackModel;
+  void sendTelemetryEvent({
+    event: "session_ended",
+    sessionId: state.token,
+    agent: state.agent,
+    initialModel: fallbackModel,
+    finalModel,
+    startedAt: state.startedAt,
+    endedAt: state.endedAt,
+    durationMs: state.endedAt - state.startedAt,
+    usage: state.costTracker.totals,
+    ...(usageByModel.length > 0 ? { usageByModel } : {}),
+    metadata: {
+      integration: "codex-app",
+      emittedBy: "daemon",
+      traceCount: state.traces.length,
+    },
+  });
+}
+
+function latestTargetModel(traces: ProxyTraceEvent[]): string | undefined {
+  return traces
+    .filter((trace) => trace.targetModel)
+    .sort((a, b) => b.startedAt - a.startedAt)[0]?.targetModel;
 }

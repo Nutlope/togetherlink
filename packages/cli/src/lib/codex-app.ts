@@ -7,7 +7,7 @@ import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./cod
 import { codexModelCatalogJson } from "./codex/catalog.js";
 import { daemonFetch, daemonSessionUrl, ensureDaemon, localProxyAuthToken, registerDaemonSession } from "./daemon/launch.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
-import { randomSessionId, sendTelemetryEvent } from "./telemetry.js";
+import { sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
 
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
@@ -52,7 +52,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const selectedModel = resolveCodexModel(ctx.main);
   const authToken = await localProxyAuthToken();
   const sessionToken = codexAppSessionToken(authToken);
-  const telemetrySessionId = randomSessionId();
+  const telemetrySessionId = sessionToken;
   const startedAt = Date.now();
   const { url: proxyUrl } = await ensureDaemon();
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionToken);
