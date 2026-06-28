@@ -145,6 +145,88 @@ curl https://api.together.ai/v1/chat/completions \
 
 GLM-5.2 returns preserved reasoning in `choices[0].message.reasoning`. Keep that reasoning unmodified when sending it back in later turns.
 
+## Codex Desktop App-Server Model List Probe
+
+Codex Desktop renders its model picker from the app-server JSON-RPC method `model/list`, not directly from the provider's raw `/v1/models` response. When debugging `togetherlink codex-app`, verify the real app-server contract before changing Desktop config again.
+
+First make sure `~/.codex/config.toml` points at the Togetherlink Codex App provider and that the local Togetherlink daemon is reachable:
+
+```bash
+/Applications/Codex.app/Contents/Resources/codex doctor --json
+```
+
+Then query the same app-server mode Desktop uses:
+
+```bash
+node --input-type=module -e '
+import { spawn } from "node:child_process";
+
+const child = spawn("/Applications/Codex.app/Contents/Resources/codex", ["app-server", "--stdio"], {
+  stdio: ["pipe", "pipe", "pipe"],
+});
+
+let buffer = "";
+let id = 1;
+const pending = new Map();
+
+child.stdout.setEncoding("utf8");
+child.stderr.setEncoding("utf8");
+child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+child.stdout.on("data", (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf("\n")) >= 0) {
+    const line = buffer.slice(0, newline).trim();
+    buffer = buffer.slice(newline + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.id !== undefined && pending.has(message.id)) {
+      pending.get(message.id)(message);
+      pending.delete(message.id);
+    }
+  }
+});
+
+function request(method, params) {
+  const requestId = id++;
+  child.stdin.write(JSON.stringify({ id: requestId, method, params }) + "\n");
+  return new Promise((resolve, reject) => {
+    pending.set(requestId, resolve);
+    setTimeout(() => reject(new Error("timeout waiting for " + method)), 10000).unref();
+  });
+}
+
+function notify(method, params) {
+  child.stdin.write(JSON.stringify({ method, params }) + "\n");
+}
+
+try {
+  await request("initialize", {
+    clientInfo: { name: "togetherlink-debug", version: "0.1.0" },
+    capabilities: { experimentalApi: true },
+  });
+  notify("notifications/initialized");
+
+  const response = await request("model/list", { limit: 100, cursor: null, includeHidden: true });
+  const models = response.result?.data ?? [];
+  console.log(JSON.stringify({
+    count: models.length,
+    models: models.map((model) => ({
+      id: model.id,
+      model: model.model,
+      displayName: model.displayName,
+      hidden: model.hidden,
+      isDefault: model.isDefault,
+    })),
+  }, null, 2));
+} finally {
+  child.kill("SIGTERM");
+}
+'
+```
+
+Expected result for `togetherlink codex-app` is six visible models, starting with `zai-org/GLM-5.2` and display name `GLM 5.2 · default`. If this probe is correct but Desktop still shows stale or missing models, the bug is in the running Desktop process or frontend state, not the Codex app-server model manager.
+
 ## Notes
 
 The Claude/Codex proxy and per-run Together settings are intentionally temporary. They should not write agent config files. Smoke tests should pass each agent's no-session flag, such as Claude's `--no-session-persistence` or Pi's `--no-session`, unless the behavior under test specifically needs persisted session state.
