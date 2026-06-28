@@ -255,7 +255,7 @@ function Home() {
               per-run routing
             </span>
           </div>
-          <div className="contents max-[680px]:grid max-[680px]:grid-cols-2 max-[680px]:gap-2.5">
+          <div className="contents max-[680px]:grid max-[680px]:grid-cols-2 max-[680px]:gap-2.5 max-[380px]:w-full max-[380px]:grid-cols-1">
             {heroTools.map((tool, index) => (
               <HeroTool key={tool.name} index={index} {...tool} />
             ))}
@@ -273,7 +273,7 @@ function Home() {
             data-fit={commandFontSize > 10}
             style={{ fontSize: commandFontSize }}
           >
-            {installCommand}
+            <InstallCommandText />
           </code>
           <button
             type="button"
@@ -297,7 +297,7 @@ function Home() {
           {proofItems.map((item) => (
             <div
               key={item.label}
-              className="rounded-[12px] bg-code px-4 py-3 text-left shadow-[inset_0_0_0_1px_rgba(229,231,235,.9)]"
+              className="rounded-[12px] bg-code px-4 py-3 text-left shadow-[inset_0_0_0_1px_rgba(229,231,235,.9)] max-[380px]:px-3.5"
             >
               <div className="text-[20px] font-semibold leading-none text-ink tabular-nums">
                 {item.value}
@@ -354,7 +354,7 @@ function Home() {
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)] max-[520px]:grid max-[520px]:grid-cols-[auto_1fr] max-[520px]:items-start">
           <span className="select-none text-faint">$</span>
           <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-            {installCommand}
+            <InstallCommandText />
           </code>
           <button
             type="button"
@@ -507,6 +507,16 @@ function formatReleaseAge(publishedAt: string | undefined) {
   return `${Math.floor(diffMs / week)}w ago`
 }
 
+function InstallCommandText() {
+  return (
+    <>
+      curl -fsSL https://togetherlink.vercel.app/
+      <wbr />
+      install.sh | sh
+    </>
+  )
+}
+
 function Step({
   number,
   children,
@@ -536,7 +546,7 @@ function HeroTool({
 }>) {
   return (
     <div
-      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5`}
+      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5 max-[380px]:w-full`}
     >
       <span className="inline-flex size-[40px] shrink-0 items-center justify-center rounded-[10px] bg-code text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
         {icon}
