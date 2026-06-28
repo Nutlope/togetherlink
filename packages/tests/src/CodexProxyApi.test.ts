@@ -24,6 +24,24 @@ describe("Codex Responses proxy tool compatibility", () => {
     vi.unstubAllEnvs();
   });
 
+  test("serves the full Codex Desktop model catalog from /v1/models", async () => {
+    const catalog = await getModels();
+    const first = catalog.models?.[0] as Record<string, unknown> | undefined;
+
+    expect(first?.slug).toBe(GLM_5_2.id);
+    expect(first?.display_name).toBe("GLM 5.2 · default");
+    expect(first?.default_reasoning_level).toBe("medium");
+    expect(first?.default_reasoning_summary).toBe("auto");
+    expect(first?.model_messages).toEqual(expect.objectContaining({
+      instructions_template: expect.stringContaining("{{ personality }}"),
+    }));
+    expect(first?.apply_patch_tool_type).toBe("freeform");
+    expect(first?.web_search_tool_type).toBe("text_and_image");
+    expect(first?.truncation_policy).toEqual({ mode: "tokens", limit: GLM_5_2.limit.context });
+    expect(first?.comp_hash).toBeNull();
+    expect(first?.use_responses_lite).toBe(false);
+  });
+
   test("maps custom tool calls back to Codex custom_tool_call items", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -945,6 +963,27 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(upstream.model).toBe(QWEN_3_5_9B.id);
   });
 });
+
+async function getModels(): Promise<Record<string, any>> {
+  const server = http.createServer((req, res) => {
+    handleCodexProxyRequest(req, res, options).catch((error) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    throw new Error("test server did not bind");
+  }
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/models`);
+    expect(response.ok).toBe(true);
+    return (await response.json()) as Record<string, any>;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
 
 async function postResponses(body: unknown): Promise<Record<string, any>> {
   const server = http.createServer((req, res) => {

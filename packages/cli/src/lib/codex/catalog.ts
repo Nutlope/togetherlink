@@ -16,14 +16,14 @@ const CODEX_MODEL_MESSAGES = {
 };
 
 export function codexModelCatalog(): { models: Array<Record<string, unknown>> } {
-  return { models: CODEX_SUPPORTED_MODELS.map(toCodexModelCatalogEntry) };
+  return { models: CODEX_SUPPORTED_MODELS.map((model, index) => toCodexModelCatalogEntry(model, index)) };
 }
 
 export function codexModelCatalogJson(): string {
   return JSON.stringify(codexModelCatalog());
 }
 
-export function toCodexModelCatalogEntry(model: { id: string; definition: ModelDefinition }): Record<string, unknown> {
+export function toCodexModelCatalogEntry(model: { id: string; definition: ModelDefinition }, priority = 50): Record<string, unknown> {
   const reasoningLevels = model.definition.reasoning
     ? [
         { effort: "low", description: "Fast responses with lighter reasoning" },
@@ -40,7 +40,7 @@ export function toCodexModelCatalogEntry(model: { id: string; definition: ModelD
     shell_type: "shell_command",
     visibility: "list",
     supported_in_api: true,
-    priority: 50,
+    priority,
     additional_speed_tiers: [],
     service_tiers: [],
     default_service_tier: null,
@@ -50,7 +50,7 @@ export function toCodexModelCatalogEntry(model: { id: string; definition: ModelD
     model_messages: CODEX_MODEL_MESSAGES,
     supports_personality: true,
     supports_reasoning_summaries: model.definition.reasoning,
-    default_reasoning_summary: "none",
+    default_reasoning_summary: model.definition.reasoning ? "auto" : "none",
     support_verbosity: false,
     default_verbosity: "low",
     apply_patch_tool_type: "freeform",
@@ -60,6 +60,8 @@ export function toCodexModelCatalogEntry(model: { id: string; definition: ModelD
     supports_image_detail_original: model.definition.attachment,
     context_window: model.definition.limit.context,
     max_context_window: model.definition.limit.context,
+    auto_compact_token_limit: null,
+    comp_hash: null,
     effective_context_window_percent: 95,
     experimental_supported_tools: [],
     input_modalities: model.definition.modalities.input,

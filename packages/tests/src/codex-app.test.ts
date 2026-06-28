@@ -36,12 +36,11 @@ describe("Codex App alpha config", () => {
     expect(config).toContain("[model_providers.togetherlink_codex_app]");
     expect(config).toContain('name = "Togetherlink"');
     expect(config).toContain('base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
-   expect(config).toContain('wire_api = "responses"');
-    // requires_openai_auth = false tells Codex this is a standalone provider
-    // so it fetches /v1/models from our proxy. Without it Codex falls back to
-    // the OpenAI catalog, logs "Unknown model <id>", and shows the generic
-    // "Custom model from config" with default reasoning levels.
-    expect(config).toContain('requires_openai_auth = false');
+    expect(config).toContain('wire_api = "responses"');
+    // Codex Desktop currently gates the model picker on provider auth state.
+    // This keeps the picker visible for custom providers; actual model
+    // requests still go to Togetherlink's local base_url.
+    expect(config).toContain('requires_openai_auth = true');
  });
 
   test("replaces an existing managed block instead of appending duplicates", () => {

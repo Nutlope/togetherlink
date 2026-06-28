@@ -3,12 +3,12 @@ import { constants as fsConstants } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, CODEX_SUPPORTED_MODELS, resolveCodexModel } from "./codex/defaults.js";
+import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
+import { codexModelCatalogJson } from "./codex/catalog.js";
 import { daemonFetch, daemonSessionUrl, ensureDaemon, localProxyAuthToken, registerDaemonSession } from "./daemon/launch.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { randomSessionId, sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
-import type { ModelDefinition } from "@togetherlink/models";
 
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
 const CODEX_APP_CONFIG_MARKER_START = "# >>> togetherlink codex-app alpha >>>";
@@ -90,13 +90,10 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     contextWindow: selectedModel.definition.limit.context,
   });
   await writeTextAtomic(configPath, next);
-  // Codex caches the remote /v1/models response in models_cache.json. If a
-  // previous session populated it with OpenAI's catalog (because the provider
-  // lacked requires_openai_auth=false), Codex keeps serving the stale OpenAI
-  // models and never sees our proxy's models — logging "Unknown model <id> is
-  // used. This will use fallback model metadata." and showing "Custom model
-  // from config" with default reasoning levels. Bust the cache so the next
-  // Codex launch refetches from our provider.
+  // Codex caches remote model metadata in models_cache.json. If a previous
+  // run populated it with OpenAI's catalog, Codex can keep serving stale model
+  // metadata and show "Custom model from config". Bust the cache so the next
+  // Codex launch refetches against the active provider/config.
   await bustStaleModelsCache(ctx.home);
   await writeAppSessionLock(ctx.home, {
     pid: process.pid,
@@ -156,12 +153,11 @@ export function buildCodexAppConfig(
     `name = ${tomlString(options.providerName)}`,
     `base_url = ${tomlString(options.baseUrl)}`,
     'wire_api = "responses"',
-    "# Tell Codex this is a standalone provider (not OpenAI) so it fetches",
-    "# /v1/models from our proxy instead of the OpenAI catalog. Without this",
-    "# Codex silently falls back to OpenAI's remote models, logging",
-    "# \"Unknown model <id> is used. This will use fallback model metadata.\"",
-    "# and showing \"Custom model from config\" with default reasoning levels.",
-    'requires_openai_auth = false',
+    "# Codex Desktop currently gates its model picker on provider auth state.",
+    "# Setting this true is a Desktop workaround for custom providers; the",
+    "# actual model requests still go to the local Togetherlink base_url above.",
+    "# See https://github.com/openai/codex/issues/10867",
+    'requires_openai_auth = true',
     CODEX_APP_CONFIG_MARKER_END,
     "",
   ].join("\n");
@@ -260,70 +256,7 @@ async function writePersistentModelCatalog(home: string): Promise<string> {
 }
 
 export function codexAppModelCatalogJson(): string {
-  return JSON.stringify({
-    models: CODEX_SUPPORTED_MODELS.map(({ definition }, index) => codexAppCatalogEntry(definition, index)),
-  });
-}
-
-const CODEX_APP_BASE_INSTRUCTIONS =
-  "You are Codex, a coding agent. You and the user share the same workspace and collaborate to achieve the user's goals.";
-
-const CODEX_APP_MODEL_MESSAGES = {
-  instructions_template: `${CODEX_APP_BASE_INSTRUCTIONS}\n\n{{ personality }}`,
-  instructions_variables: {
-    personality_default: "",
-    personality_friendly:
-      "# Personality\n\nYou are warm, collaborative, and helpful. Keep the user clearly informed while you work, and make the collaboration feel easy.",
-    personality_pragmatic:
-      "# Personality\n\nYou are direct, task-focused, and precise. State assumptions clearly, prioritize actionable progress, and avoid unnecessary detail.",
-  },
-};
-
-function codexAppCatalogEntry(model: ModelDefinition, priority: number): Record<string, unknown> {
-  const reasoningLevels = model.reasoning
-    ? [
-        { effort: "low", description: "Fast responses with lighter reasoning" },
-        { effort: "medium", description: "Balances speed and reasoning depth" },
-        { effort: "high", description: "Greater reasoning depth for complex tasks" },
-      ]
-    : [];
-  return {
-    slug: model.id,
-    display_name: model.name,
-    description: `Together AI model via togetherlink (${model.name})`,
-    default_reasoning_level: model.reasoning ? "medium" : "none",
-    supported_reasoning_levels: reasoningLevels,
-    shell_type: "shell_command",
-    visibility: "list",
-    supported_in_api: true,
-    priority,
-    additional_speed_tiers: [],
-    service_tiers: [],
-    default_service_tier: null,
-    availability_nux: null,
-    upgrade: null,
-    base_instructions: CODEX_APP_BASE_INSTRUCTIONS,
-    model_messages: CODEX_APP_MODEL_MESSAGES,
-    supports_personality: true,
-    supports_reasoning_summaries: model.reasoning,
-    default_reasoning_summary: model.reasoning ? "auto" : "none",
-    support_verbosity: false,
-    default_verbosity: "low",
-    apply_patch_tool_type: "freeform",
-    web_search_tool_type: "text_and_image",
-    truncation_policy: { mode: "tokens", limit: model.limit.context },
-    supports_parallel_tool_calls: model.tool_call,
-    supports_image_detail_original: model.attachment,
-    context_window: model.limit.context,
-    max_context_window: model.limit.context,
-    auto_compact_token_limit: null,
-    comp_hash: null,
-    effective_context_window_percent: 95,
-    experimental_supported_tools: [],
-    input_modalities: model.modalities.input,
-    supports_search_tool: false,
-    use_responses_lite: false,
-  };
+  return codexModelCatalogJson();
 }
 
 type CodexAppLaunchResult = {
@@ -489,12 +422,12 @@ function modelCatalogPath(home: string): string {
 
 /**
  * Codex caches the remote /v1/models response at ~/.codex/models_cache.json.
- * If that cache was populated while the provider block lacked
- * requires_openai_auth=false, it holds OpenAI's catalog (gpt-5.x) instead of
- * our proxy's models. Codex then logs "Unknown model <id> is used. This will
- * use fallback model metadata." and shows "Custom model from config" with the
- * default 5 reasoning levels. Removing the stale cache forces the next Codex
- * launch to refetch from our provider. Safe to no-op if the file is absent.
+ * If that cache was populated by OpenAI/ChatGPT routing, it holds OpenAI's
+ * catalog (gpt-5.x) instead of our proxy's models. Codex can then log
+ * "Unknown model <id> is used. This will use fallback model metadata." and
+ * show "Custom model from config". Removing the stale cache forces the next
+ * Codex launch to refetch from the active provider/config. Safe to no-op if
+ * the file is absent.
  */
 async function bustStaleModelsCache(home: string): Promise<void> {
   const cachePath = path.join(home, ".codex", "models_cache.json");
