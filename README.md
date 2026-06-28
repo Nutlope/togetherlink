@@ -195,12 +195,13 @@ pnpm -F @togetherlink/cli exec togetherlink claude --help
 pnpm -F @togetherlink/cli exec togetherlink claude --version
 ```
 
-The Claude local proxy defaults to Together GLM-5.2 (`zai-org/GLM-5.2`) and can also route Claude Code through Kimi K2.7 Code.
+The Claude local proxy defaults to Together GLM-5.2 (`zai-org/GLM-5.2`) and can route Claude Code through any curated Together model in the repo's shared model list.
 Pick a backend for one launch:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink --main together-glm-5-2 claude
 pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k2-7-code claude
+pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
 ```
 
 Check the runtime defaults without launching Claude:
@@ -242,7 +243,7 @@ pnpm -F @togetherlink/cli exec togetherlink daemon profile
 
 ## Testing Codex App
 
-Codex App support is an alpha feature. Unlike `togetherlink codex`, it persistently patches Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. The config stays active until you run `--restore`, similar to `ollama launch codex-app`. If Codex App is already open, togetherlink will not close it; quit and reopen Codex Desktop when you are ready for it to reload the Togetherlink profile.
+Codex App support is an alpha feature. Unlike `togetherlink codex`, it persistently patches Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. The config stays active until you run `--restore`, similar to `ollama launch codex-app`. If Codex App is already open, togetherlink asks before restarting it so the new profile can load.
 
 ```bash
 export TOGETHER_API_KEY="..."

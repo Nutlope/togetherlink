@@ -7,6 +7,7 @@ import { dispatchHarnessCommand } from "../lib/commands/harness.js";
 import { isHarnessCommand, resolveHarnessInvocation } from "../lib/commands/harness-invocation.js";
 import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from "../lib/global-config.js";
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
+import { sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
 import type { HarnessContext } from "../lib/harness-types.js";
 
@@ -129,6 +130,13 @@ async function main() {
     return;
   }
 
+  // Internal entry point run by install.sh right after a successful install
+  // verification. Not user-facing; emits the one-time install event.
+  if (command === "__telemetry-install-completed") {
+    await sendTelemetryEvent({ event: "install_completed" });
+    return;
+  }
+
   // Internal entry point: the daemon self-spawns with `--daemon` via
   // ensureDaemon() (launch.ts). Runs the shared proxy server forever; never
   // returns. Keep this before any command that needs a key — the daemon needs
@@ -197,6 +205,10 @@ async function main() {
     if (!(await ensureConfiguredForInteractiveLaunch())) {
       throw new Error("No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.");
     }
+  }
+
+  if (isHarnessCommand(invocation.command)) {
+    void sendTelemetryEvent({ event: "cli_started", agent: invocation.command });
   }
 
   await dispatchHarnessCommand(invocation.command, undefined, invocation.flags);

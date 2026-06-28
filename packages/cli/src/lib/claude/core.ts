@@ -16,6 +16,7 @@ import {
   localProxyAuthToken,
   daemonSessionUrl,
 } from "../daemon/launch.js";
+import { sendTelemetryEvent, randomSessionId } from "../telemetry.js";
 
 const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -157,6 +158,16 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     throw new Error(`Could not register this Claude session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  const telemetrySessionId = randomSessionId();
+  const startedAt = Date.now();
+  void sendTelemetryEvent({
+    event: "session_started",
+    sessionId: telemetrySessionId,
+    agent: "claude",
+    initialModel: targetModelId,
+    startedAt,
+  });
+
   // Always-on banner so the user can never be in doubt that this is routing
   // to Together AI, not Anthropic — the model picker alone isn't
   // enough since most users never open it. Goes to stderr so it never
@@ -215,7 +226,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   // The daemon owns the tracker (keyed by our token); fetch its summary. Goes to
   // stderr so it never corrupts claude's stdout. Best-effort: a dead/unreachable
   // daemon (or a timeout) just means no cost line, never a broken command.
-  await printSessionCost(proxyUrl, sessionId);
+  const usage = await printSessionCost(proxyUrl, sessionId);
   keepalive.stop();
   // Deregister so the daemon doesn't keep a finished session's tracker around.
   // (A kill -9 of this launcher skips this; the daemon reaps orphaned sessions
@@ -226,22 +237,42 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     // best-effort
   }
 
+  const endedAt = Date.now();
+  void sendTelemetryEvent({
+    event: "session_ended",
+    sessionId: telemetrySessionId,
+    agent: "claude",
+    initialModel: targetModelId,
+    finalModel: targetModelId,
+    startedAt,
+    endedAt,
+    durationMs: endedAt - startedAt,
+    ...(usage ? { usage } : {}),
+    ...(typeof result.status === "number" ? { exitCode: result.status } : {}),
+    ...(result.signal ? { signal: result.signal } : {}),
+  });
+
   return result;
 }
 
-async function printSessionCost(proxyUrl: string, authToken: string): Promise<void> {
+async function printSessionCost(proxyUrl: string, authToken: string): Promise<{ promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number } | undefined> {
   try {
     const response = await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`);
     if (response.ok) {
-      const { summary } = (await response.json()) as { summary?: string };
+      const { summary, totals } = (await response.json()) as {
+        summary?: string;
+        totals?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
+      };
       if (summary) {
         process.stderr.write(`${summary}\n`);
       }
+      return totals;
     }
   } catch {
     // Daemon gone, unreachable, or timed out: skip the cost line rather than
     // fail the command (or hang it — daemonFetch bounds the wait).
   }
+  return undefined;
 }
 
 function randomLocalProxyToken(): string {

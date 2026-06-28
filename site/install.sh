@@ -221,6 +221,7 @@ esac
 # Verify the install works right now if already on PATH, else with explicit PATH.
 if PATH="$BIN_DIR:$PATH" togetherlink --version >/dev/null 2>&1; then
   ok "Verified: $(PATH="$BIN_DIR:$PATH" togetherlink --version)"
+  PATH="$BIN_DIR:$PATH" togetherlink __telemetry-install-completed >/dev/null 2>&1 || true
 fi
 
 bold "Done. Run \`togetherlink help\` to get started."

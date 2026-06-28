@@ -88,14 +88,14 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     catalogPath,
   });
 
-  const launch = await launchCodexApp();
+  const launch = await launchCodexApp({ reason: "configured", openIfClosed: true });
   const intro = [
-    "togetherlink codex-app is alpha: Codex App support is not stable yet.",
-    `Codex App is configured for Together AI (${selectedModel.definition.name}).`,
-    "This config stays active until you run: togetherlink codex-app --restore",
+    "Codex App profile changed to Togetherlink. (alpha)",
+    `Model: ${selectedModel.definition.name}`,
+    "Start a task or open a repository in Codex App as usual.",
+    "Restore your previous Codex App profile with: togetherlink codex-app --restore",
     `Backup: ${backup}`,
     codexAppLaunchMessage(launch),
-    "If Codex App was already open, quit and reopen it when you are ready so it reloads the Togetherlink profile.",
   ].filter(Boolean).join("\n");
 
   return { message: intro };
@@ -176,10 +176,12 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
     // Restore should still succeed if the daemon is not reachable.
   }
 
+  const launch = await launchCodexApp({ reason: "restored", openIfClosed: false });
   return {
     message: [
-      "Restored Codex App config from the latest togetherlink codex-app backup.",
+      "Codex App restored to your previous profile.",
       `Backup date: ${manifest.createdAt}`,
+      codexAppLaunchMessage(launch),
     ].join("\n"),
   };
 }
@@ -276,25 +278,64 @@ function codexAppBaseInstructions(): string {
 
 type CodexAppLaunchResult = {
   launched: boolean;
+  launchAttempted: boolean;
   wasRunning: boolean;
+  restarted: boolean;
+  restartDeclined: boolean;
+  restartUnsupported: boolean;
 };
 
-async function launchCodexApp(): Promise<CodexAppLaunchResult> {
+type CodexAppLaunchReason = "configured" | "restored";
+
+async function launchCodexApp(options: { reason: CodexAppLaunchReason; openIfClosed: boolean }): Promise<CodexAppLaunchResult> {
   const wasRunning = await isCodexAppRunning();
+  let restarted = false;
+  let restartDeclined = false;
+  let restartUnsupported = false;
+
   if (wasRunning) {
-    return { launched: false, wasRunning };
+    if (await shouldRestartCodexApp(options.reason)) {
+      restarted = await quitCodexApp();
+      restartUnsupported = !restarted;
+    } else {
+      restartDeclined = true;
+    }
   }
-  const launched = await openCodexApp();
-  return { launched, wasRunning };
+
+  const launchAttempted = !(restartDeclined || restartUnsupported || !options.openIfClosed);
+  const launched = launchAttempted ? await openCodexApp() : false;
+  return { launched, launchAttempted, wasRunning, restarted, restartDeclined, restartUnsupported };
 }
 
 function codexAppLaunchMessage(result: CodexAppLaunchResult): string {
-  if (result.wasRunning) {
-    return "Codex App is already open. Config written; togetherlink did not restart it.";
+  if (result.wasRunning && result.restarted && result.launched) {
+    return "Codex App was already open; restart approved and relaunch requested.";
+  }
+  if (result.wasRunning && result.restartDeclined) {
+    return "Codex App is already open. Restart it when you are ready so it reloads this profile.";
+  }
+  if (result.wasRunning && result.restartUnsupported) {
+    return "Codex App is already open, but togetherlink could not restart it. Quit and reopen Codex App when you are ready.";
+  }
+  if (!result.wasRunning && !result.launchAttempted) {
+    return "Codex App was not running.";
   }
   return result.launched
     ? "Codex App launch requested."
     : "Config written, but Codex App could not be launched automatically. Open Codex App manually.";
+}
+
+async function shouldRestartCodexApp(reason: CodexAppLaunchReason): Promise<boolean> {
+  if (!isInteractive()) {
+    return false;
+  }
+  const clack = await import("@clack/prompts");
+  const action = reason === "restored" ? "reload your restored Codex profile" : "reload the Togetherlink profile";
+  const restart = await clack.confirm({
+    message: `Codex App is already open. Restart it now to ${action}?`,
+    initialValue: false,
+  });
+  return restart === true;
 }
 
 async function openCodexApp(): Promise<boolean> {
@@ -331,6 +372,37 @@ async function isCodexAppRunning(): Promise<boolean> {
   return false;
 }
 
+async function quitCodexApp(): Promise<boolean> {
+  if (process.platform === "darwin") {
+    try {
+      await execFileAsync("/usr/bin/osascript", ["-e", 'tell application "Codex" to quit']);
+      return waitForCodexAppExit();
+    } catch {
+      return false;
+    }
+  }
+  if (process.platform === "win32") {
+    try {
+      await execFileAsync("taskkill", ["/IM", "Codex.exe"]);
+      return waitForCodexAppExit();
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function waitForCodexAppExit(): Promise<boolean> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (!(await isCodexAppRunning())) {
+      return true;
+    }
+    await sleep(200);
+  }
+  return false;
+}
+
 async function spawnDetached(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -347,6 +419,14 @@ async function spawnDetached(command: string, args: string[]): Promise<boolean> 
 
 function codexConfigPath(home: string): string {
   return path.join(home, ".codex", "config.toml");
+}
+
+function isInteractive(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function backupDir(home: string): string {
