@@ -35,7 +35,7 @@ maybeDescribe("live headless harness smoke", () => {
 function smokeScenarios(): Scenario[] {
   return [
     ...pickScenarios(codexScenarios(), [
-      "codex: basic streaming headless response",
+      "codex: basic headless response",
       "codex: bash tool call",
     ]),
     ...pickScenarios(claudeScenarios(), [

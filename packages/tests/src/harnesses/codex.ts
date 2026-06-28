@@ -11,7 +11,7 @@ import type { Scenario } from "../types.js";
 export function codexScenarios(): Scenario[] {
   return [
     {
-      name: "codex: basic streaming headless response",
+      name: "codex: basic headless response",
       run: async (context) => {
         assertCommandExists("codex");
         const result = await runCommand(context, "codex-basic", process.execPath, [

@@ -253,8 +253,8 @@ async function handleDaemonRequest(
       // tokens: the token is the only secret gating a session's /v1/* requests
       // (it authorizes billing against that session's Together apiKey), so
       // publishing it here would let any local loopback process harvest a
-      // victim's token and impersonate their session. `daemon status` and the
-      // dashboard only need the count + agent/modelLabel/started. Per-session
+      // victim's token and impersonate their session. Dashboard views only need
+      // the count + agent/modelLabel/started. Per-session
       // detail (cost/delete/usage) is keyed by a token only the owning launcher
       // knows.
       writeJson(res, 200, {
@@ -836,9 +836,9 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
 }
 
 /**
- * Best-effort health probe. Exported so the launcher (`launch.ts`) and the
- * `daemon status` command can reuse it. Resolves false on any failure (refused,
- * timeout, non-200) rather than rejecting.
+ * Best-effort health probe. Exported so the launcher (`launch.ts`) can reuse
+ * it. Resolves false on any failure (refused, timeout, non-200) rather than
+ * rejecting.
  */
 export async function probeHealthz(port: number): Promise<boolean> {
   return (await probeDaemonHealth(port)) !== undefined;

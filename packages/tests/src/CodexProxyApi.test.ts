@@ -359,6 +359,34 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("forwards streamed Codex deltas before the response completes", async () => {
+    vi.unstubAllEnvs();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return delayedSseResponse([
+        { delayMs: 0, chunk: { choices: [{ delta: { content: "hel" } }] } },
+        { delayMs: 80, chunk: { choices: [{ delta: { content: "lo" } }] } },
+        { delayMs: 80, chunk: { choices: [{ finish_reason: "stop", delta: {} }] } },
+        { delayMs: 80, chunk: { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } } },
+      ]);
+    }));
+
+    const timeline = await postResponsesStreamingTimeline({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
+    });
+
+    const firstDelta = timeline.find((entry) => entry.text.includes("response.output_text.delta"));
+    const completed = timeline.find((entry) => entry.text.includes("response.completed"));
+    expect(firstDelta?.atMs).toBeDefined();
+    expect(completed?.atMs).toBeDefined();
+    expect(firstDelta!.atMs).toBeLessThan(completed!.atMs);
+    expect(completed!.atMs - firstDelta!.atMs).toBeGreaterThanOrEqual(50);
+  });
+
   test("preserves namespace tool-call groups with more than five parallel calls", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -964,6 +992,47 @@ async function postResponsesText(body: unknown): Promise<string> {
   }
 }
 
+async function postResponsesStreamingTimeline(body: unknown): Promise<Array<{ atMs: number; text: string }>> {
+  const server = http.createServer((req, res) => {
+    handleCodexProxyRequest(req, res, options).catch((error) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    throw new Error("test server did not bind");
+  }
+  try {
+    const startedAt = Date.now();
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.ok).toBe(true);
+    expect(response.body).not.toBeNull();
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const timeline: Array<{ atMs: number; text: string }> = [];
+    while (true) {
+      const read = await reader.read();
+      if (read.done) {
+        break;
+      }
+      timeline.push({ atMs: Date.now() - startedAt, text: decoder.decode(read.value, { stream: true }) });
+    }
+    const finalText = decoder.decode();
+    if (finalText) {
+      timeline.push({ atMs: Date.now() - startedAt, text: finalText });
+    }
+    return timeline;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -976,6 +1045,26 @@ function sseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } 
   const separator = `${lineEnding}${lineEnding}`;
   const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}${separator}`).join("") + `data: [DONE]${separator}`;
   return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function delayedSseResponse(chunks: Array<{ delayMs: number; chunk: unknown }>): Response {
+  const encoder = new TextEncoder();
+  const separator = "\n\n";
+  return new Response(new ReadableStream({
+    async start(controller) {
+      for (const { delayMs, chunk } of chunks) {
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
+      }
+      controller.enqueue(encoder.encode(`data: [DONE]${separator}`));
+      controller.close();
+    },
+  }), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });
