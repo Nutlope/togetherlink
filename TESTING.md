@@ -155,6 +155,13 @@ First make sure `~/.codex/config.toml` points at the Togetherlink Codex App prov
 /Applications/Codex.app/Contents/Resources/codex doctor --json
 ```
 
+If the app-server protocol changed, regenerate the local TypeScript bindings in `/tmp` and inspect the method/parameter shapes:
+
+```bash
+/Applications/Codex.app/Contents/Resources/codex app-server generate-ts --out /tmp/codex-app-server-ts
+rg "model/list|ModelListParams|InitializeParams|ClientInfo|InitializeCapabilities" /tmp/codex-app-server-ts -g "*.ts"
+```
+
 Then query the same app-server mode Desktop uses:
 
 ```bash
@@ -202,10 +209,17 @@ function notify(method, params) {
 
 try {
   await request("initialize", {
-    clientInfo: { name: "togetherlink-debug", version: "0.1.0" },
-    capabilities: { experimentalApi: true },
+    clientInfo: {
+      name: "togetherlink-debug",
+      title: "Togetherlink Debug",
+      version: "0.5.3",
+    },
+    capabilities: {
+      experimentalApi: true,
+      requestAttestation: false,
+      optOutNotificationMethods: [],
+    },
   });
-  notify("notifications/initialized");
 
   const response = await request("model/list", { limit: 100, cursor: null, includeHidden: true });
   const models = response.result?.data ?? [];
@@ -226,6 +240,27 @@ try {
 ```
 
 Expected result for `togetherlink codex-app` is six visible models, starting with `zai-org/GLM-5.2` and display name `GLM 5.2 · default`. If this probe is correct but Desktop still shows stale or missing models, the bug is in the running Desktop process or frontend state, not the Codex app-server model manager.
+
+Also verify the active Togetherlink daemon session route returns the same catalog without calling Together:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+
+const raw = readFileSync(process.env.HOME + "/.codex/config.toml", "utf8");
+const baseUrl = raw.match(/base_url\s*=\s*"([^"]+)"/)?.[1];
+if (!baseUrl) throw new Error("missing Togetherlink codex-app base_url");
+
+const response = await fetch(baseUrl + "/models");
+const body = await response.json();
+const models = body.data ?? body.models ?? [];
+console.log(JSON.stringify({
+  status: response.status,
+  count: models.length,
+  ids: models.map((model) => model.id ?? model.slug),
+}, null, 2));
+'
+```
 
 Codex Desktop has had a custom-provider picker bug where the frontend hides the model picker unless the provider reports auth as required: https://github.com/openai/codex/issues/10867. `togetherlink codex-app` intentionally writes `requires_openai_auth = true` for the custom provider as a Desktop workaround. If Desktop prompts for login during manual testing, choose API key and enter any placeholder character; model traffic still goes to the configured local Togetherlink `base_url`.
 
