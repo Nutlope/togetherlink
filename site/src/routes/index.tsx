@@ -78,7 +78,6 @@ const heroProof = [
   { value: '4', label: 'coding agents' },
   { value: '1', label: 'install command' },
   { value: '0', label: 'config files rewritten' },
-  { value: 'auto', label: 'updates in place' },
 ]
 
 const heroToolPositions = [
@@ -86,6 +85,13 @@ const heroToolPositions = [
   'sm:absolute sm:right-[7%] sm:top-[18%]',
   'sm:absolute sm:left-[10%] sm:bottom-[18%]',
   'sm:absolute sm:right-[9%] sm:bottom-[18%]',
+]
+
+const explicitCommands = [
+  'togetherlink opencode',
+  'togetherlink claude',
+  'togetherlink codex',
+  'togetherlink pi',
 ]
 
 export const Route = createFileRoute('/')({
@@ -97,16 +103,59 @@ function Home() {
     'idle',
   )
   const [version, setVersion] = useState('Apache-2.0')
+  const [latestRelease, setLatestRelease] = useState({
+    value: 'auto',
+    label: 'updates in place',
+  })
+  const [copiedExplicitCommand, setCopiedExplicitCommand] = useState<
+    string | null
+  >(null)
   const commandRef = useRef<HTMLElement>(null)
+  const commandShellRef = useRef<HTMLDivElement>(null)
+  const [commandFontSize, setCommandFontSize] = useState(14)
 
   useEffect(() => {
     fetch('/latest.json', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((manifest: { version?: string }) => {
+      .then((manifest: { version?: string; publishedAt?: string }) => {
         if (manifest.version) setVersion(`v${manifest.version} - Apache-2.0`)
+        const releaseAge = formatReleaseAge(manifest.publishedAt)
+        if (releaseAge) {
+          setLatestRelease({
+            value: releaseAge,
+            label: 'latest release',
+          })
+        }
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const shell = commandShellRef.current
+    const command = commandRef.current
+    if (!shell || !command) return
+
+    const resizeObserver = new ResizeObserver(() => {
+      const availableWidth = command.getBoundingClientRect().width
+      const estimatedCharacterWidth = 0.62
+      const nextSize = Math.min(
+        14,
+        Math.max(
+          10,
+          Math.floor(
+            availableWidth / (installCommand.length * estimatedCharacterWidth),
+          ),
+        ),
+      )
+
+      setCommandFontSize(nextSize)
+    })
+
+    resizeObserver.observe(shell)
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  const proofItems = [...heroProof, latestRelease]
 
   const handleCopy = async () => {
     try {
@@ -123,6 +172,16 @@ function Home() {
       }
       setCopyState('select')
       window.setTimeout(() => setCopyState('idle'), 1600)
+    }
+  }
+
+  const handleCopyExplicitCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopiedExplicitCommand(command)
+      window.setTimeout(() => setCopiedExplicitCommand(null), 1400)
+    } catch {
+      setCopiedExplicitCommand(null)
     }
   }
 
@@ -203,11 +262,16 @@ function Home() {
           </div>
         </div>
 
-        <div className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]">
+        <div
+          ref={commandShellRef}
+          className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)] max-[520px]:grid max-[520px]:grid-cols-[auto_1fr] max-[520px]:items-start max-[520px]:pr-[18px]"
+        >
           <span className="select-none text-faint">$</span>
           <code
             ref={commandRef}
-            className="min-w-0 flex-1 [overflow-wrap:anywhere] text-[clamp(10px,2.4vw,14px)] leading-snug text-ink sm:whitespace-nowrap"
+            className="min-w-0 flex-1 break-words leading-snug text-ink [overflow-wrap:anywhere] data-[fit=true]:whitespace-nowrap"
+            data-fit={commandFontSize > 10}
+            style={{ fontSize: commandFontSize }}
           >
             {installCommand}
           </code>
@@ -215,7 +279,7 @@ function Home() {
             type="button"
             onClick={handleCopy}
             aria-label="Copy install command"
-            className="min-w-[58px] cursor-pointer whitespace-nowrap rounded-lg border border-line-strong bg-white px-[13px] py-[7px] font-sans text-[13px] font-medium text-muted transition hover:border-ink hover:text-ink active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white"
+            className="min-w-[58px] cursor-pointer whitespace-nowrap rounded-lg border border-line-strong bg-white px-[13px] py-[7px] font-sans text-[13px] font-medium text-muted transition hover:border-ink hover:text-ink active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white max-[520px]:col-span-2 max-[520px]:min-h-10"
             data-copied={copyState === 'copied'}
           >
             {copyState === 'copied'
@@ -230,7 +294,7 @@ function Home() {
         </div>
 
         <div className="mx-auto mt-7 grid max-w-[720px] grid-cols-4 gap-2.5 max-[680px]:grid-cols-2">
-          {heroProof.map((item) => (
+          {proofItems.map((item) => (
             <div
               key={item.label}
               className="rounded-[12px] bg-code px-4 py-3 text-left shadow-[inset_0_0_0_1px_rgba(229,231,235,.9)]"
@@ -287,11 +351,24 @@ function Home() {
 
       <section className="mx-auto mt-2 mb-20 max-w-[880px]">
         <h2 className="m-0 mb-5 text-xl font-semibold text-ink">Get started</h2>
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)]">
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)] max-[520px]:grid max-[520px]:grid-cols-[auto_1fr] max-[520px]:items-start">
           <span className="select-none text-faint">$</span>
           <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">
             {installCommand}
           </code>
+          <button
+            type="button"
+            onClick={handleCopy}
+            aria-label="Copy install command"
+            className="ml-auto min-h-10 cursor-pointer whitespace-nowrap rounded-lg border border-line-strong bg-white px-[13px] py-[7px] font-sans text-[13px] font-medium text-muted transition hover:border-ink hover:text-ink active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white max-[520px]:col-span-2 max-[520px]:ml-0"
+            data-copied={copyState === 'copied'}
+          >
+            {copyState === 'copied'
+              ? 'Copied'
+              : copyState === 'select'
+                ? 'Select Cmd+C'
+                : 'Copy'}
+          </button>
         </div>
         <Step number="1">
           Install with the one-liner above. It drops the binary at{' '}
@@ -310,11 +387,37 @@ function Home() {
           saved, so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code
           config are untouched.
         </Step>
-        <p className="m-0 border-t border-line pt-[18px] text-[15px] leading-relaxed text-muted [&_code]:rounded-md [&_code]:border [&_code]:border-line-strong [&_code]:bg-code [&_code]:px-[7px] [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_code]:text-ink">
-          Prefer explicit commands? Use <code>togetherlink opencode</code>,{' '}
-          <code>togetherlink claude</code>, <code>togetherlink codex</code>, or{' '}
-          <code>togetherlink pi</code> instead of the short wrappers.
-        </p>
+        <div className="border-t border-line pt-[18px]">
+          <p className="m-0 text-[15px] leading-relaxed text-muted">
+            Prefer explicit commands? Use the long form instead of the short
+            wrappers.
+          </p>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2">
+            {explicitCommands.map((command) => (
+              <button
+                key={command}
+                type="button"
+                onClick={() => handleCopyExplicitCommand(command)}
+                aria-label={`Copy ${command}`}
+                className="flex min-h-10 cursor-pointer items-center justify-between gap-2 rounded-md border border-line-strong bg-code px-3 py-2 text-left font-mono text-[13px] leading-none text-ink transition hover:border-faint hover:bg-white active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-white"
+                data-copied={copiedExplicitCommand === command}
+              >
+                <code className="min-w-0 truncate">{command}</code>
+                <span
+                  className="inline-flex size-5 shrink-0 items-center justify-center text-faint data-[copied=true]:text-ink"
+                  data-copied={copiedExplicitCommand === command}
+                  aria-hidden="true"
+                >
+                  {copiedExplicitCommand === command ? (
+                    <CheckMark />
+                  ) : (
+                    <CopyMark />
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <footer className="border-t border-line py-8 pb-14 text-sm text-faint">
@@ -359,6 +462,26 @@ function Home() {
   )
 }
 
+function formatReleaseAge(publishedAt: string | undefined) {
+  if (!publishedAt) return null
+
+  const timestamp = new Date(publishedAt).getTime()
+  if (!Number.isFinite(timestamp)) return null
+
+  const diffMs = Math.max(0, Date.now() - timestamp)
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  const day = 24 * hour
+  const week = 7 * day
+
+  if (diffMs < minute) return 'just now'
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m ago`
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`
+  if (diffMs < week) return `${Math.floor(diffMs / day)}d ago`
+
+  return `${Math.floor(diffMs / week)}w ago`
+}
+
 function Step({
   number,
   children,
@@ -388,13 +511,13 @@ function HeroTool({
 }>) {
   return (
     <div
-      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5`}
+      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5`}
     >
       <span className="inline-flex size-[40px] shrink-0 items-center justify-center rounded-[10px] bg-code text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
         {icon}
       </span>
       <span className="min-w-0">
-        <span className="block truncate text-[14px] font-semibold text-ink">
+        <span className="block text-[14px] leading-tight font-semibold text-ink">
           {name}
         </span>
         <code className="mt-0.5 block truncate font-mono text-[12px] text-muted">
@@ -468,6 +591,42 @@ function PiMark() {
         d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
       />
       <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
+    </svg>
+  )
+}
+
+function CopyMark() {
+  return (
+    <svg className="size-[15px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect
+        x="8"
+        y="8"
+        width="11"
+        height="11"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M5 15.5V6.8C5 5.8 5.8 5 6.8 5h8.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function CheckMark() {
+  return (
+    <svg className="size-[15px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 12.5l4.2 4L19 7.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
