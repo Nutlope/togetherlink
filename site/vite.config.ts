@@ -10,7 +10,12 @@ export default defineConfig({
     port: 3000,
   },
   plugins: [
-    nitro({ preset: 'vercel' }),
+    nitro({
+      preset: 'vercel',
+      output: {
+        dir: '../.vercel/output',
+      },
+    }),
     tsConfigPaths(),
     tanstackStart({
       prerender: {
