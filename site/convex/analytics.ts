@@ -55,7 +55,7 @@ export const getDashboardSummary = query({
         }
       }
 
-      if (event.eventType === 'session_ended' || event.eventType === 'usage_report') {
+      if (event.eventType === 'session_ended') {
         const agent = event.agent ?? 'unknown'
         const agentTotals = tokensByAgent.get(agent) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 }
         agentTotals.promptTokens += event.promptTokens ?? 0

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, CODEX_SUPPORTED_MODELS, resolveCodexModel } from "./codex/defaults.js";
 import { daemonFetch, daemonSessionUrl, ensureDaemon, localProxyAuthToken, registerDaemonSession } from "./daemon/launch.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
+import { randomSessionId, sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
 import type { ModelDefinition } from "@togetherlink/models";
 
@@ -50,6 +51,8 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const selectedModel = resolveCodexModel(ctx.main);
   const authToken = await localProxyAuthToken();
   const sessionToken = codexAppSessionToken(authToken);
+  const telemetrySessionId = randomSessionId();
+  const startedAt = Date.now();
   const { url: proxyUrl } = await ensureDaemon();
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionToken);
   const catalogPath = await writePersistentModelCatalog(ctx.home);
@@ -65,6 +68,13 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
     ...(process.env.TOGETHERLINK_DEBUG === "1" ? { debug: true } : {}),
+  });
+  void sendTelemetryEvent({
+    event: "session_started",
+    sessionId: telemetrySessionId,
+    agent: "codex-app",
+    initialModel: selectedModel.definition.id,
+    startedAt,
   });
 
   const configPath = codexConfigPath(ctx.home);

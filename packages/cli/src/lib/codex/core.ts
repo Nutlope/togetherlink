@@ -36,6 +36,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const debug = process.env.TOGETHERLINK_DEBUG === "1";
   const sessionId = randomLocalProxyToken();
   const authToken = await localProxyAuthToken();
+  const telemetrySessionId = randomSessionId();
   const { url: proxyUrl } = await ensureDaemon();
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
   const registration = {
@@ -57,7 +58,6 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     throw new Error(`Could not register this Codex session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const telemetrySessionId = randomSessionId();
   const startedAt = Date.now();
   void sendTelemetryEvent({
     event: "session_started",

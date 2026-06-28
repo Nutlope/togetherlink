@@ -128,6 +128,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   const debug = process.env.TOGETHERLINK_DEBUG === "1";
   const sessionId = randomLocalProxyToken();
   const authToken = await localProxyAuthToken();
+  const telemetrySessionId = randomSessionId();
 
   // Ensure the shared daemon is up (spawn-once/reuse by healthz probe). The
   // daemon outlives this launcher, so N `togetherlink claude` sessions share one
@@ -158,7 +159,6 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     throw new Error(`Could not register this Claude session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const telemetrySessionId = randomSessionId();
   const startedAt = Date.now();
   void sendTelemetryEvent({
     event: "session_started",

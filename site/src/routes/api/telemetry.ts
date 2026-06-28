@@ -7,7 +7,6 @@ const VALID_EVENT_TYPES = new Set([
   'cli_started',
   'session_started',
   'session_ended',
-  'usage_report',
 ])
 
 const VALID_OS = new Set(['macos', 'linux', 'windows', 'unknown'])
