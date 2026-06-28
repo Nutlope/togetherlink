@@ -247,43 +247,65 @@ export function codexAppModelCatalogJson(): string {
   });
 }
 
+const CODEX_APP_BASE_INSTRUCTIONS =
+  "You are Codex, a coding agent. You and the user share the same workspace and collaborate to achieve the user's goals.";
+
+const CODEX_APP_MODEL_MESSAGES = {
+  instructions_template: `${CODEX_APP_BASE_INSTRUCTIONS}\n\n{{ personality }}`,
+  instructions_variables: {
+    personality_default: "",
+    personality_friendly:
+      "# Personality\n\nYou are warm, collaborative, and helpful. Keep the user clearly informed while you work, and make the collaboration feel easy.",
+    personality_pragmatic:
+      "# Personality\n\nYou are direct, task-focused, and precise. State assumptions clearly, prioritize actionable progress, and avoid unnecessary detail.",
+  },
+};
+
 function codexAppCatalogEntry(model: ModelDefinition, priority: number): Record<string, unknown> {
+  const reasoningLevels = model.reasoning
+    ? [
+        { effort: "low", description: "Fast responses with lighter reasoning" },
+        { effort: "medium", description: "Balances speed and reasoning depth" },
+        { effort: "high", description: "Greater reasoning depth for complex tasks" },
+      ]
+    : [];
   return {
     slug: model.id,
     display_name: model.name,
     description: `Together AI model via togetherlink (${model.name})`,
-    default_reasoning_level: null,
-    supported_reasoning_levels: [],
-    shell_type: "default",
+    default_reasoning_level: model.reasoning ? "medium" : "none",
+    supported_reasoning_levels: reasoningLevels,
+    shell_type: "shell_command",
     visibility: "list",
     supported_in_api: true,
     priority,
     additional_speed_tiers: [],
+    service_tiers: [],
+    default_service_tier: null,
     availability_nux: null,
     upgrade: null,
-    base_instructions: codexAppBaseInstructions(),
-    model_messages: null,
+    base_instructions: CODEX_APP_BASE_INSTRUCTIONS,
+    model_messages: CODEX_APP_MODEL_MESSAGES,
+    supports_personality: true,
     supports_reasoning_summaries: model.reasoning,
     default_reasoning_summary: model.reasoning ? "auto" : "none",
     support_verbosity: false,
-    default_verbosity: null,
-    apply_patch_tool_type: null,
-    web_search_tool_type: "text",
-    truncation_policy: { mode: "bytes", limit: 10_000 },
-    supports_parallel_tool_calls: false,
-    supports_image_detail_original: false,
+    default_verbosity: "low",
+    apply_patch_tool_type: "freeform",
+    web_search_tool_type: "text_and_image",
+    truncation_policy: { mode: "tokens", limit: model.limit.context },
+    supports_parallel_tool_calls: model.tool_call,
+    supports_image_detail_original: model.attachment,
     context_window: model.limit.context,
     max_context_window: model.limit.context,
     auto_compact_token_limit: null,
+    comp_hash: null,
     effective_context_window_percent: 95,
     experimental_supported_tools: [],
     input_modalities: model.modalities.input,
     supports_search_tool: false,
+    use_responses_lite: false,
   };
-}
-
-function codexAppBaseInstructions(): string {
-  return "You are Codex, a coding agent. You and the user share the same workspace and collaborate to achieve the user's goals.";
 }
 
 type CodexAppLaunchResult = {

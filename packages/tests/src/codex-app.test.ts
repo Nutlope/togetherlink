@@ -99,18 +99,57 @@ describe("Codex App alpha config", () => {
     expect(config).toContain('[projects."/repo"]');
   });
 
-  test("uses app-friendly model entries without reasoning effort clutter", () => {
+  test("emits the full ModelInfo schema Codex Desktop expects", () => {
     const catalog = JSON.parse(codexAppModelCatalogJson()) as { models: Array<Record<string, unknown>> };
     const first = catalog.models[0];
 
     expect(first).toBeDefined();
     expect(first?.display_name).toBe("GLM 5.2 · default");
-    expect(first?.shell_type).toBe("default");
-    expect(first?.default_reasoning_level).toBeNull();
-    expect(first?.supported_reasoning_levels).toEqual([]);
+    expect(first?.shell_type).toBe("shell_command");
+    // Reasoning models expose effort levels; non-reasoning models use "none".
+    expect(first?.default_reasoning_level).toBe("medium");
+    expect(first?.supported_reasoning_levels).toEqual([
+      { effort: "low", description: "Fast responses with lighter reasoning" },
+      { effort: "medium", description: "Balances speed and reasoning depth" },
+      { effort: "high", description: "Greater reasoning depth for complex tasks" },
+    ]);
     expect(first?.supports_reasoning_summaries).toBe(true);
     expect(first?.default_reasoning_summary).toBe("auto");
     expect(first?.support_verbosity).toBe(false);
-    expect(first?.supports_parallel_tool_calls).toBe(false);
+    expect(first?.default_verbosity).toBe("low");
+
+    // These fields were previously missing and caused Codex Desktop to fall
+    // back to base instructions on every turn (see app log: "model_messages
+    // is missing, falling back to base instructions"). They must now be present.
+    expect(first?.service_tiers).toEqual([]);
+    expect(first?.default_service_tier).toBeNull();
+    expect(first?.use_responses_lite).toBe(false);
+    expect(first?.apply_patch_tool_type).toBe("freeform");
+    expect(first?.web_search_tool_type).toBe("text_and_image");
+    expect(first?.truncation_policy).toEqual({ mode: "tokens", limit: 262144 });
+    expect(first?.comp_hash).toBeNull();
+    // model_messages MUST be an object (not null) so Codex Desktop can resolve
+    // the requested personality instead of warning and falling back.
+    expect(first?.model_messages).toEqual(
+      expect.objectContaining({
+        instructions_template: expect.stringContaining("{{ personality }}"),
+        instructions_variables: expect.objectContaining({
+          personality_default: "",
+          personality_friendly: expect.any(String),
+          personality_pragmatic: expect.any(String),
+        }),
+      }),
+    );
+    expect(first?.supports_personality).toBe(true);
+    // Per-model capability flags must be derived from the model definition,
+    // not hardcoded off, so vision/tool-calling models are advertised correctly.
+    expect(first?.supports_parallel_tool_calls).toBe(true);
+    expect(first?.supports_image_detail_original).toBe(false); // GLM-5.2 is text-only
+    expect(first?.input_modalities).toEqual(["text"]);
+
+    // A vision-capable model in the catalog must advertise image input.
+    const vision = catalog.models.find((m) => m.slug === "moonshotai/Kimi-K2.6");
+    expect(vision?.supports_image_detail_original).toBe(true);
+    expect(vision?.input_modalities).toEqual(["text", "image"]);
   });
 });
