@@ -177,7 +177,7 @@ function Home() {
 
   const handleCopyExplicitCommand = async (command: string) => {
     try {
-      await navigator.clipboard.writeText(command)
+      await copyText(command)
       setCopiedExplicitCommand(command)
       window.setTimeout(() => setCopiedExplicitCommand(null), 1400)
     } catch {
@@ -392,19 +392,19 @@ function Home() {
             Prefer explicit commands? Use the long form instead of the short
             wrappers.
           </p>
-          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2">
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2 max-[520px]:grid-cols-1">
             {explicitCommands.map((command) => (
               <button
                 key={command}
                 type="button"
                 onClick={() => handleCopyExplicitCommand(command)}
                 aria-label={`Copy ${command}`}
-                className="flex min-h-10 cursor-pointer items-center justify-between gap-2 rounded-md border border-line-strong bg-code px-3 py-2 text-left font-mono text-[13px] leading-none text-ink transition hover:border-faint hover:bg-white active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-white"
+                className="flex min-h-10 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-line-strong bg-code px-2.5 py-2 text-left font-mono text-[12px] leading-none text-ink transition hover:border-faint hover:bg-white active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-white"
                 data-copied={copiedExplicitCommand === command}
               >
                 <code className="min-w-0 truncate">{command}</code>
                 <span
-                  className="inline-flex size-5 shrink-0 items-center justify-center text-faint data-[copied=true]:text-ink"
+                  className="inline-flex size-4 shrink-0 items-center justify-center text-faint data-[copied=true]:text-ink"
                   data-copied={copiedExplicitCommand === command}
                   aria-hidden="true"
                 >
@@ -460,6 +460,31 @@ function Home() {
       </footer>
     </main>
   )
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {}
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    if (!document.execCommand('copy')) {
+      throw new Error('Copy command failed')
+    }
+  } finally {
+    document.body.removeChild(textarea)
+  }
 }
 
 function formatReleaseAge(publishedAt: string | undefined) {
