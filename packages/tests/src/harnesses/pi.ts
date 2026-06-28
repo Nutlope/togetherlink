@@ -6,34 +6,6 @@ import type { Scenario } from "../types.js";
 export function piScenarios(): Scenario[] {
   return [
     {
-      name: "pi: status exposes Codex-curated Together models",
-      run: async (context) => {
-        const result = await runCommand(context, "pi-status", process.execPath, [
-          context.cliBin,
-          "pi",
-          "status",
-          "--json",
-        ]);
-        assert(result.status === 0, `exit ${result.status}`);
-        const status = asRecord(JSON.parse(result.stdout));
-        assert(status.provider === "together", "expected Together provider");
-        assert(status.currentModel === "zai-org/GLM-5.2", "expected Codex default model");
-        assert(status.sessionMode === "persistent", "expected persistent Pi sessions");
-        assert(status.configMode === "ephemeral", "expected ephemeral Pi config");
-        const supportedModels = String(status.supportedModels ?? "").split(",");
-        for (const model of [
-          "zai-org/GLM-5.2",
-          "moonshotai/Kimi-K2.6",
-          "moonshotai/Kimi-K2.7-Code",
-          "MiniMaxAI/MiniMax-M3",
-          "Qwen/Qwen3.7-Max",
-          "deepseek-ai/DeepSeek-V4-Pro",
-        ]) {
-          assert(supportedModels.includes(model), `missing Codex-supported model ${model}`);
-        }
-      },
-    },
-    {
       name: "pi: basic streaming json response with cost",
       run: async (context) => {
         assertCommandExists("pi");

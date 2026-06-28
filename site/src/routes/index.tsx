@@ -16,7 +16,7 @@ const features = [
         OpenCode setup is exactly as it was, while sessions can still resume.
       </>
     ),
-    supportLabel: 'Status',
+    supportLabel: 'Support',
     supportValue: '100%',
     icon: <OpenCodeMark />,
     accent: undefined,
@@ -60,7 +60,7 @@ const features = [
         persistence.
       </>
     ),
-    supportLabel: 'Status',
+    supportLabel: 'Support',
     supportValue: '100%',
     icon: <PiMark />,
     accent: undefined,

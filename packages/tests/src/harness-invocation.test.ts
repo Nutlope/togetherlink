@@ -28,7 +28,7 @@ describe("harness invocation parsing", () => {
     expect(invocation.flags.passthrough).toEqual(["run", "--resume", "8616d14d-f3a7-4ee3-bfc3-34bce6602b8d"]);
   });
 
-  test("marks native status passthrough when the separator is present", () => {
+  test("passes native status through when the separator is present", () => {
     const parsed = parseArgs(["claude", "--", "status"]);
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
@@ -37,7 +37,7 @@ describe("harness invocation parsing", () => {
     expect(invocation.flags.passthroughSeparator).toBe(true);
   });
 
-  test("leaves harness status available to the wrapper without a separator", () => {
+  test("passes status through like any other native argument", () => {
     const parsed = parseArgs(["claude", "status"]);
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 

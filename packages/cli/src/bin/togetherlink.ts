@@ -9,7 +9,6 @@ import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from ".
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
-import type { HarnessContext } from "../lib/harness-types.js";
 
 async function loadStoredExaKey(): Promise<void> {
   if (process.env.EXA_API_KEY) {
@@ -150,8 +149,8 @@ async function main() {
   // User-facing daemon control. Not a harness, so handle it before the harness
   // dispatch (which would reject "daemon" as an unknown harness).
   if (command === "daemon") {
-    if (rawVerb === undefined || rawVerb === "status") {
-      throw new Error('Use "togetherlink status daemon" for daemon status.');
+    if (rawVerb === undefined) {
+      throw new Error('Unknown "daemon" command. Expected: profile, stop.');
     }
     const { runDaemonCommand } = await import("../lib/daemon/cli.js");
     await runDaemonCommand(rawVerb);
@@ -173,26 +172,7 @@ async function main() {
     return;
   }
 
-  if (command === "status") {
-    const target = rawVerb === "picode" ? "pi" : rawVerb;
-    if (target === "daemon") {
-      const { runDaemonCommand } = await import("../lib/daemon/cli.js");
-      await runDaemonCommand("status");
-      return;
-    }
-    if (!isHarnessCommand(target)) {
-      throw new Error(`Unknown status target "${target ?? ""}". Expected one of: claude, codex, opencode, pi, daemon.`);
-    }
-    await dispatchHarnessCommand(target, "status", flagsWithTrailingJson(parsed.flags));
-    return;
-  }
-
   const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
-
-  if (isHarnessCommand(invocation.command) && isHarnessStatusInvocation(invocation.flags)) {
-    await dispatchHarnessCommand(invocation.command, "status", statusFlags(invocation.flags));
-    return;
-  }
 
   // First-run key setup only matters for the harness-launching commands.
   if (
@@ -212,27 +192,6 @@ async function main() {
   }
 
   await dispatchHarnessCommand(invocation.command, undefined, invocation.flags);
-}
-
-function isHarnessStatusInvocation(flags: Partial<HarnessContext> & { passthroughSeparator?: boolean }): boolean {
-  return flags.passthroughSeparator !== true && flags.passthrough?.[0] === "status";
-}
-
-function statusFlags(flags: Partial<HarnessContext> & { passthroughSeparator?: boolean }): Partial<HarnessContext> {
-  const trailing = flags.passthrough?.slice(1) ?? [];
-  return flagsWithTrailingJson({
-    ...flags,
-    passthrough: trailing,
-  });
-}
-
-function flagsWithTrailingJson(flags: Partial<HarnessContext>): Partial<HarnessContext> {
-  const trailing = flags.passthrough ?? [];
-  return {
-    ...flags,
-    json: flags.json || trailing.includes("--json"),
-    passthrough: trailing.filter((arg) => arg !== "--json"),
-  };
 }
 
 main().catch((err: unknown) => {

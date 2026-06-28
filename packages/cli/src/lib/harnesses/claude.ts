@@ -1,7 +1,4 @@
 import {
-  CLAUDE_DEFAULT_MODEL,
-  CLAUDE_DEFAULT_TOGETHER_MODEL,
-  CLAUDE_SUPPORTED_MODELS,
   resolveClaudeModel,
 } from "../claude/defaults.js";
 import { HARNESS } from "../harness.js";
@@ -33,17 +30,5 @@ export default defineHarness({
       process.exitCode = result.status;
     }
     return {};
-  },
-
-  async status() {
-    return {
-      payload: {
-        harness: HARNESS.CLAUDE,
-        provider: "local-together-proxy",
-        currentModel: CLAUDE_DEFAULT_MODEL,
-        targetModel: CLAUDE_DEFAULT_TOGETHER_MODEL,
-        supportedModels: CLAUDE_SUPPORTED_MODELS.map((model) => model.alias).join(", "),
-      },
-    };
   },
 });

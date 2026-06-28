@@ -21,7 +21,6 @@ export type Harness = {
   id: HarnessId;
   label: string;
   run: (ctx: HarnessContext) => Promise<HarnessResult>;
-  status: (ctx: HarnessContext) => Promise<HarnessResult>;
 };
 
 /**
@@ -32,9 +31,6 @@ export type Harness = {
 export function defineHarness(impl: Harness): Harness {
   if (typeof impl.run !== "function") {
     throw new Error(`Harness "${impl.id}" is missing required method "run"`);
-  }
-  if (typeof impl.status !== "function") {
-    throw new Error(`Harness "${impl.id}" is missing required method "status"`);
   }
   return impl;
 }

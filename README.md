@@ -68,10 +68,6 @@ Run the built CLI directly:
 ```bash
 node packages/cli/dist/bin/togetherlink.js
 node packages/cli/dist/bin/togetherlink.js help
-node packages/cli/dist/bin/togetherlink.js --json status opencode
-node packages/cli/dist/bin/togetherlink.js --json status claude
-node packages/cli/dist/bin/togetherlink.js --json status codex
-node packages/cli/dist/bin/togetherlink.js --json status pi
 ```
 
 Run through the workspace bin, which is closest to how users will invoke it:
@@ -79,10 +75,6 @@ Run through the workspace bin, which is closest to how users will invoke it:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink
 pnpm -F @togetherlink/cli exec togetherlink help
-pnpm -F @togetherlink/cli exec togetherlink --json status opencode
-pnpm -F @togetherlink/cli exec togetherlink --json status claude
-pnpm -F @togetherlink/cli exec togetherlink --json status codex
-pnpm -F @togetherlink/cli exec togetherlink --json status pi
 ```
 
 Typecheck/test:
@@ -99,7 +91,6 @@ OpenCode uses ephemeral Together settings: `togetherlink opencode` injects the T
 ```bash
 export TOGETHER_API_KEY="..."
 
-pnpm -F @togetherlink/cli exec togetherlink --json status opencode
 pnpm -F @togetherlink/cli exec togetherlink opencode
 ```
 
@@ -204,12 +195,6 @@ pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k2-7-code claud
 pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
 ```
 
-Check the runtime defaults without launching Claude:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink --json status claude
-```
-
 ## Testing Codex
 
 Codex uses ephemeral Together settings. `togetherlink` launches the terminal `codex` CLI with per-run config flags and a local Responses-compatible proxy that translates Codex traffic to Together chat completions, while leaving Codex's own session/history behavior intact.
@@ -227,12 +212,6 @@ Run Codex headlessly through Together:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink codex exec "Say hi"
 tcodex exec "Say hi"
-```
-
-Check the runtime defaults without launching Codex:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink --json status codex
 ```
 
 Inspect recent Codex proxy speed traces:
@@ -279,10 +258,4 @@ Run Pi Code headlessly through Together:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink pi -p "Say hi"
 tpi -p "Say hi"
-```
-
-Check the runtime defaults without launching Pi:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink --json status pi
 ```
