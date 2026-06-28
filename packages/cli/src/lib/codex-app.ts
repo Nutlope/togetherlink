@@ -90,6 +90,14 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     contextWindow: selectedModel.definition.limit.context,
   });
   await writeTextAtomic(configPath, next);
+  // Codex caches the remote /v1/models response in models_cache.json. If a
+  // previous session populated it with OpenAI's catalog (because the provider
+  // lacked requires_openai_auth=false), Codex keeps serving the stale OpenAI
+  // models and never sees our proxy's models — logging "Unknown model <id> is
+  // used. This will use fallback model metadata." and showing "Custom model
+  // from config" with default reasoning levels. Bust the cache so the next
+  // Codex launch refetches from our provider.
+  await bustStaleModelsCache(ctx.home);
   await writeAppSessionLock(ctx.home, {
     pid: process.pid,
     startedAt: new Date().toISOString(),
@@ -148,6 +156,12 @@ export function buildCodexAppConfig(
     `name = ${tomlString(options.providerName)}`,
     `base_url = ${tomlString(options.baseUrl)}`,
     'wire_api = "responses"',
+    "# Tell Codex this is a standalone provider (not OpenAI) so it fetches",
+    "# /v1/models from our proxy instead of the OpenAI catalog. Without this",
+    "# Codex silently falls back to OpenAI's remote models, logging",
+    "# \"Unknown model <id> is used. This will use fallback model metadata.\"",
+    "# and showing \"Custom model from config\" with default reasoning levels.",
+    'requires_openai_auth = false',
     CODEX_APP_CONFIG_MARKER_END,
     "",
   ].join("\n");
@@ -177,6 +191,10 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   }
   await rm(modelCatalogPath(home), { force: true });
   await rm(appSessionLockPath(home), { force: true });
+  // Restore should also drop the models cache: a stale OpenAI-only cache left
+  // behind by a togetherlink session would make Codex show "Unknown model"
+  // warnings for the user's real (restored) model until the cache expires.
+  await bustStaleModelsCache(home);
 
   try {
     const authToken = await localProxyAuthToken();
@@ -467,6 +485,24 @@ function backupDir(home: string): string {
 
 function modelCatalogPath(home: string): string {
   return path.join(home, ".codex", "togetherlink-codex-app-models.json");
+}
+
+/**
+ * Codex caches the remote /v1/models response at ~/.codex/models_cache.json.
+ * If that cache was populated while the provider block lacked
+ * requires_openai_auth=false, it holds OpenAI's catalog (gpt-5.x) instead of
+ * our proxy's models. Codex then logs "Unknown model <id> is used. This will
+ * use fallback model metadata." and shows "Custom model from config" with the
+ * default 5 reasoning levels. Removing the stale cache forces the next Codex
+ * launch to refetch from our provider. Safe to no-op if the file is absent.
+ */
+async function bustStaleModelsCache(home: string): Promise<void> {
+  const cachePath = path.join(home, ".codex", "models_cache.json");
+  try {
+    await rm(cachePath, { force: true });
+  } catch {
+    // Best-effort: a missing or locked file is fine; Codex will re-evaluate.
+  }
 }
 
 function appSessionLockPath(home: string): string {
