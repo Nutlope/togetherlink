@@ -407,6 +407,7 @@ export async function handleProxyRequest(
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
   const nativeTools = nativeServerTools(body.tools);
+  const targetTraceModel = resolveTargetModel(body.model, options);
   const tracePayload = tracePayloadForClaudeUpstream(body, options);
   const upstreamMode: ProxyTraceEvent["upstreamMode"] = body.stream ? "stream" : "buffered";
   const traceBase = {
@@ -414,6 +415,8 @@ export async function handleProxyRequest(
     route: path,
     method: req.method ?? "POST",
     model: body.model ?? options.modelId,
+    requestedModel: body.model ?? options.modelId,
+    targetModel: targetTraceModel.definition.id,
     stream: Boolean(body.stream),
     upstreamMode,
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),

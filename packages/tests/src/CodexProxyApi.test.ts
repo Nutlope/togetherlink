@@ -823,13 +823,14 @@ describe("Codex Responses proxy tool compatibility", () => {
         return realFetch(url, init);
       }
       requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({
-        choices: [{ message: { content: "I can see the image." } }],
-      });
+      return sseResponse([
+        { choices: [{ delta: { content: "I can see the image." }, finish_reason: "stop" }] },
+      ]);
     }));
 
-    await postResponses({
+    const response = await postResponsesText({
       model: QWEN_3_7_MAX.id,
+      stream: true,
       input: [
         {
           type: "message",
@@ -841,6 +842,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         },
       ],
     });
+    expect(response).toContain("response.completed");
 
     const upstream = requests[0] as {
       model?: string;

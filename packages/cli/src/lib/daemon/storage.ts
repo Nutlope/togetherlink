@@ -312,17 +312,19 @@ class SqliteDashboardStore implements DashboardStore {
     this.db
       .prepare(`
         INSERT INTO traces (
-          id, session_token, route, method, model, stream, request_bytes,
-          request_preview, cache_key_json, prompt_profile_json, message_count,
-          tool_count, native_tool_count, started_at, upstream_started_at,
-          upstream_headers_at, first_byte_at, duration_ms, completed_at, ok,
-          status, error, usage_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, session_token, route, method, model, requested_model, target_model,
+          stream, request_bytes, request_preview, cache_key_json, prompt_profile_json,
+          message_count, tool_count, native_tool_count, started_at, upstream_started_at,
+          upstream_headers_at, first_byte_at, duration_ms, completed_at, ok, status,
+          error, usage_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           session_token = excluded.session_token,
           route = excluded.route,
           method = excluded.method,
           model = excluded.model,
+          requested_model = excluded.requested_model,
+          target_model = excluded.target_model,
           stream = excluded.stream,
           request_bytes = excluded.request_bytes,
           request_preview = excluded.request_preview,
@@ -403,6 +405,8 @@ class SqliteDashboardStore implements DashboardStore {
         route TEXT NOT NULL,
         method TEXT NOT NULL,
         model TEXT,
+        requested_model TEXT,
+        target_model TEXT,
         stream INTEGER,
         request_bytes INTEGER,
         request_preview TEXT,
@@ -428,6 +432,16 @@ class SqliteDashboardStore implements DashboardStore {
       CREATE INDEX IF NOT EXISTS idx_traces_session_started ON traces(session_token, started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_traces_started_at ON traces(started_at DESC);
     `);
+    this.addColumnIfMissing("traces", "requested_model", "TEXT");
+    this.addColumnIfMissing("traces", "target_model", "TEXT");
+  }
+
+  private addColumnIfMissing(table: string, column: string, type: string): void {
+    try {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch {
+      // Existing databases already have the column.
+    }
   }
 
   private toStoredSession(row: SessionRow): StoredSession {
@@ -568,6 +582,8 @@ function traceParams(token: string, trace: ProxyTraceEvent, updatedAt: number): 
     trace.route,
     trace.method,
     trace.model ?? null,
+    trace.requestedModel ?? null,
+    trace.targetModel ?? null,
     trace.stream === undefined ? null : trace.stream ? 1 : 0,
     trace.requestBytes ?? null,
     trace.requestPreview ?? null,
@@ -617,6 +633,8 @@ type TraceRow = {
   route: string;
   method: string;
   model: string | null;
+  requested_model: string | null;
+  target_model: string | null;
   stream: number | null;
   request_bytes: number | null;
   request_preview: string | null;
@@ -661,6 +679,8 @@ function rowToTrace(row: TraceRow): ProxyTraceEvent {
     route: row.route,
     method: row.method,
     ...(row.model ? { model: row.model } : {}),
+    ...(row.requested_model ? { requestedModel: row.requested_model } : {}),
+    ...(row.target_model ? { targetModel: row.target_model } : {}),
     ...(row.stream !== null ? { stream: row.stream === 1 } : {}),
     ...(typeof row.request_bytes === "number" ? { requestBytes: row.request_bytes } : {}),
     ...(row.request_preview ? { requestPreview: row.request_preview } : {}),

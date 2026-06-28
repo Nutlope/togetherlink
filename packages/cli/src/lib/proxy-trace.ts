@@ -3,6 +3,8 @@ export type ProxyTraceEvent = {
   route: string;
   method: string;
   model?: string;
+  requestedModel?: string;
+  targetModel?: string;
   stream?: boolean;
   upstreamMode?: "buffered" | "stream";
   requestBytes?: number;

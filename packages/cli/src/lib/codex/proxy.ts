@@ -251,6 +251,8 @@ export async function handleCodexProxyRequest(
     route: path,
     method: req.method ?? "POST",
     model: body.model ?? options.modelId,
+    requestedModel: requestModel.requestedModelId,
+    targetModel: requestModel.targetModelId,
     stream: Boolean(body.stream),
     requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
     requestPreview: summarizeResponsesRequestContent(body),
