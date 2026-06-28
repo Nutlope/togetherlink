@@ -20,6 +20,10 @@ export default defineConfig({
     tanstackStart({
       prerender: {
         enabled: true,
+        // /dashboard reads an auth cookie via a server loader; prerendering it
+        // bakes a single static "not authed" snapshot that ignores every
+        // visitor's cookie, so login never sticks. Same for its API route.
+        filter: ({ path }) => !path.startsWith('/dashboard') && !path.startsWith('/api/'),
       },
     }),
     viteReact(),
