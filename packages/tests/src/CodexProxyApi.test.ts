@@ -558,7 +558,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
-  test("falls back to non-streaming native web_search completion when upstream SSE goes idle", async () => {
+  test("fails streamed native web_search completion when upstream SSE goes idle", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
@@ -573,13 +573,7 @@ describe("Codex Responses proxy tool compatibility", () => {
           results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
         });
       }
-      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
-        return hangingSseResponse([{ choices: [{ delta: {} }] }]);
-      }
-      return jsonResponse({
-        choices: [{ message: { content: "Recovered without streaming." } }],
-        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
-      });
+      return hangingSseResponse([{ choices: [{ delta: {} }] }]);
     }));
 
     const response = await postResponsesText({
@@ -589,13 +583,14 @@ describe("Codex Responses proxy tool compatibility", () => {
       input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
     });
 
-    expect(response).toContain("Recovered without streaming.");
-    expect(response).toContain("response.completed");
-    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
-    expect(requests[1]?.body.stream).toBe(false);
+    expect(response).toContain("response.failed");
+    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).not.toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests[0]?.body.stream).toBe(true);
   });
 
-  test("falls back when upstream SSE keepalives make no Codex progress", async () => {
+  test("fails when upstream SSE keepalives make no Codex progress", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -603,13 +598,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         return realFetch(url, init);
       }
       requests.push({ url, body: JSON.parse(String(init?.body)) });
-      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
-        return noProgressSseResponse();
-      }
-      return jsonResponse({
-        choices: [{ message: { content: "Recovered after keepalives." } }],
-        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
-      });
+      return noProgressSseResponse();
     }));
 
     const response = await postResponsesText({
@@ -619,12 +608,14 @@ describe("Codex Responses proxy tool compatibility", () => {
       input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
     });
 
-    expect(response).toContain("Recovered after keepalives.");
-    expect(response).toContain("response.completed");
-    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+    expect(response).toContain("response.failed");
+    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).not.toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests[0]?.body.stream).toBe(true);
   });
 
-  test("falls back when native stream emits reasoning but never final output", async () => {
+  test("fails when native stream emits reasoning but never final output", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS", "100");
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -632,13 +623,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         return realFetch(url, init);
       }
       requests.push({ url, body: JSON.parse(String(init?.body)) });
-      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
-        return reasoningOnlySseResponse();
-      }
-      return jsonResponse({
-        choices: [{ message: { content: "Recovered after reasoning timeout." } }],
-        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
-      });
+      return reasoningOnlySseResponse();
     }));
 
     const response = await postResponsesText({
@@ -649,10 +634,12 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
 
     expect(response).toContain("response.reasoning_text.delta");
-    expect(response).toContain("response.reasoning_text.done");
-    expect(response).toContain("Recovered after reasoning timeout.");
-    expect(response).toContain("response.completed");
-    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+    expect(response).toContain("response.failed");
+    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).not.toContain("Recovered after reasoning timeout.");
+    expect(response).not.toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests[0]?.body.stream).toBe(true);
   });
 
   test("does not leak native web_search when a client tool call is returned in the same group", async () => {
