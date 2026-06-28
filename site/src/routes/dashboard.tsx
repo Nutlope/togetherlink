@@ -80,6 +80,12 @@ function DashboardRoute() {
     }
   }
 
+  useEffect(() => {
+    if (!isAuthed) return
+    const interval = setInterval(() => void loadData(), 15_000)
+    return () => clearInterval(interval)
+  }, [isAuthed])
+
   if (!isAuthed) {
     return (
       <div style={{ maxWidth: 400, margin: '4rem auto', fontFamily: 'monospace' }}>
@@ -116,12 +122,6 @@ function DashboardRoute() {
   if (!data && !loading) {
     void loadData()
   }
-
-  useEffect(() => {
-    if (!isAuthed) return
-    const interval = setInterval(() => void loadData(), 15_000)
-    return () => clearInterval(interval)
-  }, [isAuthed])
 
   return (
     <div style={{ maxWidth: 960, margin: '2rem auto', fontFamily: 'monospace' }}>
