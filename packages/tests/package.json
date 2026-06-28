@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts",
-    "test:codex": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/Codex.test.ts",
-    "test:claude": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/Claude.test.ts",
-    "test:opencode": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/OpenCode.test.ts",
-    "test:pi": "pnpm -F @togetherlink/cli build && vitest run --config vitest.config.ts src/Pi.test.ts"
+    "test": "node scripts/run-vitest.mjs",
+    "test:live-smoke": "TOGETHERLINK_LIVE_SMOKE=1 node scripts/run-vitest.mjs src/LiveSmoke.test.ts",
+    "test:live-models-check": "TOGETHERLINK_LIVE_MODELS_CHECK=1 VITEST_MAX_CONCURRENCY=${VITEST_MAX_CONCURRENCY:-6} node scripts/run-vitest.mjs src/livemodelscheck.test.ts",
+    "test:codex": "node scripts/run-vitest.mjs src/Codex.test.ts",
+    "test:claude": "node scripts/run-vitest.mjs src/Claude.test.ts",
+    "test:opencode": "node scripts/run-vitest.mjs src/OpenCode.test.ts",
+    "test:pi": "node scripts/run-vitest.mjs src/Pi.test.ts"
   },
   "devDependencies": {
     "@togetherlink/models": "workspace:*",

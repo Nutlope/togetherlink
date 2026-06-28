@@ -230,6 +230,167 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("keeps streamed client tool calls in Codex-compatible completed item events", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return sseResponse([
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_alpha",
+                    type: "function",
+                    function: { name: "multi_agent_v1__spawn_agent", arguments: "{\"task\":\"Say " },
+                  },
+                  {
+                    index: 1,
+                    id: "call_beta",
+                    type: "function",
+                    function: { name: "multi_agent_v1__spawn_agent", arguments: "{\"task\":\"Say " },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, function: { arguments: "alpha\"}" } },
+                  { index: 1, function: { arguments: "beta\"}" } },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "namespace",
+          name: "multi_agent_v1",
+          description: "Spawn and manage sub-agents.",
+          tools: [
+            {
+              type: "function",
+              name: "spawn_agent",
+              description: "Start a sub-agent.",
+              parameters: {
+                type: "object",
+                properties: { task: { type: "string" } },
+                required: ["task"],
+              },
+            },
+          ],
+        },
+      ],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Use two agents." }] }],
+    });
+
+    const firstAdded = response.indexOf('"call_id":"call_alpha"');
+    const secondAdded = response.indexOf('"call_id":"call_beta"');
+    const completed = response.indexOf("response.completed");
+    expect(firstAdded).toBeGreaterThan(-1);
+    expect(secondAdded).toBeGreaterThan(-1);
+    expect(completed).toBeGreaterThan(secondAdded);
+    expect(response).not.toContain("response.function_call_arguments.delta");
+    expect(response).not.toContain("response.function_call_arguments.done");
+    expect(response).toContain('"arguments":"{\\"task\\":\\"Say alpha\\"}"');
+    expect(response).toContain('"arguments":"{\\"task\\":\\"Say beta\\"}"');
+  });
+
+  test("parses CRLF-delimited upstream SSE streams", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return sseResponse([
+        { choices: [{ delta: { content: "hi" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+      ], { lineEnding: "\r\n" });
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("response.output_text.delta");
+    expect(response).toContain("hi");
+    expect(response).toContain("response.completed");
+  });
+
+  test("streams ordinary Codex turns upstream by default", async () => {
+    const requests: Array<{ body: any }> = [];
+    vi.unstubAllEnvs();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ body: JSON.parse(String(init?.body)) });
+      return sseResponse([
+        { choices: [{ delta: { content: "hi" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+        { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(requests[0]?.body.stream).toBe(true);
+    expect(response).toContain("response.output_text.delta");
+    expect(response).toContain('"sequence_number":');
+    expect(response).toContain("response.content_part.done");
+    expect(response).toContain("response.completed");
+  });
+
+  test("forwards streamed Codex deltas before the response completes", async () => {
+    vi.unstubAllEnvs();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return delayedSseResponse([
+        { delayMs: 0, chunk: { choices: [{ delta: { content: "hel" } }] } },
+        { delayMs: 80, chunk: { choices: [{ delta: { content: "lo" } }] } },
+        { delayMs: 80, chunk: { choices: [{ finish_reason: "stop", delta: {} }] } },
+        { delayMs: 80, chunk: { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } } },
+      ]);
+    }));
+
+    const timeline = await postResponsesStreamingTimeline({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
+    });
+
+    const firstDelta = timeline.find((entry) => entry.text.includes("response.output_text.delta"));
+    const completed = timeline.find((entry) => entry.text.includes("response.completed"));
+    expect(firstDelta?.atMs).toBeDefined();
+    expect(completed?.atMs).toBeDefined();
+    expect(timeline.some((entry) => entry.text.includes("response.in_progress"))).toBe(true);
+    expect(timeline.some((entry) => entry.text.includes("response.content_part.done"))).toBe(true);
+    expect(firstDelta!.atMs).toBeLessThan(completed!.atMs);
+    expect(completed!.atMs - firstDelta!.atMs).toBeGreaterThanOrEqual(50);
+  });
+
   test("preserves namespace tool-call groups with more than five parallel calls", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -359,6 +520,158 @@ describe("Codex Responses proxy tool compatibility", () => {
       role: "assistant",
       content: [{ type: "output_text", text: "Codex docs: https://developers.openai.com/codex", annotations: [] }],
     });
+  });
+
+  test("streams native web_search thinking and final answer deltas instead of buffering", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url, body });
+      if (url.includes("api.exa.ai")) {
+        return jsonResponse({
+          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
+        });
+      }
+      const togetherRequestCount = requests.filter((request) => request.url.includes("api.together.ai")).length;
+      if (togetherRequestCount === 1) {
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: "Need current docs. " } }] },
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_search",
+                      type: "function",
+                      function: { name: "web_search", arguments: JSON.stringify({ query: "Codex docs" }) },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ delta: { reasoning_content: "Found it. " } }] },
+        { choices: [{ delta: { content: "Codex docs: " } }] },
+        { choices: [{ delta: { content: "https://developers.openai.com/codex" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+        { usage: { prompt_tokens: 15, completion_tokens: 7, total_tokens: 22 } },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Search Codex docs." }] }],
+    });
+
+    const reasoningIndex = response.indexOf("response.reasoning_text.delta");
+    const textIndex = response.indexOf("response.output_text.delta");
+    const completedIndex = response.indexOf("response.completed");
+    expect(reasoningIndex).toBeGreaterThan(-1);
+    expect(textIndex).toBeGreaterThan(-1);
+    expect(completedIndex).toBeGreaterThan(textIndex);
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
+    expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
+    expect(requests[2]?.body.messages.at(-1)).toMatchObject({
+      role: "tool",
+      tool_call_id: "call_search",
+      content: expect.stringContaining("Codex docs"),
+    });
+  });
+
+  test("fails streamed native web_search completion when upstream SSE goes idle", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url, body });
+      if (url.includes("api.exa.ai")) {
+        return jsonResponse({
+          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
+        });
+      }
+      return hangingSseResponse([{ choices: [{ delta: {} }] }]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("response.failed");
+    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).not.toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests[0]?.body.stream).toBe(true);
+  });
+
+  test("fails when upstream SSE keepalives make no Codex progress", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ url, body: JSON.parse(String(init?.body)) });
+      return noProgressSseResponse();
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("response.failed");
+    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).not.toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests[0]?.body.stream).toBe(true);
+  });
+
+  test("fails when native stream emits reasoning but never final output", async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS", "100");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ url, body: JSON.parse(String(init?.body)) });
+      return reasoningOnlySseResponse();
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [{ type: "web_search", name: "web_search" }],
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(response).toContain("response.reasoning_text.delta");
+    expect(response).toContain("response.failed");
+    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).not.toContain("Recovered after reasoning timeout.");
+    expect(response).not.toContain("response.completed");
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests[0]?.body.stream).toBe(true);
   });
 
   test("does not leak native web_search when a client tool call is returned in the same group", async () => {
@@ -683,6 +996,47 @@ async function postResponsesText(body: unknown): Promise<string> {
   }
 }
 
+async function postResponsesStreamingTimeline(body: unknown): Promise<Array<{ atMs: number; text: string }>> {
+  const server = http.createServer((req, res) => {
+    handleCodexProxyRequest(req, res, options).catch((error) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    throw new Error("test server did not bind");
+  }
+  try {
+    const startedAt = Date.now();
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.ok).toBe(true);
+    expect(response.body).not.toBeNull();
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const timeline: Array<{ atMs: number; text: string }> = [];
+    while (true) {
+      const read = await reader.read();
+      if (read.done) {
+        break;
+      }
+      timeline.push({ atMs: Date.now() - startedAt, text: decoder.decode(read.value, { stream: true }) });
+    }
+    const finalText = decoder.decode();
+    if (finalText) {
+      timeline.push({ atMs: Date.now() - startedAt, text: finalText });
+    }
+    return timeline;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -690,9 +1044,90 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function sseResponse(chunks: unknown[]): Response {
-  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n";
+function sseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } = {}): Response {
+  const lineEnding = options.lineEnding ?? "\n";
+  const separator = `${lineEnding}${lineEnding}`;
+  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}${separator}`).join("") + `data: [DONE]${separator}`;
   return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function delayedSseResponse(chunks: Array<{ delayMs: number; chunk: unknown }>): Response {
+  const encoder = new TextEncoder();
+  const separator = "\n\n";
+  return new Response(new ReadableStream({
+    async start(controller) {
+      for (const { delayMs, chunk } of chunks) {
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
+      }
+      controller.enqueue(encoder.encode(`data: [DONE]${separator}`));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function hangingSseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } = {}): Response {
+  const encoder = new TextEncoder();
+  const lineEnding = options.lineEnding ?? "\n";
+  const separator = `${lineEnding}${lineEnding}`;
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
+      }
+    },
+    cancel() {
+      // The proxy should cancel this stream once the idle timeout fires.
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function noProgressSseResponse(): Response {
+  const encoder = new TextEncoder();
+  let interval: NodeJS.Timeout | undefined;
+  return new Response(new ReadableStream({
+    start(controller) {
+      interval = setInterval(() => {
+        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{}}]}\n\n"));
+      }, 20);
+    },
+    cancel() {
+      if (interval) {
+        clearInterval(interval);
+      }
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function reasoningOnlySseResponse(): Response {
+  const encoder = new TextEncoder();
+  let interval: NodeJS.Timeout | undefined;
+  return new Response(new ReadableStream({
+    start(controller) {
+      interval = setInterval(() => {
+        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking \"}}]}\n\n"));
+      }, 20);
+    },
+    cancel() {
+      if (interval) {
+        clearInterval(interval);
+      }
+    },
+  }), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });

@@ -4,14 +4,16 @@ import { ALL_HARNESSES } from "./harness.js";
 const FLAG_ALIASES = {
   "--api-key": "apiKey",
   "--main": "main",
+  "--model": "main",
   "--search": "search",
   "--slot": "slot",
 } as const satisfies Record<string, keyof HarnessContext>;
 
-const BOOLEAN_FLAGS = new Set(["--json"]);
-type BooleanFlag = "json";
+const BOOLEAN_FLAGS = new Set(["--json", "--restore"]);
+type BooleanFlag = "json" | "restore";
 const BOOLEAN_FLAG_KEYS = {
   "--json": "json",
+  "--restore": "restore",
 } as const satisfies Record<string, BooleanFlag>;
 
 export type ParsedArgs = {
@@ -25,7 +27,7 @@ export type ParsedArgs = {
  */
 export function parseArgs(argv: string[]): ParsedArgs {
   const positional = [];
-  const flags: ParsedArgs["flags"] = { json: false };
+  const flags: ParsedArgs["flags"] = { json: false, restore: false };
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];

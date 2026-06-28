@@ -14,16 +14,12 @@ type DashboardResponse = {
 };
 
 /**
- * `togetherlink status daemon` / `togetherlink daemon stop`. These are thin
+ * `togetherlink daemon profile` / `togetherlink daemon stop`. These are thin
  * user-facing controls over the shared proxy daemon; the daemon itself is
  * started lazily by `togetherlink claude` via `ensureDaemon`.
  */
 export async function runDaemonCommand(verb: string | undefined): Promise<void> {
-  const resolved = verb ?? "status";
-  if (resolved === "status") {
-    await daemonStatus();
-    return;
-  }
+  const resolved = verb;
   if (resolved === "profile") {
     await daemonProfile();
     return;
@@ -37,32 +33,7 @@ export async function runDaemonCommand(verb: string | undefined): Promise<void> 
     await runDaemon();
     return;
   }
-  throw new Error(`Unknown "daemon ${verb ?? ""}" command. Expected: status, profile, stop.`);
-}
-
-async function daemonStatus(): Promise<void> {
-  const port = resolveDaemonPort();
-  const healthy = await probeHealthz(port);
-  if (!healthy) {
-    console.log(`togetherlink daemon: not running on ${daemonUrl(port)}`);
-    return;
-  }
-  let sessionCount = 0;
-  try {
-    const response = await fetch(`${daemonUrl(port)}/internal/sessions`);
-    if (response.ok) {
-      const body = (await response.json()) as { sessions?: unknown[] };
-      sessionCount = body.sessions?.length ?? 0;
-    }
-  } catch {
-    // sessions endpoint unreachable; just report the daemon is up
-  }
-  const pid = await readPid();
-  console.log(
-    `togetherlink daemon: running on ${daemonUrl(port)}` +
-      (pid !== undefined ? ` (pid ${pid})` : "") +
-      (sessionCount > 0 ? `, ${sessionCount} active session${sessionCount === 1 ? "" : "s"}` : ""),
-  );
+  throw new Error(`Unknown "daemon ${verb ?? ""}" command. Expected: profile, stop.`);
 }
 
 async function daemonProfile(): Promise<void> {

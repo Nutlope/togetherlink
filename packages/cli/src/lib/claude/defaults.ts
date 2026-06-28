@@ -1,8 +1,8 @@
 import {
   GLM_5_2,
   GLM_5_2_ANTHROPIC_CAPABILITIES,
+  KIMI_K2_7_CODE,
   SELECTABLE_MODELS,
-  VISION_MODELS,
   resolveModelByKeys,
   type ModelDefinition,
 } from "@togetherlink/models";
@@ -19,29 +19,26 @@ export type ClaudeModelSelection = {
   definition: ModelDefinition;
 };
 
-export const CLAUDE_HAIKU_MODEL = VISION_MODELS[1] ?? VISION_MODELS[0] ?? GLM_5_2;
+export const CLAUDE_HAIKU_MODEL = KIMI_K2_7_CODE;
 export const CLAUDE_HAIKU_MODEL_SELECTION: ClaudeModelSelection = {
   alias: CLAUDE_HAIKU_MODEL.anthropicAlias ?? CLAUDE_HAIKU_MODEL.id,
   definition: CLAUDE_HAIKU_MODEL,
 };
 
 /**
- * Claude-routable models = the curated flagships that carry an Anthropic alias
- * plus the lightweight Haiku-tier backend Claude Code uses for built-in
- * exploration subagents. Derived from the shared manifest so a new alias-bearing
- * model appears here without a code edit.
+ * Claude-routable models = every curated flagship plus the lightweight
+ * Haiku-tier backend Claude Code uses for built-in exploration subagents.
+ * Models without a friendly Anthropic alias use their Together id directly.
  */
-const aliasBackedClaudeModels = SELECTABLE_MODELS.filter(
-  (model) => model.anthropicAlias !== null,
-).map((definition) => ({
+const selectableClaudeModels = SELECTABLE_MODELS.map((definition) => ({
   alias: definition.anthropicAlias ?? definition.id,
   definition,
 }));
 
 export const CLAUDE_SUPPORTED_MODELS: readonly ClaudeModelSelection[] = [
-  ...aliasBackedClaudeModels,
+  ...selectableClaudeModels,
   ...(
-    aliasBackedClaudeModels.some((model) => model.definition.id === CLAUDE_HAIKU_MODEL_SELECTION.definition.id)
+    selectableClaudeModels.some((model) => model.definition.id === CLAUDE_HAIKU_MODEL_SELECTION.definition.id)
       ? []
       : [CLAUDE_HAIKU_MODEL_SELECTION]
   ),

@@ -20,6 +20,7 @@ Or launch a tool directly:
 
 ```bash
 togetherlink codex        # alias: tcodex
+togetherlink codex-app    # alpha: Codex Desktop session with restore
 togetherlink claude       # alias: tclaude
 togetherlink pi           # alias: tpi
 togetherlink opencode     # alias: topencode
@@ -33,6 +34,7 @@ The compact CLI guide is:
 
 ```text
 togetherlink configure
+togetherlink codex-app [--model <model>] [--restore]  (alpha)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
 togetherlink pi [...]          (alias: tpi)
@@ -66,10 +68,6 @@ Run the built CLI directly:
 ```bash
 node packages/cli/dist/bin/togetherlink.js
 node packages/cli/dist/bin/togetherlink.js help
-node packages/cli/dist/bin/togetherlink.js --json status opencode
-node packages/cli/dist/bin/togetherlink.js --json status claude
-node packages/cli/dist/bin/togetherlink.js --json status codex
-node packages/cli/dist/bin/togetherlink.js --json status pi
 ```
 
 Run through the workspace bin, which is closest to how users will invoke it:
@@ -77,10 +75,6 @@ Run through the workspace bin, which is closest to how users will invoke it:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink
 pnpm -F @togetherlink/cli exec togetherlink help
-pnpm -F @togetherlink/cli exec togetherlink --json status opencode
-pnpm -F @togetherlink/cli exec togetherlink --json status claude
-pnpm -F @togetherlink/cli exec togetherlink --json status codex
-pnpm -F @togetherlink/cli exec togetherlink --json status pi
 ```
 
 Typecheck/test:
@@ -97,7 +91,6 @@ OpenCode uses ephemeral Together settings: `togetherlink opencode` injects the T
 ```bash
 export TOGETHER_API_KEY="..."
 
-pnpm -F @togetherlink/cli exec togetherlink --json status opencode
 pnpm -F @togetherlink/cli exec togetherlink opencode
 ```
 
@@ -193,18 +186,13 @@ pnpm -F @togetherlink/cli exec togetherlink claude --help
 pnpm -F @togetherlink/cli exec togetherlink claude --version
 ```
 
-The Claude local proxy defaults to Together GLM-5.2 (`zai-org/GLM-5.2`) and can also route Claude Code through Kimi K2.7 Code.
+The Claude local proxy defaults to Together GLM-5.2 (`zai-org/GLM-5.2`) and can route Claude Code through any curated Together model in the repo's shared model list.
 Pick a backend for one launch:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink --main together-glm-5-2 claude
 pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k2-7-code claude
-```
-
-Check the runtime defaults without launching Claude:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink --json status claude
+pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
 ```
 
 ## Testing Codex
@@ -226,17 +214,30 @@ pnpm -F @togetherlink/cli exec togetherlink codex exec "Say hi"
 tcodex exec "Say hi"
 ```
 
-Check the runtime defaults without launching Codex:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink --json status codex
-```
-
 Inspect recent Codex proxy speed traces:
 
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink daemon profile
 ```
+
+## Testing Codex App
+
+Codex App support is an alpha feature. Unlike `togetherlink codex`, it persistently patches Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. The config stays active until you run `--restore`, similar to `ollama launch codex-app`. If Codex App is already open, togetherlink asks before restarting it so the new profile can load.
+
+```bash
+export TOGETHER_API_KEY="..."
+
+pnpm -F @togetherlink/cli exec togetherlink codex-app
+pnpm -F @togetherlink/cli exec togetherlink codex-app --model moonshotai/Kimi-K2.7-Code
+```
+
+Restore the previous Codex config:
+
+```bash
+pnpm -F @togetherlink/cli exec togetherlink codex-app --restore
+```
+
+Backups live under `~/.togetherlink/backup/codex-app/`. The managed model catalog lives under `~/.codex/` so Codex Desktop can load it, and the session lock lives under `~/.togetherlink/codex-app/`.
 
 ## Testing Pi Code
 
@@ -257,10 +258,4 @@ Run Pi Code headlessly through Together:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink pi -p "Say hi"
 tpi -p "Say hi"
-```
-
-Check the runtime defaults without launching Pi:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink --json status pi
 ```

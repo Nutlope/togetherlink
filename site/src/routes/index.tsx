@@ -16,7 +16,7 @@ const features = [
         OpenCode setup is exactly as it was, while sessions can still resume.
       </>
     ),
-    supportLabel: 'Status',
+    supportLabel: 'Support',
     supportValue: '100%',
     icon: <OpenCodeMark />,
     accent: undefined,
@@ -60,11 +60,38 @@ const features = [
         persistence.
       </>
     ),
-    supportLabel: 'Status',
+    supportLabel: 'Support',
     supportValue: '100%',
     icon: <PiMark />,
     accent: undefined,
   },
+]
+
+const heroTools = [
+  { name: 'OpenCode', command: 'topencode', icon: <OpenCodeMark /> },
+  { name: 'Claude Code', command: 'tclaude', icon: <ClaudeMark /> },
+  { name: 'Codex', command: 'tcodex', icon: <CodexMark /> },
+  { name: 'Pi Code', command: 'tpi', icon: <PiMark /> },
+]
+
+const heroProof = [
+  { value: '4', label: 'coding agents' },
+  { value: '1', label: 'install command' },
+  { value: '0', label: 'config files rewritten' },
+]
+
+const heroToolPositions = [
+  'sm:absolute sm:left-[8%] sm:top-[18%]',
+  'sm:absolute sm:right-[7%] sm:top-[18%]',
+  'sm:absolute sm:left-[10%] sm:bottom-[18%]',
+  'sm:absolute sm:right-[9%] sm:bottom-[18%]',
+]
+
+const explicitCommands = [
+  'togetherlink opencode',
+  'togetherlink claude',
+  'togetherlink codex',
+  'togetherlink pi',
 ]
 
 export const Route = createFileRoute('/')({
@@ -76,16 +103,59 @@ function Home() {
     'idle',
   )
   const [version, setVersion] = useState('Apache-2.0')
+  const [latestRelease, setLatestRelease] = useState({
+    value: 'auto',
+    label: 'updates in place',
+  })
+  const [copiedExplicitCommand, setCopiedExplicitCommand] = useState<
+    string | null
+  >(null)
   const commandRef = useRef<HTMLElement>(null)
+  const commandShellRef = useRef<HTMLDivElement>(null)
+  const [commandFontSize, setCommandFontSize] = useState(14)
 
   useEffect(() => {
     fetch('/latest.json', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((manifest: { version?: string }) => {
+      .then((manifest: { version?: string; publishedAt?: string }) => {
         if (manifest.version) setVersion(`v${manifest.version} - Apache-2.0`)
+        const releaseAge = formatReleaseAge(manifest.publishedAt)
+        if (releaseAge) {
+          setLatestRelease({
+            value: releaseAge,
+            label: 'latest release',
+          })
+        }
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const shell = commandShellRef.current
+    const command = commandRef.current
+    if (!shell || !command) return
+
+    const resizeObserver = new ResizeObserver(() => {
+      const availableWidth = command.getBoundingClientRect().width
+      const estimatedCharacterWidth = 0.62
+      const nextSize = Math.min(
+        14,
+        Math.max(
+          10,
+          Math.floor(
+            availableWidth / (installCommand.length * estimatedCharacterWidth),
+          ),
+        ),
+      )
+
+      setCommandFontSize(nextSize)
+    })
+
+    resizeObserver.observe(shell)
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  const proofItems = [...heroProof, latestRelease]
 
   const handleCopy = async () => {
     try {
@@ -105,23 +175,19 @@ function Home() {
     }
   }
 
+  const handleCopyExplicitCommand = async (command: string) => {
+    try {
+      await copyText(command)
+      setCopiedExplicitCommand(command)
+      window.setTimeout(() => setCopiedExplicitCommand(null), 1400)
+    } catch {
+      setCopiedExplicitCommand(null)
+    }
+  }
+
   return (
     <main className="mx-auto max-w-[1120px] px-6 max-[520px]:px-[18px]">
       <header className="flex items-center gap-2.5 pt-6 max-[520px]:flex-wrap max-[520px]:gap-y-3.5">
-        <a
-          href="https://www.together.ai/"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Together AI"
-          className="opacity-90 transition-opacity hover:opacity-100"
-        >
-          <img
-            className="block h-[22px] w-auto"
-            src="/together-ai.png"
-            alt="Together AI"
-          />
-        </a>
-        <span className="h-[18px] w-px bg-line" />
         <div className="flex items-center gap-2 text-base font-semibold text-ink">
           <img
             className="block size-[22px]"
@@ -149,37 +215,71 @@ function Home() {
         </nav>
       </header>
 
-      <section className="py-[88px] pb-4 text-center max-[520px]:pt-16">
-        <span className="mb-7 inline-block rounded-full border border-line-strong bg-white px-3.5 py-1.5 text-[13px] font-medium text-muted">
-          Together AI - for OpenCode, Claude Code, Codex & Pi Code
-        </span>
+      <section className="py-[74px] pb-4 text-center max-[520px]:pt-14">
+        <a
+          href="https://www.together.ai/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-7 inline-flex items-center gap-2 rounded-full border border-line-strong bg-white px-3.5 py-1.5 text-[13px] font-medium text-muted shadow-[0_1px_2px_rgba(10,10,10,.04)] transition-colors hover:text-ink"
+        >
+          <span>Powered by</span>
+          <img
+            className="block h-[15px] w-auto"
+            src="/together-ai.png"
+            alt="Together AI"
+          />
+        </a>
         <h1 className="m-0 text-balance text-[clamp(34px,6vw,52px)] font-semibold leading-[1.08] text-ink">
-          Together models,
+          Use Together AI
           <br />
-          right inside your editor.
+          in the agents you already run.
         </h1>
         <p className="mx-auto mt-5 mb-9 max-w-[560px] text-pretty text-[19px] leading-normal text-muted">
-          One tiny, always-current binary. Run{' '}
-          <code className="text-ink">topencode</code> or{' '}
-          <code className="text-ink">tclaude</code> or{' '}
-          <code className="text-ink">tcodex</code> or{' '}
-          <code className="text-ink">tpi</code> and your existing tools route
-          through Together AI models - no proxy to run, no agent config to write.
+          Install once, then launch OpenCode, Claude Code, Codex, or Pi Code
+          with short commands. TogetherLink injects Together settings for that
+          run only, so your normal tool configs stay clean.
         </p>
 
-        <div className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]">
+        <div className="relative mx-auto mb-9 flex min-h-[250px] max-w-[760px] items-center justify-center overflow-hidden rounded-[24px] bg-[radial-gradient(circle_at_center,#f5f5f4_0,#ffffff_58%,#fafafa_100%)] px-5 py-8 shadow-[inset_0_0_0_1px_rgba(229,231,235,.9),0_1px_2px_rgba(10,10,10,.04)] max-[680px]:min-h-0 max-[680px]:flex-col max-[680px]:gap-5 max-[680px]:rounded-[18px]">
+          <div className="pointer-events-none absolute inset-x-12 top-1/2 hidden h-px bg-[linear-gradient(90deg,transparent,#d1d5db,transparent)] sm:block" />
+          <div className="pointer-events-none absolute inset-y-8 left-1/2 hidden w-px bg-[linear-gradient(180deg,transparent,#d1d5db,transparent)] sm:block" />
+          <div className="relative z-10 flex size-[134px] flex-col items-center justify-center rounded-full bg-white text-ink shadow-[0_1px_2px_rgba(10,10,10,.04),0_24px_70px_-28px_rgba(10,10,10,.32),inset_0_0_0_1px_rgba(229,231,235,.96)]">
+            <img
+              className="mb-1 size-[42px]"
+              src="/togetherlink-logo.svg"
+              alt=""
+              aria-hidden="true"
+            />
+            <span className="text-[15px] font-semibold">TogetherLink</span>
+            <span className="mt-0.5 text-[11px] font-medium text-faint">
+              per-run routing
+            </span>
+          </div>
+          <div className="contents max-[680px]:grid max-[680px]:grid-cols-2 max-[680px]:gap-2.5 max-[380px]:w-full max-[380px]:grid-cols-1">
+            {heroTools.map((tool, index) => (
+              <HeroTool key={tool.name} index={index} {...tool} />
+            ))}
+          </div>
+        </div>
+
+        <div
+          ref={commandShellRef}
+          className="mx-auto mb-4 flex max-w-[600px] items-center gap-3 rounded-xl border border-line-strong bg-code py-4 pr-4 pl-[18px] text-left font-mono text-sm shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)] max-[520px]:grid max-[520px]:grid-cols-[auto_1fr] max-[520px]:items-start max-[520px]:pr-[18px]"
+        >
           <span className="select-none text-faint">$</span>
           <code
             ref={commandRef}
-            className="min-w-0 flex-1 [overflow-wrap:anywhere] text-[clamp(10px,2.4vw,14px)] leading-snug text-ink sm:whitespace-nowrap"
+            className="min-w-0 flex-1 break-words leading-snug text-ink [overflow-wrap:anywhere] data-[fit=true]:whitespace-nowrap"
+            data-fit={commandFontSize > 10}
+            style={{ fontSize: commandFontSize }}
           >
-            {installCommand}
+            <InstallCommandText />
           </code>
           <button
             type="button"
             onClick={handleCopy}
             aria-label="Copy install command"
-            className="min-w-[58px] cursor-pointer whitespace-nowrap rounded-lg border border-line-strong bg-white px-[13px] py-[7px] font-sans text-[13px] font-medium text-muted transition hover:border-ink hover:text-ink active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white"
+            className="min-w-[58px] cursor-pointer whitespace-nowrap rounded-lg border border-line-strong bg-white px-[13px] py-[7px] font-sans text-[13px] font-medium text-muted transition hover:border-ink hover:text-ink active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white max-[520px]:col-span-2 max-[520px]:min-h-10"
             data-copied={copyState === 'copied'}
           >
             {copyState === 'copied'
@@ -190,31 +290,23 @@ function Home() {
           </button>
         </div>
         <div className="text-[13px] text-faint">
-          macOS & Linux - installs Bun for you if needed - keeps itself up to
-          date
+          macOS & Linux - installs Bun if needed - keeps itself up to date
         </div>
 
-        <div className="mx-auto mt-8 max-w-[680px] overflow-hidden rounded-[18px] border border-emerald-200/70 bg-[linear-gradient(135deg,#f0fdf4_0%,#f7fee7_55%,#ffffff_100%)] text-left shadow-[0_1px_2px_rgba(10,10,10,.04),0_10px_30px_-12px_rgba(16,185,129,.18)]">
-          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:gap-5">
-            <span className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-full border border-emerald-300/70 bg-white text-emerald-600 shadow-[inset_0_1px_0_rgba(255,255,255,.8)]">
-              <ShieldMark />
-            </span>
-            <p className="m-0 text-[14.5px] leading-relaxed text-muted">
-              <strong className="font-semibold text-ink">
-                Non-destructive by design.
-              </strong>{' '}
-              Together settings are injected per run - no agent config files are
-              rewritten. Your subscriptions and your existing OpenCode, Claude
-              Code, Codex, or Pi Code config are never touched, while each tool's
-              normal local sessions can still persist.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-y-2 border-t border-emerald-200/70 bg-white/55 px-5 py-3 text-[12px] font-medium text-muted max-[620px]:justify-start max-[620px]:gap-x-4">
-            <Guarantee icon={<NoDiskMark />} label="Sessions can persist" />
-            <Guarantee icon={<NoDiskMark />} label="No config overwritten" />
-            <Guarantee icon={<NoDiskMark />} label="Auto-updates atomically" />
-            <Guarantee icon={<NoDiskMark />} label="Keep your subscription" />
-          </div>
+        <div className="mx-auto mt-7 grid max-w-[720px] grid-cols-4 gap-2.5 max-[680px]:grid-cols-2">
+          {proofItems.map((item) => (
+            <div
+              key={item.label}
+              className="rounded-[12px] bg-code px-4 py-3 text-left shadow-[inset_0_0_0_1px_rgba(229,231,235,.9)] max-[380px]:px-3.5"
+            >
+              <div className="text-[20px] font-semibold leading-none text-ink tabular-nums">
+                {item.value}
+              </div>
+              <div className="mt-1.5 text-[12.5px] font-medium leading-snug text-muted">
+                {item.label}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -259,11 +351,24 @@ function Home() {
 
       <section className="mx-auto mt-2 mb-20 max-w-[880px]">
         <h2 className="m-0 mb-5 text-xl font-semibold text-ink">Get started</h2>
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)]">
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)] max-[520px]:grid max-[520px]:grid-cols-[auto_1fr] max-[520px]:items-start">
           <span className="select-none text-faint">$</span>
           <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-            {installCommand}
+            <InstallCommandText />
           </code>
+          <button
+            type="button"
+            onClick={handleCopy}
+            aria-label="Copy install command"
+            className="ml-auto min-h-10 cursor-pointer whitespace-nowrap rounded-lg border border-line-strong bg-white px-[13px] py-[7px] font-sans text-[13px] font-medium text-muted transition hover:border-ink hover:text-ink active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white max-[520px]:col-span-2 max-[520px]:ml-0"
+            data-copied={copyState === 'copied'}
+          >
+            {copyState === 'copied'
+              ? 'Copied'
+              : copyState === 'select'
+                ? 'Select Cmd+C'
+                : 'Copy'}
+          </button>
         </div>
         <Step number="1">
           Install with the one-liner above. It drops the binary at{' '}
@@ -282,11 +387,37 @@ function Home() {
           saved, so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code
           config are untouched.
         </Step>
-        <p className="m-0 border-t border-line pt-[18px] text-[15px] leading-relaxed text-muted [&_code]:rounded-md [&_code]:border [&_code]:border-line-strong [&_code]:bg-code [&_code]:px-[7px] [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_code]:text-ink">
-          Prefer explicit commands? Use <code>togetherlink opencode</code>,{' '}
-          <code>togetherlink claude</code>, <code>togetherlink codex</code>, or{' '}
-          <code>togetherlink pi</code> instead of the short wrappers.
-        </p>
+        <div className="border-t border-line pt-[18px]">
+          <p className="m-0 text-[15px] leading-relaxed text-muted">
+            Prefer explicit commands? Use the long form instead of the short
+            wrappers.
+          </p>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2 max-[520px]:grid-cols-1">
+            {explicitCommands.map((command) => (
+              <button
+                key={command}
+                type="button"
+                onClick={() => handleCopyExplicitCommand(command)}
+                aria-label={`Copy ${command}`}
+                className="flex min-h-10 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-line-strong bg-code px-2.5 py-2 text-left font-mono text-[12px] leading-none text-ink transition hover:border-faint hover:bg-white active:scale-95 data-[copied=true]:border-ink data-[copied=true]:bg-white"
+                data-copied={copiedExplicitCommand === command}
+              >
+                <code className="min-w-0 truncate">{command}</code>
+                <span
+                  className="inline-flex size-4 shrink-0 items-center justify-center text-faint data-[copied=true]:text-ink"
+                  data-copied={copiedExplicitCommand === command}
+                  aria-hidden="true"
+                >
+                  {copiedExplicitCommand === command ? (
+                    <CheckMark />
+                  ) : (
+                    <CopyMark />
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <footer className="border-t border-line py-8 pb-14 text-sm text-faint">
@@ -331,6 +462,61 @@ function Home() {
   )
 }
 
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {}
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    if (!document.execCommand('copy')) {
+      throw new Error('Copy command failed')
+    }
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+function formatReleaseAge(publishedAt: string | undefined) {
+  if (!publishedAt) return null
+
+  const timestamp = new Date(publishedAt).getTime()
+  if (!Number.isFinite(timestamp)) return null
+
+  const diffMs = Math.max(0, Date.now() - timestamp)
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  const day = 24 * hour
+  const week = 7 * day
+
+  if (diffMs < minute) return 'just now'
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m ago`
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`
+  if (diffMs < week) return `${Math.floor(diffMs / day)}d ago`
+
+  return `${Math.floor(diffMs / week)}w ago`
+}
+
+function InstallCommandText() {
+  return (
+    <>
+      curl -fsSL https://togetherlink.vercel.app/
+      <wbr />
+      install.sh | sh
+    </>
+  )
+}
+
 function Step({
   number,
   children,
@@ -343,6 +529,36 @@ function Step({
       <div className="text-[15px] text-muted [&_code]:rounded-md [&_code]:border [&_code]:border-line-strong [&_code]:bg-code [&_code]:px-[7px] [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_code]:text-ink">
         {children}
       </div>
+    </div>
+  )
+}
+
+function HeroTool({
+  name,
+  command,
+  icon,
+  index,
+}: Readonly<{
+  name: string
+  command: string
+  icon: ReactNode
+  index: number
+}>) {
+  return (
+    <div
+      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5 max-[380px]:w-full`}
+    >
+      <span className="inline-flex size-[40px] shrink-0 items-center justify-center rounded-[10px] bg-code text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[14px] leading-tight font-semibold text-ink">
+          {name}
+        </span>
+        <code className="mt-0.5 block truncate font-mono text-[12px] text-muted">
+          {command}
+        </code>
+      </span>
     </div>
   )
 }
@@ -414,43 +630,33 @@ function PiMark() {
   )
 }
 
-function ShieldMark() {
+function CopyMark() {
   return (
-    <svg className="size-[17px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 3l7 2.5v5.2c0 4.6-3.1 8.9-7 10.3-3.9-1.4-7-5.7-7-10.3V5.5L12 3z"
+    <svg className="size-[15px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect
+        x="8"
+        y="8"
+        width="11"
+        height="11"
+        rx="2"
         stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
+        strokeWidth="1.8"
       />
       <path
-        d="M9 12l2 2 4-4.2"
+        d="M5 15.5V6.8C5 5.8 5.8 5 6.8 5h8.7"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.8"
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   )
 }
 
-function Guarantee({
-  icon,
-  label,
-}: Readonly<{ icon: ReactNode; label: string }>) {
+function CheckMark() {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span className="text-emerald-500">{icon}</span>
-      {label}
-    </span>
-  )
-}
-
-function NoDiskMark() {
-  return (
-    <svg className="size-[13px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg className="size-[15px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
-        d="M5 12.5l5 5 9-11"
+        d="M5 12.5l4.2 4L19 7.5"
         stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"

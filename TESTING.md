@@ -178,6 +178,30 @@ Current scenarios cover:
 - Lighter OpenCode coverage for basic streaming, bash tools, and context pressure.
 - Pi Code coverage for streaming JSON, bash tool calls, usage/cost accounting, and Together model-list vision metadata.
 
+## Live Models Check
+
+`packages/tests/src/livemodelscheck.test.ts` is the exhaustive real-inference model check. It is skipped by the normal suite unless `TOGETHERLINK_LIVE_MODELS_CHECK=1` is set, because it launches real Claude Code and Codex CLI sessions and calls Together for every curated model.
+
+Run it with:
+
+```bash
+pnpm -F @togetherlink/tests test:live-models-check
+```
+
+The check runs one concurrent case per harness/model/probe tuple. Default concurrency is 6 and can be changed with:
+
+```bash
+VITEST_MAX_CONCURRENCY=3 pnpm -F @togetherlink/tests test:live-models-check
+```
+
+For each curated `SELECTABLE_MODELS` entry it runs both harnesses through:
+
+- Hello-world completion.
+- Shell/tool call.
+- Subagent delegation (`spawn_agent`/collab tool calls for Codex, `Task`/`Agent` stream events for Claude).
+
+Claude also includes its Haiku-tier backend if it is not already in `SELECTABLE_MODELS`, because Claude Code may use that backend for built-in subagent work.
+
 ## GitHub Live Workflow
 
 `.github/workflows/live-agent-gauntlet.yml` runs the same real-inference suite on a daily schedule, on pushes to `main` that touch integration code, and by manual dispatch. It requires a repository secret named `TOGETHER_API_KEY`.

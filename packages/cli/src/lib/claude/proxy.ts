@@ -1253,7 +1253,7 @@ function withNativeToolSystemPrompt(messages: OpenAIMessage[], nativeTools: Nati
     ...nativeTools.map((tool) => `- ${tool.name}: call this for live web search. Always provide a concise non-empty query.`),
     "After tool results are returned, answer from the provided sources and include source URLs when relevant.",
   ].join("\n");
-  return [{ role: "system", content: prompt }, ...messages];
+  return mergeLeadingSystemMessages([{ role: "system", content: prompt }, ...messages]);
 }
 
 async function runExaSearch(input: unknown, tool: AnthropicTool, options: ClaudeProxyOptions): Promise<string> {
@@ -1347,18 +1347,16 @@ function trimSearchText(value: string): string {
 }
 
 function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDefinition): OpenAIMessage[] {
-  const messages: OpenAIMessage[] = [
-    {
-      role: "system",
-      content: targetModel
-        ? `${TOGETHERLINK_IDENTITY_PROMPT} Backend: ${targetModel.name} (${targetModel.id}).`
-        : TOGETHERLINK_IDENTITY_PROMPT,
-    },
+  const systemParts = [
+    targetModel
+      ? `${TOGETHERLINK_IDENTITY_PROMPT} Backend: ${targetModel.name} (${targetModel.id}).`
+      : TOGETHERLINK_IDENTITY_PROMPT,
   ];
   const system = stringifyAnthropicContent(body.system);
   if (system) {
-    messages.push({ role: "system", content: system });
+    systemParts.push(system);
   }
+  const messages: OpenAIMessage[] = [{ role: "system", content: systemParts.join("\n\n") }];
 
   for (const message of body.messages ?? []) {
     if (typeof message.content === "string") {
@@ -1403,6 +1401,22 @@ function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDef
   }
 
   return messages;
+}
+
+function mergeLeadingSystemMessages(messages: OpenAIMessage[]): OpenAIMessage[] {
+  const systemParts: string[] = [];
+  let index = 0;
+  while (index < messages.length && messages[index]?.role === "system") {
+    const content = messages[index]?.content;
+    if (typeof content === "string" && content.trim()) {
+      systemParts.push(content);
+    }
+    index += 1;
+  }
+  if (systemParts.length === 0) {
+    return messages.slice(index);
+  }
+  return [{ role: "system", content: systemParts.join("\n\n") }, ...messages.slice(index)];
 }
 
 function toAnthropicMessage(response: OpenAIChatResponse, model: string): Record<string, unknown> {

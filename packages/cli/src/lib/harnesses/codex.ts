@@ -1,4 +1,4 @@
-import { CODEX_DEFAULT_MODEL, CODEX_DEFAULT_MODEL_NAME, CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
+import { resolveCodexModel } from "../codex/defaults.js";
 import { runCodexTogether } from "../codex/core.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
@@ -27,18 +27,5 @@ export default defineHarness({
       process.exitCode = result.status;
     }
     return {};
-  },
-
-  async status(): Promise<HarnessResult> {
-    return {
-      payload: {
-        harness: HARNESS.CODEX,
-        provider: "local-responses-to-together-proxy",
-        currentModel: CODEX_DEFAULT_MODEL,
-        targetModel: CODEX_DEFAULT_MODEL,
-        modelName: CODEX_DEFAULT_MODEL_NAME,
-        supportedModels: CODEX_SUPPORTED_MODELS.map((model) => model.id).join(", "),
-      },
-    };
   },
 });

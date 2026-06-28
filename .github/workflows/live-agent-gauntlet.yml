@@ -12,6 +12,7 @@ on:
           - all
           - claude
           - codex
+          - live-models-check
           - opencode
           - pi
   schedule:
@@ -96,6 +97,9 @@ jobs:
               ;;
             codex)
               packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
+              ;;
+            live-models-check)
+              TOGETHERLINK_LIVE_MODELS_CHECK=1 VITEST_MAX_CONCURRENCY=6 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/livemodelscheck.test.ts
               ;;
             opencode)
               packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts

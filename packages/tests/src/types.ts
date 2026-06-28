@@ -15,6 +15,7 @@ export type CommandResult = {
   args: string[];
   cwd: string;
   status: number;
+  timedOut?: boolean;
   stdout: string;
   stderr: string;
 };

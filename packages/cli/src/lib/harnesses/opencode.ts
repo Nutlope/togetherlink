@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { OPENCODE_DEFAULT_MODEL, OPENCODE_DEFAULT_MODEL_NAME } from "../opencode/defaults.js";
+import { OPENCODE_DEFAULT_MODEL } from "../opencode/defaults.js";
 import { buildOpencodeConfigJson, buildOpencodeEnv } from "../opencode/core.js";
 import { resolveTogetherApiKey } from "../together-core.js";
 import { defineHarness } from "../harness-types.js";
@@ -68,17 +68,5 @@ export default defineHarness({
       process.exitCode = result.status;
     }
     return {};
-  },
-
-  async status(): Promise<HarnessResult> {
-    return {
-      payload: {
-        harness: HARNESS.OPENCODE,
-        provider: "together",
-        currentModel: OPENCODE_DEFAULT_MODEL,
-        targetModel: OPENCODE_DEFAULT_MODEL,
-        modelName: OPENCODE_DEFAULT_MODEL_NAME,
-      },
-    };
   },
 });

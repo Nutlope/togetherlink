@@ -102,6 +102,9 @@ async function currentScriptIdentity(): Promise<ScriptIdentity> {
 }
 
 function daemonMatchesCurrentScript(health: DaemonHealth, current: ScriptIdentity): boolean {
+  if (health.home !== null && health.home !== resolveTogetherlinkHome()) {
+    return false;
+  }
   if (health.scriptPath !== current.scriptPath) {
     return false;
   }

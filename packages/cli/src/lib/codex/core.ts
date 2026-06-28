@@ -14,6 +14,7 @@ import {
   localProxyAuthToken,
   daemonSessionUrl,
 } from "../daemon/launch.js";
+import { sendTelemetryEvent, randomSessionId } from "../telemetry.js";
 
 export type CodexLaunchOptions = {
   apiKey: string;
@@ -35,6 +36,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const debug = process.env.TOGETHERLINK_DEBUG === "1";
   const sessionId = randomLocalProxyToken();
   const authToken = await localProxyAuthToken();
+  const telemetrySessionId = randomSessionId();
   const { url: proxyUrl } = await ensureDaemon();
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
   const registration = {
@@ -55,6 +57,15 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   } catch (err) {
     throw new Error(`Could not register this Codex session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
+
+  const startedAt = Date.now();
+  void sendTelemetryEvent({
+    event: "session_started",
+    sessionId: telemetrySessionId,
+    agent: "codex",
+    initialModel: modelId,
+    startedAt,
+  });
 
   process.stderr.write(`togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`);
   if (debug) {
@@ -90,7 +101,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     child.on("exit", (status, signal) => resolve({ status, signal }));
   });
 
-  await printSessionCost(proxyUrl, sessionId);
+  const usage = await printSessionCost(proxyUrl, sessionId);
   keepalive.stop();
   try {
     await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
@@ -98,6 +109,21 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     // best-effort
   }
   catalog.cleanup();
+
+  const endedAt = Date.now();
+  void sendTelemetryEvent({
+    event: "session_ended",
+    sessionId: telemetrySessionId,
+    agent: "codex",
+    initialModel: modelId,
+    finalModel: modelId,
+    startedAt,
+    endedAt,
+    durationMs: endedAt - startedAt,
+    ...(usage ? { usage } : {}),
+    ...(typeof result.status === "number" ? { exitCode: result.status } : {}),
+    ...(result.signal ? { signal: result.signal } : {}),
+  });
 
   return result;
 }
@@ -164,18 +190,23 @@ function codexArgsWithoutModelOverrides(args: string[]): string[] {
   return sanitized;
 }
 
-async function printSessionCost(proxyUrl: string, authToken: string): Promise<void> {
+async function printSessionCost(proxyUrl: string, authToken: string): Promise<{ promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number } | undefined> {
   try {
     const response = await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`);
     if (response.ok) {
-      const { summary } = (await response.json()) as { summary?: string };
+      const { summary, totals } = (await response.json()) as {
+        summary?: string;
+        totals?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
+      };
       if (summary) {
         process.stderr.write(`${summary}\n`);
       }
+      return totals;
     }
   } catch {
     // best-effort
   }
+  return undefined;
 }
 
 function randomLocalProxyToken(): string {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { CODEX_DEFAULT_MODEL, CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
+import { CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
 import { resolveTogetherApiKey } from "../together-core.js";
@@ -144,19 +144,5 @@ export default defineHarness({
       process.exitCode = result.status;
     }
     return {};
-  },
-
-  async status(): Promise<HarnessResult> {
-    return {
-      payload: {
-        harness: HARNESS.PI,
-        provider: PI_PROVIDER_ID,
-        currentModel: CODEX_DEFAULT_MODEL,
-        targetModel: CODEX_DEFAULT_MODEL,
-        supportedModels: PI_SUPPORTED_MODELS,
-        sessionMode: "persistent",
-        configMode: "ephemeral",
-      },
-    };
   },
 });
