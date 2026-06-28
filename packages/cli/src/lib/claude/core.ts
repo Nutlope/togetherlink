@@ -226,7 +226,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   // The daemon owns the tracker (keyed by our token); fetch its summary. Goes to
   // stderr so it never corrupts claude's stdout. Best-effort: a dead/unreachable
   // daemon (or a timeout) just means no cost line, never a broken command.
-  const usage = await printSessionCost(proxyUrl, sessionId);
+  const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
   keepalive.stop();
   // Deregister so the daemon doesn't keep a finished session's tracker around.
   // (A kill -9 of this launcher skips this; the daemon reaps orphaned sessions
@@ -248,6 +248,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     endedAt,
     durationMs: endedAt - startedAt,
     ...(usage ? { usage } : {}),
+    ...(usageByModel && usageByModel.length > 0 ? { usageByModel } : {}),
     ...(typeof result.status === "number" ? { exitCode: result.status } : {}),
     ...(result.signal ? { signal: result.signal } : {}),
   });
@@ -255,24 +256,30 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   return result;
 }
 
-async function printSessionCost(proxyUrl: string, authToken: string): Promise<{ promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number } | undefined> {
+type SessionCostResult = {
+  usage?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
+  usageByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
+};
+
+async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
   try {
     const response = await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`);
     if (response.ok) {
-      const { summary, totals } = (await response.json()) as {
+      const { summary, totals, totalsByModel } = (await response.json()) as {
         summary?: string;
         totals?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
+        totalsByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
       };
       if (summary) {
         process.stderr.write(`${summary}\n`);
       }
-      return totals;
+      return { ...(totals ? { usage: totals } : {}), ...(totalsByModel ? { usageByModel: totalsByModel } : {}) };
     }
   } catch {
     // Daemon gone, unreachable, or timed out: skip the cost line rather than
     // fail the command (or hang it — daemonFetch bounds the wait).
   }
-  return undefined;
+  return {};
 }
 
 function randomLocalProxyToken(): string {

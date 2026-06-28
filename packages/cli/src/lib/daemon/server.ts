@@ -274,7 +274,11 @@ async function handleDaemonRequest(
       writeAnthropicError(res, 404, "not_found_error", "Unknown session token.");
       return;
     }
-    writeJson(res, 200, { summary: state.costTracker.summarize(), totals: state.costTracker.totals });
+    writeJson(res, 200, {
+      summary: state.costTracker.summarize(),
+      totals: state.costTracker.totals,
+      totalsByModel: state.costTracker.totalsByModel,
+    });
     return;
   }
 

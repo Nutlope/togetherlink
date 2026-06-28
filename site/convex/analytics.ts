@@ -64,13 +64,27 @@ export const getDashboardSummary = query({
         agentTotals.costUsd += event.costUsd ?? 0
         tokensByAgent.set(agent, agentTotals)
 
-        const model = event.model ?? event.finalModel ?? event.initialModel ?? 'unknown'
-        const modelTotals = tokensByModel.get(model) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 }
-        modelTotals.promptTokens += event.promptTokens ?? 0
-        modelTotals.cachedTokens += event.cachedTokens ?? 0
-        modelTotals.completionTokens += event.completionTokens ?? 0
-        modelTotals.costUsd += event.costUsd ?? 0
-        tokensByModel.set(model, modelTotals)
+        // Prefer the real per-model breakdown reported by the proxy (accounts
+        // for in-session model switches). Older CLI versions don't send it, so
+        // fall back to the launch-time model as a best-effort guess.
+        if (event.usageByModel && event.usageByModel.length > 0) {
+          for (const entry of event.usageByModel) {
+            const modelTotals = tokensByModel.get(entry.model) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 }
+            modelTotals.promptTokens += entry.promptTokens ?? 0
+            modelTotals.cachedTokens += entry.cachedTokens ?? 0
+            modelTotals.completionTokens += entry.completionTokens ?? 0
+            modelTotals.costUsd += entry.costUsd ?? 0
+            tokensByModel.set(entry.model, modelTotals)
+          }
+        } else {
+          const model = event.model ?? event.finalModel ?? event.initialModel ?? 'unknown'
+          const modelTotals = tokensByModel.get(model) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 }
+          modelTotals.promptTokens += event.promptTokens ?? 0
+          modelTotals.cachedTokens += event.cachedTokens ?? 0
+          modelTotals.completionTokens += event.completionTokens ?? 0
+          modelTotals.costUsd += event.costUsd ?? 0
+          tokensByModel.set(model, modelTotals)
+        }
       }
 
       osCounts.set(event.os, (osCounts.get(event.os) ?? 0) + 1)

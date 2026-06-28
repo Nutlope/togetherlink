@@ -17,6 +17,8 @@ export type TelemetryUsage = {
   costUsd?: number;
 };
 
+export type TelemetryModelUsage = TelemetryUsage & { model: string };
+
 export type TelemetryEvent = {
   sessionId?: string;
   event: TelemetryEventType;
@@ -28,6 +30,10 @@ export type TelemetryEvent = {
   endedAt?: number;
   durationMs?: number;
   usage?: TelemetryUsage;
+  // Per-model usage breakdown for the session, e.g. when Claude Code's
+  // /model picker switches tiers mid-session without relaunching. Falls back
+  // to initialModel/finalModel on the backend when absent (older CLI builds).
+  usageByModel?: TelemetryModelUsage[];
   exitCode?: number;
   signal?: string;
   errorKind?: string;

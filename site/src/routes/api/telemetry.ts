@@ -31,6 +31,13 @@ interface TelemetryPayload {
     completionTokens?: number
     costUsd?: number
   }
+  usageByModel?: Array<{
+    model: string
+    promptTokens?: number
+    cachedTokens?: number
+    completionTokens?: number
+    costUsd?: number
+  }>
   exitCode?: number
   signal?: string
   errorKind?: string
@@ -100,6 +107,7 @@ export const Route = createFileRoute('/api/telemetry')({
             cachedTokens: body.usage?.cachedTokens,
             completionTokens: body.usage?.completionTokens,
             costUsd: body.usage?.costUsd,
+            usageByModel: body.usageByModel,
             exitCode: body.exitCode,
             signal: body.signal,
             errorKind: body.errorKind,

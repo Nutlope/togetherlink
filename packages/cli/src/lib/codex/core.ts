@@ -101,7 +101,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     child.on("exit", (status, signal) => resolve({ status, signal }));
   });
 
-  const usage = await printSessionCost(proxyUrl, sessionId);
+  const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
   keepalive.stop();
   try {
     await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
@@ -121,6 +121,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     endedAt,
     durationMs: endedAt - startedAt,
     ...(usage ? { usage } : {}),
+    ...(usageByModel && usageByModel.length > 0 ? { usageByModel } : {}),
     ...(typeof result.status === "number" ? { exitCode: result.status } : {}),
     ...(result.signal ? { signal: result.signal } : {}),
   });
@@ -190,23 +191,29 @@ function codexArgsWithoutModelOverrides(args: string[]): string[] {
   return sanitized;
 }
 
-async function printSessionCost(proxyUrl: string, authToken: string): Promise<{ promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number } | undefined> {
+type SessionCostResult = {
+  usage?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
+  usageByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
+};
+
+async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
   try {
     const response = await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`);
     if (response.ok) {
-      const { summary, totals } = (await response.json()) as {
+      const { summary, totals, totalsByModel } = (await response.json()) as {
         summary?: string;
         totals?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
+        totalsByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
       };
       if (summary) {
         process.stderr.write(`${summary}\n`);
       }
-      return totals;
+      return { ...(totals ? { usage: totals } : {}), ...(totalsByModel ? { usageByModel: totalsByModel } : {}) };
     }
   } catch {
     // best-effort
   }
-  return undefined;
+  return {};
 }
 
 function randomLocalProxyToken(): string {

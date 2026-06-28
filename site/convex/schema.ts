@@ -21,6 +21,17 @@ export default defineSchema({
     cachedTokens: v.optional(v.number()),
     completionTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
+    usageByModel: v.optional(
+      v.array(
+        v.object({
+          model: v.string(),
+          promptTokens: v.optional(v.number()),
+          cachedTokens: v.optional(v.number()),
+          completionTokens: v.optional(v.number()),
+          costUsd: v.optional(v.number()),
+        }),
+      ),
+    ),
     exitCode: v.optional(v.number()),
     signal: v.optional(v.string()),
     errorKind: v.optional(v.string()),

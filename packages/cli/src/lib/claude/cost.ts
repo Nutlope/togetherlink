@@ -40,12 +40,20 @@ export type TokenUsage = {
   costUsd: number;
 };
 
+export type ModelTokenUsage = TokenUsage & { model: string };
+
 export class CostTracker {
   private readonly defaultMainModel: ModelDefinition;
   private promptTokens = 0;
   private cachedTokens = 0;
   private completionTokens = 0;
   private costUsd = 0;
+  // Per-model breakdown, keyed by the real Together model id used for each
+  // call. addUsage already resolves the actual model per request (it can
+  // differ from the session's launch-time model when Claude Code's own
+  // /model picker switches tiers without relaunching), so this is the only
+  // place that knows the true usage split — the flat totals above discard it.
+  private readonly byModel = new Map<string, TokenUsage>();
   // Vision sub-call spend is tracked separately so the summary can show it
   // distinctly and so we never mix GLM-5.2 rates with vision-model rates.
   private visionCalls = 0;
@@ -100,6 +108,14 @@ export class CostTracker {
     this.cachedTokens += cached;
     this.completionTokens += completionTokens;
     this.costUsd += cost;
+
+    const bucket = this.byModel.get(model.id) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 };
+    bucket.promptTokens += promptTokens;
+    bucket.cachedTokens += cached;
+    bucket.completionTokens += completionTokens;
+    bucket.costUsd += cost;
+    this.byModel.set(model.id, bucket);
+
     return cost;
   }
 
@@ -119,6 +135,13 @@ export class CostTracker {
     this.visionCompletionTokens += completionTokens;
     this.visionCostUsd += cost;
     this.costUsd += cost;
+
+    const bucket = this.byModel.get(model) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 };
+    bucket.promptTokens += promptTokens;
+    bucket.completionTokens += completionTokens;
+    bucket.costUsd += cost;
+    this.byModel.set(model, bucket);
+
     return cost;
   }
 
@@ -132,6 +155,10 @@ export class CostTracker {
     this.completionTokens = totals.completionTokens ?? 0;
     this.costUsd = totals.costUsd ?? 0;
     this.externalSummary = externalSummary;
+    // Hydration restores a flat snapshot (e.g. daemon restart recovery), which
+    // has no per-model breakdown. Fold it into the default model's bucket
+    // rather than losing it from the breakdown entirely.
+    this.byModel.set(this.defaultMainModel.id, { ...this.totals });
     this.beginRequest();
   }
 
@@ -142,6 +169,11 @@ export class CostTracker {
       completionTokens: this.completionTokens,
       costUsd: this.costUsd,
     };
+  }
+
+  /** Per-model usage breakdown, e.g. when Claude Code's /model picker switches tiers mid-session. */
+  get totalsByModel(): ModelTokenUsage[] {
+    return Array.from(this.byModel.entries()).map(([model, usage]) => ({ model, ...usage }));
   }
 
   get requestDelta(): TokenUsage {
