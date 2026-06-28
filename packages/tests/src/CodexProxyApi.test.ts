@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2, MINIMAX_M3, QWEN_3_5_9B } from "@togetherlink/models";
+import { GLM_5_2, MINIMAX_M3, QWEN_3_5_9B, QWEN_3_7_MAX } from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
@@ -807,6 +807,46 @@ describe("Codex Responses proxy tool compatibility", () => {
     const upstream = requests[0] as {
       messages: Array<{ role: string; content?: unknown }>;
     };
+    expect(upstream.messages.at(-1)).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Describe this." },
+        { type: "image_url", image_url: { url: "data:image/png;base64,abc123", detail: "high" } },
+      ],
+    });
+  });
+
+  test("routes Desktop per-turn vision model selections instead of the session default", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push(JSON.parse(String(init?.body)));
+      return jsonResponse({
+        choices: [{ message: { content: "I can see the image." } }],
+      });
+    }));
+
+    await postResponses({
+      model: QWEN_3_7_MAX.id,
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "Describe this." },
+            { type: "input_image", image_url: "data:image/png;base64,abc123", detail: "high" },
+          ],
+        },
+      ],
+    });
+
+    const upstream = requests[0] as {
+      model?: string;
+      messages: Array<{ role: string; content?: unknown }>;
+    };
+    expect(upstream.model).toBe(QWEN_3_7_MAX.id);
     expect(upstream.messages.at(-1)).toEqual({
       role: "user",
       content: [

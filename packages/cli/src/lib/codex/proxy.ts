@@ -592,23 +592,25 @@ function toChatPayload(
 
 function resolveCodexRequestModel(body: ResponsesRequest, options: CodexProxyOptions): ResolvedCodexRequestModel {
   const requestedModelId = body.model ?? options.modelId;
-  if (!isCodexMemoryRequest(body, requestedModelId)) {
+  if (isCodexMemoryRequest(body, requestedModelId)) {
+    const configured = process.env[CODEX_MEMORY_MODEL_ENV]?.trim();
+    const configuredModel = configured ? findModelById(configured) : undefined;
+    const definition = configuredModel ?? MINIMAX_M3;
     return {
       requestedModelId,
-      targetModelId: options.targetModelId,
-      definition: options.modelDefinition,
-      memory: false,
+      targetModelId: definition.id,
+      definition,
+      memory: true,
     };
   }
 
-  const configured = process.env[CODEX_MEMORY_MODEL_ENV]?.trim();
-  const configuredModel = configured ? findModelById(configured) : undefined;
-  const definition = configuredModel ?? MINIMAX_M3;
+  const requestedModel = findModelById(requestedModelId);
+  const definition = requestedModel ?? options.modelDefinition;
   return {
     requestedModelId,
     targetModelId: definition.id,
     definition,
-    memory: true,
+    memory: false,
   };
 }
 
