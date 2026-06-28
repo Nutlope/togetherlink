@@ -356,6 +356,8 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(requests[0]?.body.stream).toBe(true);
     expect(response).toContain("response.output_text.delta");
+    expect(response).toContain('"sequence_number":');
+    expect(response).toContain("response.content_part.done");
     expect(response).toContain("response.completed");
   });
 
@@ -383,6 +385,8 @@ describe("Codex Responses proxy tool compatibility", () => {
     const completed = timeline.find((entry) => entry.text.includes("response.completed"));
     expect(firstDelta?.atMs).toBeDefined();
     expect(completed?.atMs).toBeDefined();
+    expect(timeline.some((entry) => entry.text.includes("response.in_progress"))).toBe(true);
+    expect(timeline.some((entry) => entry.text.includes("response.content_part.done"))).toBe(true);
     expect(firstDelta!.atMs).toBeLessThan(completed!.atMs);
     expect(completed!.atMs - firstDelta!.atMs).toBeGreaterThanOrEqual(50);
   });

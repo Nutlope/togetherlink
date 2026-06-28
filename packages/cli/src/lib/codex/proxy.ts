@@ -175,6 +175,8 @@ type StreamOutputState = {
   text: string;
 };
 
+const responseSequenceNumbers = new WeakMap<ServerResponse, number>();
+
 type StreamTurnResult =
   | {
       ok: true;
@@ -1152,8 +1154,21 @@ async function streamResponseFromTogether(
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
+  res.flushHeaders();
+  res.socket?.setNoDelay(true);
   writeResponsesSse(res, "response.created", {
     type: "response.created",
+    response: {
+      id: responseId,
+      object: "response",
+      created_at: Math.floor(Date.now() / 1000),
+      status: "in_progress",
+      model: body.model ?? options.modelId,
+      output: [],
+    },
+  });
+  writeResponsesSse(res, "response.in_progress", {
+    type: "response.in_progress",
     response: {
       id: responseId,
       object: "response",
@@ -1474,6 +1489,13 @@ function completeOpenOutputItems(res: ServerResponse, outputState: StreamOutputS
       content_index: 0,
       text: outputState.text,
     });
+    writeResponsesSse(res, "response.content_part.done", {
+      type: "response.content_part.done",
+      item_id: outputState.textItemId,
+      output_index: outputState.textOutputIndex,
+      content_index: 0,
+      part: { type: "output_text", text: outputState.text, annotations: [] },
+    });
     writeResponsesSse(res, "response.output_item.done", {
       type: "response.output_item.done",
       output_index: outputState.textOutputIndex,
@@ -1791,8 +1813,14 @@ function sseEventPayload(rawEvent: string): string {
 }
 
 function writeResponsesSse(res: ServerResponse, event: string, data: unknown): void {
+  const sequenceNumber = responseSequenceNumbers.get(res) ?? 0;
+  responseSequenceNumbers.set(res, sequenceNumber + 1);
+  const payload =
+    data && typeof data === "object" && !Array.isArray(data) && !("sequence_number" in data)
+      ? { ...(data as Record<string, unknown>), sequence_number: sequenceNumber }
+      : data;
   res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function toResponsesUsage(usage: ChatResponse["usage"]): Record<string, unknown> {
