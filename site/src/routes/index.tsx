@@ -36,7 +36,7 @@ const features = [
     accent: undefined,
   },
   {
-    title: 'Codex',
+    title: 'Codex CLI',
     tag: 'Beta',
     tagTone: 'beta',
     body: (
@@ -70,7 +70,7 @@ const features = [
 const heroTools = [
   { name: 'OpenCode', command: 'topencode', icon: <OpenCodeMark /> },
   { name: 'Claude Code', command: 'tclaude', icon: <ClaudeMark /> },
-  { name: 'Codex', command: 'tcodex', icon: <CodexMark /> },
+  { name: 'Codex CLI', command: 'tcodex', icon: <CodexMark /> },
   { name: 'Pi Code', command: 'tpi', icon: <PiMark /> },
 ]
 
@@ -92,6 +92,21 @@ const explicitCommands = [
   'togetherlink claude',
   'togetherlink codex',
   'togetherlink pi',
+]
+
+const codexAppCommands = [
+  {
+    command: 'togetherlink codex-app',
+    label: 'Configure',
+    description:
+      'Patches Codex Desktop config to route through Together. The change stays active until you restore.',
+  },
+  {
+    command: 'togetherlink codex-app --restore',
+    label: 'Restore',
+    description:
+      'Brings back your OpenAI / ChatGPT subscription profile and removes the togetherlink config.',
+  },
 ]
 
 export const Route = createFileRoute('/')({
@@ -235,8 +250,8 @@ function Home() {
           in the agents you already run.
         </h1>
         <p className="mx-auto mt-5 mb-9 max-w-[560px] text-pretty text-[19px] leading-normal text-muted">
-          Install once, then launch OpenCode, Claude Code, Codex, or Pi Code
-          with short commands. TogetherLink injects Together settings for that
+          Install once, then launch OpenCode, Claude Code, Codex CLI, or Pi
+          Code with short commands. TogetherLink injects Together settings for that
           run only, so your normal tool configs stay clean.
         </p>
 
@@ -350,6 +365,87 @@ function Home() {
       </section>
 
       <section className="mx-auto mt-2 mb-20 max-w-[880px]">
+        <div className="overflow-hidden rounded-[16px] border border-amber-300 bg-amber-50/60 shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(146,64,14,.06)]">
+          <div className="flex flex-wrap items-center gap-3 border-b border-amber-300/70 px-[22px] pt-6 pb-5 max-[520px]:px-5">
+            <span className="inline-flex size-[42px] shrink-0 items-center justify-center rounded-[10px] border border-amber-300 bg-white text-ink shadow-[inset_0_1px_0_rgba(255,255,255,.72)]">
+              <CodexMark />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5">
+                <h2 className="m-0 text-[19px] font-semibold text-ink">
+                  Codex Desktop App
+                </h2>
+                <span className="inline-flex rotate-[-1.5deg] items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-[9px] py-1 text-[11px] font-semibold uppercase tracking-[.05em] text-amber-900 shadow-[0_1px_0_rgba(255,255,255,.85)_inset,0_1px_2px_rgba(146,64,14,.12)]">
+                  <span className="size-1.5 rounded-full bg-amber-500" />
+                  Alpha
+                </span>
+              </div>
+              <p className="m-0 mt-1.5 text-[14.5px] leading-normal text-muted">
+                Also works with the Codex desktop app. Unlike the per-run CLI
+                wrappers above, this persistently patches Codex Desktop config
+                so the app talks to Together. When you want your OpenAI
+                subscription back, run the restore command.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-px bg-amber-300/70 sm:grid-cols-2">
+            {codexAppCommands.map((entry) => (
+              <div
+                key={entry.command}
+                className="flex flex-col gap-2 bg-amber-50/60 px-[22px] py-5 max-[520px]:px-5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12.5px] font-semibold uppercase tracking-[.05em] text-amber-900/80">
+                    {entry.label}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyExplicitCommand(entry.command)}
+                  aria-label={`Copy ${entry.command}`}
+                  className="group flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-left font-mono text-[13px] text-ink transition hover:border-amber-500 active:scale-[.98] data-[copied=true]:border-ink data-[copied=true]:bg-ink data-[copied=true]:text-white"
+                  data-copied={copiedExplicitCommand === entry.command}
+                >
+                  <span className="select-none text-faint group-data-[copied=true]:text-white/70">
+                    $
+                  </span>
+                  <code className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">
+                    {entry.command}
+                  </code>
+                  <span
+                    className="inline-flex size-4 shrink-0 items-center justify-center text-faint data-[copied=true]:text-white"
+                    data-copied={copiedExplicitCommand === entry.command}
+                    aria-hidden="true"
+                  >
+                    {copiedExplicitCommand === entry.command ? (
+                      <CheckMark />
+                    ) : (
+                      <CopyMark />
+                    )}
+                  </span>
+                </button>
+                <p className="m-0 text-[13px] leading-snug text-muted">
+                  {entry.description}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-amber-300/70 px-[22px] py-3.5 text-[12.5px] text-muted max-[520px]:px-5">
+            <span className="font-medium text-amber-900/80">
+              Heads up
+            </span>
+            <span>
+              Configure stays active until you restore. Backups live under{' '}
+              <code className="rounded-md border border-amber-300 bg-white px-[7px] py-0.5 font-mono text-[12px] text-ink">
+                ~/.togetherlink/backup/codex-app/
+              </code>
+              .
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto mt-2 mb-20 max-w-[880px]">
         <h2 className="m-0 mb-5 text-xl font-semibold text-ink">Get started</h2>
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-line-strong bg-code px-3.5 py-2.5 font-mono text-[13px] text-ink shadow-[0_1px_2px_rgba(10,10,10,.04)] max-[520px]:grid max-[520px]:grid-cols-[auto_1fr] max-[520px]:items-start">
           <span className="select-none text-faint">$</span>
@@ -378,14 +474,17 @@ function Home() {
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, or{' '}
-          <code>tcodex</code>, or <code>tpi</code>. On first launch it asks
-          once for your Together API key - press Enter to skip and add it later.
+          <code>tcodex</code>, or <code>tpi</code>. For the Codex desktop app
+          run <code>togetherlink codex-app</code> (alpha), and restore it with{' '}
+          <code>togetherlink codex-app --restore</code>. On first launch it
+          asks once for your Together API key - press Enter to skip and add it
+          later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date
           on its own. Change your mind? Just stop using it - no agent config was
-          saved, so your subscriptions and your OpenCode/Claude Code/Codex/Pi Code
-          config are untouched.
+          saved, so your subscriptions and your OpenCode/Claude Code/Codex
+          CLI/Pi Code config are untouched.
         </Step>
         <div className="border-t border-line pt-[18px]">
           <p className="m-0 text-[15px] leading-relaxed text-muted">
@@ -449,12 +548,12 @@ function Home() {
           </a>
           <a
             className="transition-colors hover:text-ink"
-            href="https://github.com/openai/codex"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Codex
-          </a>
+           href="https://github.com/openai/codex"
+           target="_blank"
+           rel="noopener noreferrer"
+         >
+            Codex CLI
+         </a>
         </div>
         <p className="m-0 text-[13px]">{version}</p>
       </footer>
