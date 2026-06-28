@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useSession } from '@tanstack/react-start/server'
 import { ConvexHttpClient } from 'convex/browser'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../../convex/_generated/api'
 
 type DashboardSummary = Awaited<ReturnType<typeof fetchSummary>>
@@ -11,6 +11,13 @@ async function dashboardSession() {
   return useSession<{ authed?: boolean }>({
     name: 'togetherlink-dashboard',
     password: process.env.DASHBOARD_SESSION_SECRET ?? 'togetherlink-dashboard-dev-secret-change-me',
+    maxAge: 60 * 60 * 24 * 30,
+    cookie: {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+    },
   })
 }
 
@@ -109,6 +116,12 @@ function DashboardRoute() {
   if (!data && !loading) {
     void loadData()
   }
+
+  useEffect(() => {
+    if (!isAuthed) return
+    const interval = setInterval(() => void loadData(), 15_000)
+    return () => clearInterval(interval)
+  }, [isAuthed])
 
   return (
     <div style={{ maxWidth: 960, margin: '2rem auto', fontFamily: 'monospace' }}>
