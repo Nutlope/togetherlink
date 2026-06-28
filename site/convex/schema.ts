@@ -32,6 +32,7 @@ export default defineSchema({
         }),
       ),
     ),
+    metadata: v.optional(v.any()),
     exitCode: v.optional(v.number()),
     signal: v.optional(v.string()),
     errorKind: v.optional(v.string()),

@@ -24,10 +24,12 @@ const MAX_TRACES_PER_SESSION = 200;
  *   togetherai` adapter knows Together's URL, and OpenCode handles images
  *   natively). The daemon only holds a `CostTracker` the launcher self-reports
  *   into at exit (via `opencode stats`), so the dashboard can show it.
- * - `codex`: the daemon PROXIES OpenAI Responses-shaped Codex traffic and
+ * - `codex`: the daemon PROXIES OpenAI Responses-shaped Codex CLI traffic and
  *   translates it to Together chat completions.
+ * - `codex-app`: same proxy path as `codex`, but registered by the persistent
+ *   Codex Desktop app integration so dashboard/telemetry can distinguish it.
  */
-export type AgentId = "claude" | "opencode" | "codex";
+export type AgentId = "claude" | "opencode" | "codex" | "codex-app";
 
 /**
  * One live coding-agent session, keyed by the random auth token the launcher
@@ -313,7 +315,7 @@ function isAlive(pid: number): boolean {
 export const sessions = new SessionRegistry();
 
 /** Agents whose traffic the daemon proxies (vs. self-reporting cost). */
-const PROXIED_AGENTS = new Set<AgentId>(["claude", "codex"]);
+const PROXIED_AGENTS = new Set<AgentId>(["claude", "codex", "codex-app"]);
 
 export function isProxiedAgent(agent: AgentId): boolean {
   return PROXIED_AGENTS.has(agent);

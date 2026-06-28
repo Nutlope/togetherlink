@@ -34,6 +34,7 @@ export type TelemetryEvent = {
   // /model picker switches tiers mid-session without relaunching. Falls back
   // to initialModel/finalModel on the backend when absent (older CLI builds).
   usageByModel?: TelemetryModelUsage[];
+  metadata?: Record<string, unknown>;
   exitCode?: number;
   signal?: string;
   errorKind?: string;

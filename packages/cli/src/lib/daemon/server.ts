@@ -351,7 +351,7 @@ async function handleDaemonRequest(
     return;
   }
 
-  if (session.agent === "codex") {
+  if (session.agent === "codex" || session.agent === "codex-app") {
     try {
       await handleCodexProxyRequest(req, res, session.options);
     } finally {
@@ -429,7 +429,7 @@ function writeDashboardHtml(res: ServerResponse): void {
     .agent-icon { display: inline-flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); }
     .agent-icon svg { width: 20px; height: 20px; display: block; }
     .agent-icon[data-agent=claude] { color: var(--claude); }
-    .agent-icon[data-agent=codex] { color: var(--codex); }
+    .agent-icon[data-agent=codex], .agent-icon[data-agent="codex-app"] { color: var(--codex); }
     .agent-icon[data-agent=opencode] { color: var(--opencode); }
     .session-name { min-width: 0; }
     .session-name h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -757,7 +757,7 @@ function AgentIcon({ agent }) {
       )
     );
   }
-  if (agent === "codex") {
+  if (agent === "codex" || agent === "codex-app") {
     return e("span", { className: "agent-icon", "data-agent": agent, title: agentLabel[agent] },
       e("svg", { viewBox: "0 0 24 24", fill: "none", "aria-hidden": "true" },
         e("path", { d: "M4.5 7.5 12 3l7.5 4.5v9L12 21l-7.5-4.5v-9Z", stroke: "currentColor", strokeWidth: "1.7", strokeLinejoin: "round" }),

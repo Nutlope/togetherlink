@@ -78,7 +78,11 @@ export async function registerCodexSession(context: TestContext, daemon: TestDae
   return await registerSession(context, daemon, "codex");
 }
 
-async function registerSession(context: TestContext, daemon: TestDaemon, agent: "claude" | "codex"): Promise<string> {
+export async function registerCodexAppSession(context: TestContext, daemon: TestDaemon): Promise<string> {
+  return await registerSession(context, daemon, "codex-app");
+}
+
+async function registerSession(context: TestContext, daemon: TestDaemon, agent: "claude" | "codex" | "codex-app"): Promise<string> {
   const apiKey = await resolveTogetherApiKey(context.repoRoot);
   const token = `${agent}-context-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const response = await fetch(`${daemon.url}/internal/sessions`, {

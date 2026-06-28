@@ -50,7 +50,7 @@ async function daemonProfile(): Promise<void> {
     throw new Error(`Daemon dashboard returned HTTP ${response.status}.`);
   }
   const body = (await response.json()) as DashboardResponse;
-  const sessions = (body.sessions ?? []).filter((session) => session.agent === "codex");
+  const sessions = (body.sessions ?? []).filter((session) => session.agent === "codex" || session.agent === "codex-app");
   const traces = sessions
     .flatMap((session) => (session.traces ?? []).map((trace) => ({ trace, session })))
     .sort((a, b) => b.trace.startedAt - a.trace.startedAt);

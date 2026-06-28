@@ -13,6 +13,7 @@ import { resolveTogetherApiKey } from "./together-core.js";
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
 const CODEX_APP_CONFIG_MARKER_START = "# >>> togetherlink codex-app alpha >>>";
 const CODEX_APP_CONFIG_MARKER_END = "# <<< togetherlink codex-app alpha <<<";
+const CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND = true;
 const BACKUP_MANIFEST = "latest.json";
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +61,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   await registerDaemonSession(proxyUrl, {
     token: sessionToken,
     authToken,
-    agent: "codex",
+    agent: "codex-app",
     apiKey,
     modelLabel: `${selectedModel.definition.name} (Codex App alpha)`,
     modelId: selectedModel.definition.id,
@@ -68,13 +69,6 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
     ...(process.env.TOGETHERLINK_DEBUG === "1" ? { debug: true } : {}),
-  });
-  void sendTelemetryEvent({
-    event: "session_started",
-    sessionId: telemetrySessionId,
-    agent: "codex-app",
-    initialModel: selectedModel.definition.id,
-    startedAt,
   });
 
   const configPath = codexConfigPath(ctx.home);
@@ -104,6 +98,27 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   });
 
   const launch = await launchCodexApp({ reason: "configured", openIfClosed: true });
+  void sendTelemetryEvent({
+    event: "session_started",
+    sessionId: telemetrySessionId,
+    agent: "codex-app",
+    initialModel: selectedModel.definition.id,
+    startedAt,
+    metadata: {
+      integration: "codex-app",
+      providerId: CODEX_APP_PROVIDER_ID,
+      providerAuthWorkaround: CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND,
+      workaroundIssue: "openai/codex#10867",
+      catalogModelCount: codexAppModelCatalogCount(),
+      proxySessionRegistered: true,
+      launchAttempted: launch.launchAttempted,
+      launched: launch.launched,
+      wasRunning: launch.wasRunning,
+      restarted: launch.restarted,
+      restartDeclined: launch.restartDeclined,
+      restartUnsupported: launch.restartUnsupported,
+    },
+  });
   const intro = [
     "Codex App profile changed to Togetherlink. (alpha)",
     `Model: ${selectedModel.definition.name}`,
@@ -157,7 +172,7 @@ export function buildCodexAppConfig(
     "# Setting this true is a Desktop workaround for custom providers; the",
     "# actual model requests still go to the local Togetherlink base_url above.",
     "# See https://github.com/openai/codex/issues/10867",
-    'requires_openai_auth = true',
+    `requires_openai_auth = ${CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND ? "true" : "false"}`,
     CODEX_APP_CONFIG_MARKER_END,
     "",
   ].join("\n");
@@ -257,6 +272,15 @@ async function writePersistentModelCatalog(home: string): Promise<string> {
 
 export function codexAppModelCatalogJson(): string {
   return codexModelCatalogJson();
+}
+
+function codexAppModelCatalogCount(): number {
+  try {
+    const parsed = JSON.parse(codexAppModelCatalogJson()) as { models?: unknown[] };
+    return Array.isArray(parsed.models) ? parsed.models.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 type CodexAppLaunchResult = {
