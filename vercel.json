@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "tanstack-start",
   "buildCommand": "pnpm --dir site exec convex deploy --cmd-url-env-var-name CONVEX_URL --cmd 'pnpm --dir .. build:site'",
-  "outputDirectory": "site/dist/client",
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [
