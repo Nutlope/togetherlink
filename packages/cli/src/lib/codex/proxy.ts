@@ -1170,21 +1170,6 @@ async function streamResponseFromTogether(
     text: "",
   };
 
-  if (toolTranslation.nativeTools.length > 0 && !codexUpstreamStreamingEnabled()) {
-    return completeNativeToolsWithoutStreaming(
-      res,
-      body,
-      options,
-      payload,
-      toolTranslation,
-      modelDefinition,
-      outputState,
-      responseId,
-      signal,
-      hooks,
-    );
-  }
-
   if (toolTranslation.nativeTools.length > 0) {
     return streamResponseWithNativeTools(
       res,
@@ -1370,24 +1355,8 @@ async function streamResponseWithNativeTools(
         hooks,
       );
     } catch (err) {
-      if (err instanceof SseIdleTimeoutError && outputState.textItemId === undefined) {
-        debugLog(options, "native tool stream went idle; falling back to non-streaming responses completion", {
-          timeoutMs: err.timeoutMs,
-          model: payload.model,
-          toolCount: toolTranslation.mappings.size,
-        });
-        return completeNativeToolsWithoutStreaming(
-          res,
-          body,
-          options,
-          payload,
-          toolTranslation,
-          modelDefinition,
-          outputState,
-          responseId,
-          signal,
-          hooks,
-        );
+      if (err instanceof SseIdleTimeoutError) {
+        return failStream(res, responseId, 504, err.message);
       }
       throw err;
     }
@@ -1452,60 +1421,6 @@ async function streamResponseWithNativeTools(
     delta: fallback,
   });
   return completeStreamResponse(res, body, options, responseId, outputState, [], usage, modelDefinition, toolTranslation);
-}
-
-async function completeNativeToolsWithoutStreaming(
-  res: ServerResponse,
-  body: ResponsesRequest,
-  options: CodexProxyOptions,
-  payload: Record<string, unknown>,
-  toolTranslation: CodexToolTranslation,
-  modelDefinition: ModelDefinition,
-  outputState: StreamOutputState,
-  responseId: string,
-  signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
-): Promise<StreamProxyResult> {
-  const nativePayload = { ...payload, stream: false };
-  delete (nativePayload as { stream_options?: unknown }).stream_options;
-  const chatResponse = await callTogetherWithNativeTools(nativePayload, toolTranslation, options, modelDefinition, signal, hooks);
-  recordUsage(chatResponse.usage, options, modelDefinition);
-  const output = toResponsesOutput(chatResponse, toolTranslation);
-  completeOpenOutputItems(res, outputState);
-  let outputIndex = outputState.nextOutputIndex;
-  for (const item of output) {
-    writeResponsesSse(res, "response.output_item.added", {
-      type: "response.output_item.added",
-      output_index: outputIndex,
-      item: { ...item, status: item.status ?? "completed" },
-    });
-    writeResponsesSse(res, "response.output_item.done", {
-      type: "response.output_item.done",
-      output_index: outputIndex,
-      item,
-    });
-    outputIndex += 1;
-  }
-  writeResponsesSse(res, "response.completed", {
-    type: "response.completed",
-    response: {
-      id: responseId,
-      object: "response",
-      created_at: Math.floor(Date.now() / 1000),
-      status: "completed",
-      model: body.model ?? options.modelId,
-      output: [
-        ...(outputState.reasoningItemId !== undefined
-          ? [reasoningOutputItem(outputState.reasoningText, outputState.reasoningItemId)]
-          : []),
-        ...(outputState.textItemId !== undefined ? [messageOutputItem(outputState.text, outputState.textItemId)] : []),
-        ...output,
-      ],
-      usage: toResponsesUsage(chatResponse.usage),
-    },
-  });
-  res.end();
-  return { ok: true, status: res.statusCode };
 }
 
 async function runNativeToolCalls(
@@ -1839,14 +1754,6 @@ function codexStreamTurnTimeoutMs(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 30_000;
-}
-
-function codexUpstreamStreamingEnabled(): boolean {
-  const raw = process.env.TOGETHERLINK_CODEX_UPSTREAM_STREAMING?.trim().toLowerCase();
-  if (raw === "0" || raw === "false" || raw === "no") {
-    return false;
-  }
-  return true;
 }
 
 function* takeSseEvents(buffer: string): Generator<{ payload: string; remaining: string }> {

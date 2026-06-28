@@ -17,7 +17,6 @@ const options: CodexProxyOptions = {
 describe("Codex Responses proxy tool compatibility", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.stubEnv("TOGETHERLINK_CODEX_UPSTREAM_STREAMING", "1");
   });
 
   afterEach(() => {
