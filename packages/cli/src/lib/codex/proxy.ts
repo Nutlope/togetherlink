@@ -1843,7 +1843,10 @@ function codexStreamTurnTimeoutMs(): number {
 
 function codexUpstreamStreamingEnabled(): boolean {
   const raw = process.env.TOGETHERLINK_CODEX_UPSTREAM_STREAMING?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
+  if (raw === "0" || raw === "false" || raw === "no") {
+    return false;
+  }
+  return true;
 }
 
 function* takeSseEvents(buffer: string): Generator<{ payload: string; remaining: string }> {
