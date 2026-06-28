@@ -1,12 +1,8 @@
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
-import {
-  GLM_5_2,
-  SELECTABLE_MODELS,
-  VISION_MODELS,
-  type ModelDefinition,
-} from "@togetherlink/models";
+import { CODEX_SUPPORTED_MODELS } from "../../cli/src/lib/codex/defaults.js";
+import { CLAUDE_SUPPORTED_MODELS } from "../../cli/src/lib/claude/defaults.js";
 import { assert, assertCommandExists } from "./assert.js";
 import { runCommand } from "./command.js";
 import { cleanupTmpDir, createTestContext, resetTmpDir } from "./context.js";
@@ -176,37 +172,19 @@ function modelProbeCases(harness: Harness, models: MatrixModel[]): LiveModelCase
 }
 
 function codexModels(): MatrixModel[] {
-  return SELECTABLE_MODELS.map((model) => ({
+  return CODEX_SUPPORTED_MODELS.map((model) => ({
     id: model.id,
-    name: model.name,
+    name: model.definition.name,
     selector: model.id,
   }));
 }
 
 function claudeModels(): MatrixModel[] {
-  const selectable = SELECTABLE_MODELS.map((model) => claudeModel(model, model.anthropicAlias ?? model.id));
-  const haikuModel = VISION_MODELS[1] ?? VISION_MODELS[0] ?? GLM_5_2;
-  const haiku = claudeModel(haikuModel, haikuModel.anthropicAlias ?? haikuModel.id);
-  return uniqueModels([...selectable, haiku]);
-}
-
-function claudeModel(model: ModelDefinition, selector: string): MatrixModel {
-  return {
-    id: model.id,
-    name: model.name,
-    selector,
-  };
-}
-
-function uniqueModels(models: MatrixModel[]): MatrixModel[] {
-  const seen = new Set<string>();
-  return models.filter((model) => {
-    if (seen.has(model.id)) {
-      return false;
-    }
-    seen.add(model.id);
-    return true;
-  });
+  return CLAUDE_SUPPORTED_MODELS.map((model) => ({
+    id: model.definition.id,
+    name: model.definition.name,
+    selector: model.alias,
+  }));
 }
 
 async function runCodex(

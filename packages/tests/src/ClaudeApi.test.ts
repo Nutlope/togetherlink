@@ -235,7 +235,7 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
   });
 
-  test("coalesces Claude title-generation system prompts for Qwen Haiku requests", async () => {
+  test("coalesces Claude title-generation system prompts for Haiku-tier requests", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;

@@ -200,7 +200,7 @@ For each curated `SELECTABLE_MODELS` entry it runs both harnesses through:
 - Shell/tool call.
 - Subagent delegation (`spawn_agent`/collab tool calls for Codex, `Task`/`Agent` stream events for Claude).
 
-Claude also includes the Haiku-tier backend if it is not already in `SELECTABLE_MODELS`, because Claude Code may use that backend for built-in subagent work.
+Claude also includes its Haiku-tier backend if it is not already in `SELECTABLE_MODELS`, because Claude Code may use that backend for built-in subagent work.
 
 ## GitHub Live Workflow
 
