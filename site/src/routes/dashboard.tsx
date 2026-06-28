@@ -15,7 +15,7 @@ async function dashboardSession() {
 }
 
 async function fetchSummary() {
-  const url = process.env.CONVEX_URL
+  const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL
   if (!url) {
     return null
   }
