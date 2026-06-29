@@ -15,8 +15,7 @@ on:
           - live-models-check
           - opencode
           - pi
-  schedule:
-    - cron: "17 3 * * *"
+
   push:
     branches:
       - main
@@ -72,13 +71,44 @@ jobs:
 
       - name: Install coding-agent CLIs
         run: |
-          # OpenCode's official npm package is `opencode-ai`; it installs the
-          # `opencode` binary. See https://github.com/anomalyco/opencode.
-          npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai@latest @earendil-works/pi-coding-agent
-          claude --version
-          codex --version
-          opencode --version
-          pi --version
+          case "$HARNESS" in
+            all)
+              # OpenCode's official npm package is `opencode-ai`; it installs the
+              # `opencode` binary. See https://github.com/anomalyco/opencode.
+              npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai@latest @earendil-works/pi-coding-agent
+              claude --version
+              codex --version
+              opencode --version
+              pi --version
+              ;;
+            live-models-check)
+              npm install -g @anthropic-ai/claude-code @openai/codex
+              claude --version
+              codex --version
+              ;;
+            claude)
+              npm install -g @anthropic-ai/claude-code
+              claude --version
+              ;;
+            codex)
+              npm install -g @openai/codex
+              codex --version
+              ;;
+            opencode)
+              # OpenCode's official npm package is `opencode-ai`; it installs the
+              # `opencode` binary. See https://github.com/anomalyco/opencode.
+              npm install -g opencode-ai@latest
+              opencode --version
+              ;;
+            pi)
+              npm install -g @earendil-works/pi-coding-agent
+              pi --version
+              ;;
+            *)
+              echo "Unknown harness: $HARNESS" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Build togetherlink CLI
         run: |
