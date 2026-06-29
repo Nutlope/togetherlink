@@ -44,6 +44,10 @@ function installIdPath(home = os.homedir()): string {
   return path.join(togetherlinkHome(home), "install-id");
 }
 
+function telemetryDisabledByEnvironment(): boolean {
+  return process.env.GITHUB_ACTIONS === "true";
+}
+
 /**
  * Reads the stable anonymous install id, creating one on first use. The id is
  * a random UUID (no hardware fingerprinting) so analytics can measure
@@ -79,6 +83,10 @@ function normalizedOs(): "macos" | "linux" | "windows" | "unknown" {
  * break or noticeably slow down any CLI command.
  */
 export async function sendTelemetryEvent(event: TelemetryEvent, home = os.homedir()): Promise<void> {
+  if (telemetryDisabledByEnvironment()) {
+    return;
+  }
+
   try {
     const installId = await getInstallId(home);
     const controller = new AbortController();
