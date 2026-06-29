@@ -34,8 +34,8 @@ export const HARNESS_INSTALL: Record<HarnessId, { command: string; url: string }
     url: "https://github.com/openai/codex",
   },
   [HARNESS.OPENCODE]: {
-    command: "npm install -g opencode-ai",
-    url: "https://opencode.ai/docs",
+    command: "npm install -g opencode-ai@latest",
+    url: "https://github.com/anomalyco/opencode",
   },
   [HARNESS.PI]: {
     command: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",

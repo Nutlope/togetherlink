@@ -72,7 +72,9 @@ jobs:
 
       - name: Install coding-agent CLIs
         run: |
-          npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai @earendil-works/pi-coding-agent
+          # OpenCode's official npm package is `opencode-ai`; it installs the
+          # `opencode` binary. See https://github.com/anomalyco/opencode.
+          npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai@latest @earendil-works/pi-coding-agent
           claude --version
           codex --version
           opencode --version
