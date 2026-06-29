@@ -161,6 +161,7 @@ type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: nu
 
 const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
 const MAX_TOGETHER_RETRIES = 3;
+const MAX_TOGETHER_STREAM_IDLE_RETRIES = 3;
 
 type ResolvedCodexRequestModel = {
   requestedModelId: string;
@@ -1250,7 +1251,17 @@ async function streamResponseFromTogether(
 
   let turn: StreamTurnResult;
   try {
-    turn = await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal, hooks);
+    turn = await streamTogetherTurnWithIdleRetries(
+      res,
+      body,
+      options,
+      payload,
+      toolTranslation,
+      modelDefinition,
+      outputState,
+      signal,
+      hooks,
+    );
   } catch (err) {
     if (err instanceof SseIdleTimeoutError) {
       return failStream(res, responseId, 504, err.message);
@@ -1406,7 +1417,7 @@ async function streamResponseWithNativeTools(
   for (let iteration = 0; iteration < 6; iteration += 1) {
     let turn: StreamTurnResult;
     try {
-      turn = await streamTogetherTurn(
+      turn = await streamTogetherTurnWithIdleRetries(
         res,
         body,
         options,
@@ -1484,6 +1495,41 @@ async function streamResponseWithNativeTools(
     delta: fallback,
   });
   return completeStreamResponse(res, body, options, responseId, outputState, [], usage, modelDefinition, toolTranslation);
+}
+
+async function streamTogetherTurnWithIdleRetries(
+  res: ServerResponse,
+  body: ResponsesRequest,
+  options: CodexProxyOptions,
+  payload: Record<string, unknown>,
+  toolTranslation: CodexToolTranslation,
+  modelDefinition: ModelDefinition,
+  outputState: StreamOutputState,
+  signal?: AbortSignal,
+  hooks?: UpstreamTimingHooks,
+): Promise<StreamTurnResult> {
+  const maxRetries = codexStreamIdleRetries();
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal, hooks);
+    } catch (err) {
+      if (!(err instanceof SseIdleTimeoutError) || streamOutputStarted(outputState) || attempt >= maxRetries) {
+        throw err;
+      }
+      debugLog(options, "retrying together stream after idle timeout", {
+        attempt,
+        maxRetries,
+        model: payload.model,
+        timeoutMs: err.timeoutMs,
+      });
+      await sleep(backoffMs(attempt));
+    }
+  }
+  throw new SseIdleTimeoutError(codexStreamIdleTimeoutMs());
+}
+
+function streamOutputStarted(outputState: StreamOutputState): boolean {
+  return outputState.reasoningItemId !== undefined || outputState.textItemId !== undefined;
 }
 
 async function runNativeToolCalls(
@@ -1824,6 +1870,12 @@ function codexStreamTurnTimeoutMs(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 30_000;
+}
+
+function codexStreamIdleRetries(): number {
+  const raw = process.env.TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : MAX_TOGETHER_STREAM_IDLE_RETRIES;
 }
 
 function* takeSseEvents(buffer: string): Generator<{ payload: string; remaining: string }> {

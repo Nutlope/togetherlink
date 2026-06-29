@@ -379,6 +379,38 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("retries streamed Codex turns when upstream SSE goes idle before output", async () => {
+    const requests: Array<{ body: any }> = [];
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES", "1");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push({ body: JSON.parse(String(init?.body)) });
+      if (requests.length === 1) {
+        return hangingSseResponse([]);
+      }
+      return sseResponse([
+        { choices: [{ delta: { content: "recovered" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+        { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
+      ]);
+    }));
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(response).toContain("response.output_text.delta");
+    expect(response).toContain("recovered");
+    expect(response).toContain("response.completed");
+    expect(response).not.toContain("response.failed");
+  });
+
   test("retries transient Together rate limits before returning a Codex response", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -644,6 +676,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES", "1");
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith("http://127.0.0.1:")) {
         return realFetch(url, init);
@@ -668,13 +701,14 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.failed");
     expect(response).toContain("Together stream produced no SSE event for 100ms.");
     expect(response).not.toContain("response.completed");
-    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
     expect(requests[0]?.body.stream).toBe(true);
   });
 
   test("fails when upstream SSE keepalives make no Codex progress", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES", "1");
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith("http://127.0.0.1:")) {
         return realFetch(url, init);
@@ -693,7 +727,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.failed");
     expect(response).toContain("Together stream produced no SSE event for 100ms.");
     expect(response).not.toContain("response.completed");
-    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
+    expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
     expect(requests[0]?.body.stream).toBe(true);
   });
 
