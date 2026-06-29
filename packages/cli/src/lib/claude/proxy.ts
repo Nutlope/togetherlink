@@ -18,7 +18,10 @@ type AnthropicContentBlock =
   | { type: "thinking"; thinking: string; signature?: string }
   | { type: "redacted_thinking"; data: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content?: unknown }
+  | { type: "server_tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean }
+  | { type: "web_search_tool_result"; tool_use_id?: string; content?: unknown; error_code?: string }
+  | { type: "web_search_tool_result_error"; tool_use_id?: string; content?: unknown; error_code?: string }
   | { type: "image"; source: { type: string; media_type?: string; data?: string; url?: string } }
   | { type: "url"; url: string };
 
@@ -30,6 +33,7 @@ type AnthropicMessage = {
 type AnthropicMessagesRequest = {
   model?: string;
   max_tokens?: number;
+  stop_sequences?: string[];
   temperature?: number;
   stream?: boolean;
   system?: string | AnthropicContentBlock[];
@@ -59,6 +63,8 @@ type NativeServerTool = {
   name: string;
   definition: AnthropicTool;
 };
+
+type OpenAITool = { type: "function"; function: { name: string; description: string; parameters: unknown } };
 
 type OpenAIMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -579,19 +585,13 @@ function tracePayloadForClaudeUpstream(
   const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
   const systemMessages = upstreamMessages.filter((message) => message.role === "system");
   const nonSystemMessages = upstreamMessages.filter((message) => message.role !== "system");
-  const tools = body.tools?.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description ?? "",
-      parameters: toOpenAIToolParameters(tool),
-    },
-  }));
+  const tools = toOpenAITools(body.tools, options);
   const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
   const upstreamPayload = {
     model: targetModel.definition.id,
     messages: upstreamMessages,
     max_tokens: clampRequestedMaxTokens(body.max_tokens, targetModel.definition),
+    stop: body.stop_sequences,
     temperature: body.temperature,
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
@@ -704,6 +704,12 @@ function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | u
       if (block.type === "tool_result") {
         return `[tool_result ${block.tool_use_id}]`;
       }
+      if (block.type === "server_tool_use") {
+        return `[server_tool_use ${block.name}]`;
+      }
+      if (block.type === "web_search_tool_result" || block.type === "web_search_tool_result_error") {
+        return `[${block.type} ${block.tool_use_id ?? ""}]`;
+      }
       if (block.type === "image") {
         return "[image]";
       }
@@ -762,14 +768,7 @@ async function callTogetherChatCompletions(
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
   const messages = toOpenAIMessages(body, targetModel.definition);
-  const tools = body.tools?.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description ?? "",
-      parameters: toOpenAIToolParameters(tool),
-    },
-  }));
+  const tools = toOpenAITools(body.tools, options);
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
@@ -779,6 +778,7 @@ async function callTogetherChatCompletions(
       messages:
         turn === 0 && nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages,
       max_tokens: maxTokens,
+      stop: body.stop_sequences,
       temperature: body.temperature,
       tools,
       tool_choice: toOpenAIToolChoice(body.tool_choice),
@@ -1194,11 +1194,39 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function toOpenAITools(tools: AnthropicTool[] | undefined, options?: Pick<ClaudeProxyOptions, "debug">): OpenAITool[] | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+  const hasNativeWebSearch = tools.some(isNativeWebSearchTool);
+  return tools.flatMap((tool) => {
+    if (hasNativeWebSearch && !isNativeWebSearchTool(tool) && tool.name === "web_search") {
+      debugLog(options as ClaudeProxyOptions, "dropped colliding custom web_search tool", {
+        name: tool.name,
+        type: tool.type,
+      });
+      return [];
+    }
+    return [{
+      type: "function",
+      function: {
+        name: openAIToolName(tool),
+        description: tool.description ?? "",
+        parameters: toOpenAIToolParameters(tool),
+      },
+    }];
+  });
+}
+
+function openAIToolName(tool: AnthropicTool): string {
+  return isNativeWebSearchTool(tool) ? "web_search" : tool.name ?? "tool";
+}
+
 function toOpenAIToolParameters(tool: AnthropicTool): unknown {
   if (tool.input_schema) {
     return tool.input_schema;
   }
-  if (isWebSearchTool(tool)) {
+  if (isNativeWebSearchTool(tool)) {
     return {
       type: "object",
       properties: {
@@ -1233,15 +1261,15 @@ function toOpenAIToolChoice(toolChoice: unknown): unknown {
 
 function nativeServerTools(tools: AnthropicTool[] | undefined): NativeServerTool[] {
   return (tools ?? []).flatMap((tool) => {
-    if (!isWebSearchTool(tool)) {
+    if (!isNativeWebSearchTool(tool)) {
       return [];
     }
-    return [{ kind: "web_search", name: tool.name ?? "web_search", definition: tool }];
+    return [{ kind: "web_search", name: "web_search", definition: tool }];
   });
 }
 
-function isWebSearchTool(tool: AnthropicTool): boolean {
-  return tool.type?.startsWith("web_search_") === true || tool.name === "web_search";
+function isNativeWebSearchTool(tool: AnthropicTool): boolean {
+  return tool.type?.startsWith("web_search") === true;
 }
 
 function nativeToolMaxUses(tool: AnthropicTool): number {
@@ -1381,9 +1409,15 @@ function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDef
         messages.push({
           role: "tool",
           tool_call_id: block.tool_use_id,
-          content: stringifyUnknown(block.content),
+          content: formatToolResultContent(block.content, block.is_error),
         });
-      } else if (block.type === "tool_use") {
+      } else if (block.type === "web_search_tool_result" || block.type === "web_search_tool_result_error") {
+        messages.push({
+          role: "tool",
+          tool_call_id: block.tool_use_id ?? "web_search",
+          content: formatWebSearchToolResult(block),
+        });
+      } else if (block.type === "tool_use" || block.type === "server_tool_use") {
         toolCalls.push({
           id: block.id,
           type: "function",
@@ -1489,21 +1523,17 @@ async function streamAnthropicFromTogether(
 ): Promise<StreamProxyResult> {
   const targetModel = resolveTargetModel(body.model, options);
   const messages = toOpenAIMessages(body, targetModel.definition);
-  const tools = body.tools?.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description ?? "",
-      parameters: toOpenAIToolParameters(tool),
-    },
-  }));
+  const nativeTools = nativeServerTools(body.tools);
+  const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+  const tools = toOpenAITools(body.tools, options);
   const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
   let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
 
   const payload = {
     model: targetModel.definition.id,
-    messages,
+    messages: upstreamMessages,
     max_tokens: maxTokens,
+    stop: body.stop_sequences,
     temperature: body.temperature,
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
@@ -1647,6 +1677,21 @@ async function streamAnthropicFromTogether(
     },
   });
 
+  if (nativeTools.length > 0) {
+    return await streamAnthropicNativeToolLoop({
+      res,
+      initialResponse: response,
+      initialPayload: payload,
+      initialMessages: upstreamMessages.slice(),
+      nativeTools,
+      targetModel: targetModel.definition,
+      model,
+      options,
+      ...(signal ? { signal } : {}),
+      ...(hooks ? { hooks } : {}),
+    });
+  }
+
   const blockManager = new StreamBlockManager(res);
   let stopReason = "end_turn";
   let inputTokens = 0;
@@ -1725,6 +1770,297 @@ async function streamAnthropicFromTogether(
   writeSse(res, "message_stop", { type: "message_stop" });
   res.end();
   return { ok: true, status: res.statusCode };
+}
+
+type CollectedStreamToolCall = {
+  id?: string;
+  index: number;
+  function: { name?: string; arguments: string };
+};
+
+type CollectedStreamTurn = {
+  reasoning: string;
+  text: string;
+  toolCalls: CollectedStreamToolCall[];
+  stopReason: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+};
+
+async function streamAnthropicNativeToolLoop({
+  res,
+  initialResponse,
+  initialPayload,
+  initialMessages,
+  nativeTools,
+  targetModel,
+  model,
+  options,
+  signal,
+  hooks,
+}: {
+  res: ServerResponse;
+  initialResponse: Response;
+  initialPayload: Record<string, unknown>;
+  initialMessages: OpenAIMessage[];
+  nativeTools: NativeServerTool[];
+  targetModel: ModelDefinition;
+  model: string;
+  options: ClaudeProxyOptions;
+  signal?: AbortSignal;
+  hooks?: UpstreamTimingHooks;
+}): Promise<StreamProxyResult> {
+  const blockManager = new StreamBlockManager(res);
+  const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
+  const nativeToolUses = new Map<string, number>();
+  const messages = initialMessages.slice();
+  let response = initialResponse;
+  let stopReason = "end_turn";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
+
+  for (let turn = 0; turn < 5; turn += 1) {
+    const collected = await collectTogetherStreamTurn(response, options, hooks);
+    inputTokens += collected.inputTokens;
+    outputTokens += collected.outputTokens;
+    cachedTokens += collected.cachedTokens;
+    stopReason = collected.stopReason;
+
+    const nativeToolCalls = collected.toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function.name ?? ""));
+    if (nativeToolCalls.length === 0) {
+      emitCollectedStreamTurn(blockManager, collected);
+      break;
+    }
+
+    debugLog(options, "stream native tool calls", {
+      turn,
+      toolCalls: nativeToolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        name: toolCall.function.name,
+        argumentsPreview: toolCall.function.arguments.slice(0, 300),
+      })),
+    });
+
+    messages.push({
+      role: "assistant",
+      content: collected.text || null,
+      ...(collected.reasoning ? { reasoning_content: collected.reasoning } : {}),
+      tool_calls: collected.toolCalls.map((toolCall) => ({
+        id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: toolCall.function.name ?? "tool",
+          arguments: toolCall.function.arguments || "{}",
+        },
+      })),
+    });
+
+    for (const toolCall of nativeToolCalls) {
+      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+      const name = toolCall.function.name ?? "web_search";
+      const nativeTool = nativeTools.find((tool) => tool.name === name);
+      const input = parseJsonOrEmpty(toolCall.function.arguments);
+      const priorUses = nativeToolUses.get(name) ?? 0;
+      const maxUses = nativeTool ? nativeToolMaxUses(nativeTool.definition) : 0;
+      let result: string;
+      if (priorUses >= maxUses) {
+        result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
+      } else if (nativeTool?.kind === "web_search") {
+        nativeToolUses.set(name, priorUses + 1);
+        result = await runExaSearch(input, nativeTool.definition, options);
+      } else {
+        result = "Unsupported native server tool.";
+      }
+      messages.push({ role: "tool", tool_call_id: id, content: result });
+    }
+
+    const nextPayload: Record<string, unknown> = {
+      ...initialPayload,
+      messages,
+      model: targetModel.id,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    debugLog(options, "together stream native continuation request", {
+      model: nextPayload.model,
+      messageCount: messages.length,
+      toolCount: Array.isArray(nextPayload.tools) ? nextPayload.tools.length : 0,
+      turn: turn + 1,
+    });
+    let nextResponse: Response;
+    try {
+      hooks?.onStart?.();
+      nextResponse = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(nextPayload),
+        ...(signal ? { signal } : {}),
+      });
+      hooks?.onHeaders?.();
+    } catch (err) {
+      emitCollectedStreamTurn(blockManager, {
+        reasoning: "",
+        text: `Native server tool continuation failed: ${err instanceof Error ? err.message : String(err)}`,
+        toolCalls: [],
+        stopReason: "end_turn",
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+      });
+      stopReason = "end_turn";
+      break;
+    }
+    if (!nextResponse.ok || !nextResponse.body) {
+      const error = !nextResponse.ok ? await mapTogetherError(nextResponse) : undefined;
+      emitCollectedStreamTurn(blockManager, {
+        reasoning: "",
+        text: error?.message ?? "Together returned no stream body after native server tool execution.",
+        toolCalls: [],
+        stopReason: "end_turn",
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+      });
+      stopReason = "end_turn";
+      break;
+    }
+    response = nextResponse;
+  }
+
+  blockManager.close();
+  if (inputTokens > 0 || outputTokens > 0) {
+    options.costTracker?.addUsage(inputTokens, cachedTokens, outputTokens, targetModel);
+  }
+  debugLog(options, "together native stream done", {
+    model,
+    stopReason,
+    usage: { inputTokens, outputTokens, cachedTokens },
+    blocks: blockManager.summary(),
+  });
+  writeSse(res, "message_delta", {
+    type: "message_delta",
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+  });
+  writeSse(res, "message_stop", { type: "message_stop" });
+  res.end();
+  return { ok: true, status: res.statusCode };
+}
+
+async function collectTogetherStreamTurn(
+  response: Response,
+  options: ClaudeProxyOptions,
+  hooks?: UpstreamTimingHooks,
+): Promise<CollectedStreamTurn> {
+  const toolCalls = new Map<number, CollectedStreamToolCall>();
+  const turn: CollectedStreamTurn = {
+    reasoning: "",
+    text: "",
+    toolCalls: [],
+    stopReason: "end_turn",
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+  };
+  if (!response.body) {
+    return turn;
+  }
+  try {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      hooks?.onFirstByte?.();
+      buffer += decoder.decode(value, { stream: true });
+      buffer = consumeSseLines(buffer, (data) => {
+        if (!data) {
+          return;
+        }
+        const event = parseStreamData(data);
+        if (!event) {
+          return;
+        }
+        const delta = event.delta;
+        if (delta) {
+          const reasoning = delta.reasoning ?? delta.reasoning_content;
+          if (typeof reasoning === "string") {
+            turn.reasoning += reasoning;
+          }
+          if (typeof delta.content === "string") {
+            turn.text += delta.content;
+          }
+          if (Array.isArray(delta.tool_calls)) {
+            for (const chunk of delta.tool_calls) {
+              const index = typeof chunk.index === "number" ? chunk.index : 0;
+              const existing = toolCalls.get(index) ?? { index, function: { arguments: "" } };
+              if (chunk.id) {
+                existing.id = chunk.id;
+              }
+              if (chunk.function?.name) {
+                existing.function.name = chunk.function.name;
+              }
+              if (chunk.function?.arguments) {
+                existing.function.arguments += chunk.function.arguments;
+              }
+              toolCalls.set(index, existing);
+            }
+          }
+        }
+        if (event.usage) {
+          turn.inputTokens = event.usage.prompt_tokens ?? turn.inputTokens;
+          turn.outputTokens = event.usage.completion_tokens ?? turn.outputTokens;
+          turn.cachedTokens = event.usage.prompt_tokens_details?.cached_tokens ?? event.usage.cached_tokens ?? turn.cachedTokens;
+        }
+        if (event.finish_reason) {
+          turn.stopReason = mapStopReason(event.finish_reason);
+        }
+      });
+    }
+  } catch (err) {
+    debugLog(options, "together native stream read error", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  turn.toolCalls = [...toolCalls.values()].sort((a, b) => a.index - b.index);
+  return turn;
+}
+
+function emitCollectedStreamTurn(blockManager: StreamBlockManager, turn: CollectedStreamTurn): void {
+  if (turn.reasoning) {
+    blockManager.emitThinking(turn.reasoning);
+  }
+  if (turn.text) {
+    blockManager.emitText(turn.text);
+  }
+  for (const toolCall of turn.toolCalls) {
+    const fn: { name?: string; arguments?: string } = {
+      arguments: toolCall.function.arguments,
+    };
+    if (toolCall.function.name) {
+      fn.name = toolCall.function.name;
+    }
+    const emittedToolCall: {
+      index?: number;
+      id?: string;
+      function?: { name?: string; arguments?: string };
+    } = {
+      index: toolCall.index,
+      function: fn,
+    };
+    if (toolCall.id) {
+      emittedToolCall.id = toolCall.id;
+    }
+    blockManager.emitToolCall(emittedToolCall);
+  }
 }
 
 /**
@@ -2031,6 +2367,83 @@ function stringifyUnknown(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? "");
 }
 
+function formatToolResultContent(content: unknown, isError?: boolean): string {
+  const prefix = isError ? "[tool_result error]\n" : "";
+  if (typeof content === "string") {
+    return `${prefix}${content}`;
+  }
+  if (Array.isArray(content)) {
+    const parts = content.map(formatContentBlockForToolResult).filter((part) => part.length > 0);
+    return `${prefix}${parts.join("\n")}`;
+  }
+  return `${prefix}${stringifyUnknown(content)}`;
+}
+
+function formatContentBlockForToolResult(block: unknown): string {
+  if (typeof block !== "object" || block === null) {
+    return stringifyUnknown(block);
+  }
+  const record = block as Record<string, unknown>;
+  if (record.type === "text" && typeof record.text === "string") {
+    return record.text;
+  }
+  if (record.type === "image") {
+    const source = typeof record.source === "object" && record.source !== null ? record.source as Record<string, unknown> : {};
+    const mediaType = typeof source.media_type === "string" ? ` ${source.media_type}` : "";
+    return `[image${mediaType} in tool result]`;
+  }
+  if (record.type === "url" && typeof record.url === "string") {
+    return `[url in tool result] ${record.url}`;
+  }
+  return stringifyUnknown(block);
+}
+
+function formatWebSearchToolResult(block: Extract<AnthropicContentBlock, { type: "web_search_tool_result" | "web_search_tool_result_error" }>): string {
+  const errorCode = typeof block.error_code === "string" ? block.error_code : undefined;
+  if (block.type === "web_search_tool_result_error") {
+    return `Web search error${errorCode ? ` (${errorCode})` : ""}: ${formatToolResultContent(block.content)}`;
+  }
+  const content = block.content;
+  if (Array.isArray(content)) {
+    const lines = content.flatMap((item, index) => formatWebSearchResultItem(item, index));
+    return lines.length > 0 ? lines.join("\n\n") : "Web search returned no results.";
+  }
+  if (typeof content === "object" && content !== null) {
+    const record = content as Record<string, unknown>;
+    if (record.type === "web_search_tool_result_error") {
+      const code = typeof record.error_code === "string" ? record.error_code : errorCode;
+      return `Web search error${code ? ` (${code})` : ""}: ${formatToolResultContent(record.content)}`;
+    }
+  }
+  return formatToolResultContent(content);
+}
+
+function formatWebSearchResultItem(item: unknown, index: number): string[] {
+  if (typeof item !== "object" || item === null) {
+    return [`${index + 1}. ${stringifyUnknown(item)}`];
+  }
+  const record = item as Record<string, unknown>;
+  if (record.type === "web_search_tool_result_error") {
+    const code = typeof record.error_code === "string" ? record.error_code : undefined;
+    return [`Web search error${code ? ` (${code})` : ""}: ${formatToolResultContent(record.content)}`];
+  }
+  const title = stringField(record, "title") ?? stringField(record, "page_title") ?? "Untitled result";
+  const url = stringField(record, "url") ?? stringField(record, "source");
+  const snippet = stringField(record, "text") ?? stringField(record, "snippet") ?? stringField(record, "description");
+  return [
+    [
+      `${index + 1}. ${title}`,
+      ...(url ? [`URL: ${url}`] : []),
+      ...(snippet ? [`Snippet: ${trimSearchText(snippet)}`] : []),
+    ].join("\n"),
+  ];
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 /**
  * Small bounded LRU keyed by string. Uses a Map's insertion-order semantics:
  * `get` re-inserts (delete + set) to move the entry to the most-recently-used
@@ -2161,7 +2574,17 @@ async function resolveImageBlocks(body: AnthropicMessagesRequest, options: Claud
   // Replace image blocks inside each message's content array.
   for (const message of body.messages ?? []) {
     if (Array.isArray(message.content)) {
-      message.content = await Promise.all(message.content.map((block) => resolve(block)));
+      message.content = await Promise.all(message.content.map(async (block) => {
+        const resolved = await resolve(block);
+        if (resolved.type === "tool_result" && Array.isArray(resolved.content)) {
+          resolved.content = await Promise.all(resolved.content.map(async (innerBlock) => {
+            return typeof innerBlock === "object" && innerBlock !== null
+              ? await resolve(innerBlock as AnthropicContentBlock)
+              : innerBlock;
+          }));
+        }
+        return resolved;
+      }));
     }
   }
 }
@@ -2174,7 +2597,16 @@ async function resolveImageBlocks(body: AnthropicMessagesRequest, options: Claud
  */
 function extractImageBlocks(body: AnthropicMessagesRequest): Array<Record<string, unknown>> {
   const found: Array<Record<string, unknown>> = [];
-  const knownTypes = new Set(["text", "thinking", "redacted_thinking", "tool_use", "tool_result"]);
+  const knownTypes = new Set([
+    "text",
+    "thinking",
+    "redacted_thinking",
+    "tool_use",
+    "server_tool_use",
+    "tool_result",
+    "web_search_tool_result",
+    "web_search_tool_result_error",
+  ]);
 
   const inspectBlock = (block: unknown, location: string): void => {
     if (typeof block !== "object" || block === null) {

@@ -8,7 +8,7 @@ export async function runCommand(
   name: string,
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number; stdin?: string } = {},
+  options: { cwd?: string; timeoutMs?: number; stdin?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<CommandResult> {
   const cwd = options.cwd ?? context.repoRoot;
   const timeoutMs = options.timeoutMs ?? 120_000;
@@ -17,6 +17,7 @@ export async function runCommand(
     detached: process.platform !== "win32",
     env: {
       ...process.env,
+      ...options.env,
       TOGETHERLINK_DEBUG: "1",
       CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
       DISABLE_FEEDBACK_COMMAND: "1",

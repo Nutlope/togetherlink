@@ -10,7 +10,7 @@ The goal is not to copy Ollama wholesale. Each item below should be implemented 
 
 ## Priority 1: Fix Native Web Search Detection
 
-Status: not implemented.
+Status: implemented for tool translation, buffered native-tool routing, and streamed native web-search execution.
 
 Problem:
 
@@ -26,13 +26,18 @@ Desired behavior:
 
 Regression tests:
 
+- Added in `packages/tests/src/ClaudeApi.test.ts`.
 - A custom tool with `name: "web_search"` and no native `type` is passed upstream as a normal function tool.
 - If the model calls that custom tool, the proxy returns an Anthropic `tool_use` block to Claude Code instead of running the native Exa search loop.
-- A native tool with `type: "web_search_20250305"` is still detected and routed through the proxy's native web-search loop.
+- A native tool with `type: "web_search_20250305"` is normalized to upstream function name `web_search` and participates in buffered and streamed native web-search handling.
+
+Note:
+
+- Claude Code 2.1.195 was observed sending an internal streamed Kimi-tier request with native `type: "web_search_20250305"` during a headless `WebSearch` flow. The streamed path now executes that native tool inside the proxy, calls Exa, appends the tool result, and continues the upstream stream without exposing lower-case `web_search` as a Claude Code client tool.
 
 ## Priority 2: Handle Web Search Name Collisions
 
-Status: not implemented.
+Status: implemented.
 
 Problem:
 
@@ -49,13 +54,14 @@ Desired behavior:
 
 Regression tests:
 
+- Added in `packages/tests/src/ClaudeApi.test.ts`.
 - Given both native `web_search_...` and custom `name: "web_search"` tools, the upstream Together request contains one `web_search` function definition, using the native search schema.
 - The dropped custom schema is not sent upstream.
 - Non-colliding custom tools remain present.
 
 ## Priority 3: Support `server_tool_use` Content Blocks
 
-Status: not implemented.
+Status: implemented.
 
 Problem:
 
@@ -74,13 +80,14 @@ Desired behavior:
 
 Regression tests:
 
+- Added in `packages/tests/src/ClaudeApi.test.ts`.
 - A message containing a `server_tool_use` block is converted into an upstream assistant message with an OpenAI-compatible `tool_calls` entry.
 - The tool-call id and input JSON survive the conversion.
 - Existing `tool_use` behavior remains unchanged.
 
 ## Priority 4: Support `web_search_tool_result` Content Blocks
 
-Status: not implemented.
+Status: implemented.
 
 Problem:
 
@@ -100,13 +107,14 @@ Desired behavior:
 
 Regression tests:
 
+- Added in `packages/tests/src/ClaudeApi.test.ts`.
 - A `web_search_tool_result` containing result objects becomes a `tool` message with readable title/URL lines.
 - A `web_search_tool_result_error` becomes a readable tool-result error message.
 - The associated `tool_use_id` is preserved.
 
 ## Priority 5: Improve Rich `tool_result.content` Conversion
 
-Status: partially implemented through generic stringification.
+Status: implemented for text arrays, error marking, structured fallback, and nested image/url blocks.
 
 Problem:
 
@@ -126,14 +134,15 @@ Desired behavior:
 
 Regression tests:
 
+- Added in `packages/tests/src/ClaudeApi.test.ts`.
 - String tool results still convert exactly as before.
 - Array-of-text-block tool results convert to readable text.
 - Tool result errors include an explicit error marker in the upstream tool message.
-- Nested image/url blocks are not silently dropped.
+- Nested image/url blocks are routed through the existing image-description path or represented as model-readable placeholders.
 
 ## Priority 6: Add `stop_sequences` Passthrough
 
-Status: not implemented.
+Status: implemented.
 
 Problem:
 
@@ -150,6 +159,7 @@ Desired behavior:
 
 Regression tests:
 
+- Added in `packages/tests/src/ClaudeApi.test.ts`.
 - A request with `stop_sequences: ["</done>"]` sends `stop: ["</done>"]` to Together in buffered mode.
 - The same mapping is present in streaming mode.
 

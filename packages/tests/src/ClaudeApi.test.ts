@@ -310,6 +310,361 @@ describe("Claude proxy compatibility API", () => {
       stream: false,
     });
   });
+
+  test("does not treat a custom tool named web_search as native server search", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      return new Response(JSON.stringify({
+        id: "chatcmpl_custom_web_search",
+        choices: [{
+          finish_reason: "tool_calls",
+          message: {
+            tool_calls: [{
+              id: "call_custom_search",
+              function: { name: "web_search", arguments: "{\"query\":\"local\"}" },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [{ role: "user", content: "Call my search tool." }],
+        tools: [{
+          name: "web_search",
+          description: "A client-owned search tool.",
+          input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamToolNames(upstreamBodies[0])).toEqual(["web_search"]);
+    expect(response.body.content).toEqual([{
+      type: "tool_use",
+      id: "call_custom_search",
+      name: "web_search",
+      input: { query: "local" },
+    }]);
+  });
+
+  test("normalizes native web search and drops colliding custom web_search tools", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      return new Response(JSON.stringify({
+        id: "chatcmpl_native_collision",
+        choices: [{ message: { content: "COLLISION_OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [{ role: "user", content: "Search if needed." }],
+        tools: [
+          { type: "web_search_20250305", name: "server_search", max_uses: 1 },
+          {
+            name: "web_search",
+            description: "A colliding client tool.",
+            input_schema: { type: "object", properties: { q: { type: "string" } } },
+          },
+          {
+            name: "Read",
+            description: "Read files.",
+            input_schema: { type: "object", properties: { file_path: { type: "string" } } },
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamToolNames(upstreamBodies[0])).toEqual(["web_search", "Read"]);
+    const nativeTool = upstreamTools(upstreamBodies[0])[0]?.function;
+    expect(nativeTool?.parameters).toMatchObject({
+      type: "object",
+      required: ["query"],
+    });
+  });
+
+  test("converts server_tool_use history into OpenAI tool calls", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      return new Response(JSON.stringify({
+        id: "chatcmpl_server_tool_history",
+        choices: [{ message: { content: "SERVER_TOOL_OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [{
+          role: "assistant",
+          content: [{
+            type: "server_tool_use",
+            id: "srvu_123",
+            name: "web_search",
+            input: { query: "Together AI" },
+          }],
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const assistant = upstreamMessages(upstreamBodies[0]).find((message) => Array.isArray(message.tool_calls));
+    expect(assistant?.tool_calls).toEqual([{
+      id: "srvu_123",
+      type: "function",
+      function: { name: "web_search", arguments: "{\"query\":\"Together AI\"}" },
+    }]);
+  });
+
+  test("formats web_search_tool_result history into readable tool messages", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      return new Response(JSON.stringify({
+        id: "chatcmpl_web_result_history",
+        choices: [{ message: { content: "WEB_RESULT_OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "web_search_tool_result",
+              tool_use_id: "srvu_search",
+              content: [{ title: "Together docs", url: "https://docs.together.ai", text: "API docs" }],
+            },
+            {
+              type: "web_search_tool_result_error",
+              tool_use_id: "srvu_error",
+              error_code: "rate_limited",
+              content: "Try later",
+            },
+          ],
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const toolMessages = upstreamMessages(upstreamBodies[0]).filter((message) => message.role === "tool");
+    expect(toolMessages[0]).toMatchObject({
+      tool_call_id: "srvu_search",
+    });
+    expect(String(toolMessages[0]?.content)).toContain("Together docs");
+    expect(String(toolMessages[0]?.content)).toContain("https://docs.together.ai");
+    expect(toolMessages[1]).toMatchObject({
+      tool_call_id: "srvu_error",
+    });
+    expect(String(toolMessages[1]?.content)).toContain("rate_limited");
+  });
+
+  test("formats rich tool_result content arrays and error status", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      return new Response(JSON.stringify({
+        id: "chatcmpl_rich_tool_result",
+        choices: [{ message: { content: "RICH_TOOL_OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [{
+          role: "user",
+          content: [{
+            type: "tool_result",
+            tool_use_id: "call_rich",
+            is_error: true,
+            content: [
+              { type: "text", text: "Async agent launched successfully." },
+              { type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+              { type: "url", url: "https://example.com/image.png" },
+            ],
+          }],
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const toolMessage = upstreamMessages(upstreamBodies[upstreamBodies.length - 1]).find((message) => message.role === "tool");
+    expect(toolMessage?.tool_call_id).toBe("call_rich");
+    expect(String(toolMessage?.content)).toContain("[tool_result error]");
+    expect(String(toolMessage?.content)).toContain("Async agent launched successfully.");
+    expect(String(toolMessage?.content)).toMatch(/image|Image description/);
+    expect(String(toolMessage?.content)).toContain("[described by");
+  });
+
+  test("executes streamed native web_search server tools inside the proxy", async () => {
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      urls.push(url);
+      if (url.includes("api.exa.ai/search")) {
+        return new Response(JSON.stringify({
+          results: [{
+            title: "Native search result",
+            url: "https://example.com/native",
+            text: "Result text from Exa.",
+          }],
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      if (upstreamBodies.length === 1) {
+        return sseResponse([
+          {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: "call_native_search",
+                  function: { name: "web_search", arguments: "{\"query\":\"native search\"}" },
+                }],
+              },
+            }],
+            usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+          },
+          { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+        ]);
+      }
+
+      return sseResponse([
+        {
+          choices: [{ delta: { content: "NATIVE_STREAM_OK" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 40, completion_tokens: 3, total_tokens: 43 },
+        },
+      ]);
+    }));
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        stream: true,
+        messages: [{ role: "user", content: "Use native search." }],
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(urls.some((url) => url.includes("api.exa.ai/search"))).toBe(true);
+    expect(upstreamBodies).toHaveLength(2);
+    expect(String(response.body)).toContain("NATIVE_STREAM_OK");
+    expect(String(response.body)).not.toContain("\"name\":\"web_search\"");
+    const secondMessages = upstreamMessages(upstreamBodies[1]);
+    expect(secondMessages.some((message) => message.role === "tool" && message.tool_call_id === "call_native_search")).toBe(true);
+  });
+
+  test("passes stop_sequences upstream in buffered and streaming requests", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      upstreamBodies.push(body);
+      if (body.stream) {
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "STOP_STREAM_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          },
+        ]);
+      }
+      return new Response(JSON.stringify({
+        id: "chatcmpl_stop_buffered",
+        choices: [{ message: { content: "STOP_BUFFERED_OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+
+    const buffered = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        stop_sequences: ["</done>"],
+        messages: [{ role: "user", content: "Stop buffered." }],
+      }),
+    });
+    const streamed = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        stream: true,
+        stop_sequences: ["</done>"],
+        messages: [{ role: "user", content: "Stop stream." }],
+      }),
+    });
+
+    expect(buffered.status).toBe(200);
+    expect(streamed.status).toBe(200);
+    expect(upstreamBodies.map((body) => body.stop)).toEqual([["</done>"], ["</done>"]]);
+  });
 });
 
 function firstUserContent(body: Record<string, unknown> | undefined): unknown {
@@ -320,8 +675,27 @@ function firstUserContent(body: Record<string, unknown> | undefined): unknown {
   return typeof userMessage === "object" && userMessage !== null ? (userMessage as { content?: unknown }).content : undefined;
 }
 
-function upstreamMessages(body: Record<string, unknown> | undefined): Array<{ role?: unknown; content?: unknown }> {
-  return Array.isArray(body?.messages) ? body.messages as Array<{ role?: unknown; content?: unknown }> : [];
+function upstreamMessages(body: Record<string, unknown> | undefined): Array<{
+  role?: unknown;
+  content?: unknown;
+  tool_call_id?: unknown;
+  tool_calls?: unknown;
+}> {
+  return Array.isArray(body?.messages)
+    ? body.messages as Array<{ role?: unknown; content?: unknown; tool_call_id?: unknown; tool_calls?: unknown }>
+    : [];
+}
+
+function upstreamTools(body: Record<string, unknown> | undefined): Array<{ function?: { name?: string; parameters?: unknown } }> {
+  return Array.isArray(body?.tools)
+    ? body.tools as Array<{ function?: { name?: string; parameters?: unknown } }>
+    : [];
+}
+
+function upstreamToolNames(body: Record<string, unknown> | undefined): string[] {
+  return upstreamTools(body)
+    .map((tool) => tool.function?.name)
+    .filter((name): name is string => typeof name === "string");
 }
 
 async function callClaudeProxy({

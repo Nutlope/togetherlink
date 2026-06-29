@@ -7,7 +7,7 @@ import { dispatchHarnessCommand } from "../lib/commands/harness.js";
 import { isHarnessCommand, resolveHarnessInvocation } from "../lib/commands/harness-invocation.js";
 import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from "../lib/global-config.js";
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
-import { sendTelemetryEvent } from "../lib/telemetry.js";
+import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
 
 async function loadStoredExaKey(): Promise<void> {
@@ -121,6 +121,11 @@ async function main() {
 
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`togetherlink v${VERSION}\n`);
+    return;
+  }
+
+  if (command === "whoami") {
+    process.stdout.write(`${await getInstallId()}\n`);
     return;
   }
 

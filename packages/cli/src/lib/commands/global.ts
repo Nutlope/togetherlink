@@ -12,6 +12,7 @@ export function printHelp() {
 
 Usage:
   togetherlink configure
+  togetherlink whoami
   togetherlink codex-app [--model <model>] [--restore]  (alpha)
   togetherlink codex [...]       (alias: tcodex)
   togetherlink claude [...]      (alias: tclaude)

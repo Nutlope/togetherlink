@@ -46,6 +46,8 @@ Likely next work:
 
 ## Claude Code Terminal
 
+Latest headless spot-check: Claude Code `2.1.195` on 2026-06-29.
+
 Captured request shape:
 
 - Route: `POST /v1/messages?beta=true`
@@ -90,7 +92,17 @@ Support status:
 
 - Client tools are supported generically: the proxy converts every Anthropic tool schema into an OpenAI/Together function tool, then converts Together `tool_calls` back to Anthropic `tool_use`.
 - Captured `WebSearch` and `WebFetch` are client tools, so Claude Code executes them after the proxy returns `tool_use`.
-- Native Anthropic server tools are separately detected only for `web_search_*` or name `web_search`; those are implemented via Exa search in the proxy.
+- Native Anthropic server web-search tools are detected by `type` values starting with `web_search`, then normalized to upstream function name `web_search`. A plain custom/client tool with `name: "web_search"` is no longer classified as native only because of its name.
+- If a native web-search tool and a custom `name: "web_search"` tool appear in the same request, the proxy keeps the native tool and drops the colliding custom tool from the upstream Together payload.
+
+Headless smoke results:
+
+- Basic `--print --output-format json` completed successfully.
+- README `Read` tool prompt completed successfully without `Invalid tool parameters`.
+- Forced `WebFetch` completed successfully and returned a streamed `tool_use` with valid `input_json_delta`.
+- Forced `WebSearch` completed successfully and returned a streamed client `WebSearch` call. During that run, Claude Code also sent an internal Kimi-tier request containing native `type: "web_search_20250305"`, confirming the native path is live in current Claude Code traffic.
+- Re-running through the workspace-built daemon after the streaming native-tool fix showed the internal `web_search_20250305` call being selected, executed inside the proxy via Exa, and continued with a second Together stream request.
+- Forced subagent delegation completed successfully with `Agent` and `TaskOutput`; the launch result used rich `tool_result.content` arrays, which are now converted into readable upstream tool messages.
 
 Known gap:
 
