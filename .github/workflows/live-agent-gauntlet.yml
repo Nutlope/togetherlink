@@ -122,7 +122,7 @@ jobs:
         run: |
           case "$HARNESS" in
             all)
-              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts
+              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts
               ;;
             claude)
               packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts

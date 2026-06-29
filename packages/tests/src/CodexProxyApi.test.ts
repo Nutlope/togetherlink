@@ -379,6 +379,38 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("retries transient Together rate limits before returning a Codex response", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      requests.push(JSON.parse(String(init?.body)));
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "0" },
+        });
+      }
+      return jsonResponse({
+        choices: [{ message: { content: "Recovered after retry." } }],
+        usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 },
+      });
+    }));
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(response.output[0]).toMatchObject({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Recovered after retry.", annotations: [] }],
+    });
+  });
+
   test("forwards streamed Codex deltas before the response completes", async () => {
     vi.unstubAllEnvs();
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {

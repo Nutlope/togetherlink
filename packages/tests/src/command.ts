@@ -8,7 +8,7 @@ export async function runCommand(
   name: string,
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {},
+  options: { cwd?: string; timeoutMs?: number; stdin?: string } = {},
 ): Promise<CommandResult> {
   const cwd = options.cwd ?? context.repoRoot;
   const timeoutMs = options.timeoutMs ?? 120_000;
@@ -21,11 +21,20 @@ export async function runCommand(
       CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
       DISABLE_FEEDBACK_COMMAND: "1",
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
+  if (options.stdin !== undefined) {
+    if (!child.stdin) {
+      throw new Error("stdin pipe was not available");
+    }
+    child.stdin.end(options.stdin);
+  }
 
   let stdout = "";
   let stderr = "";
+  if (!child.stdout || !child.stderr) {
+    throw new Error("stdout/stderr pipes were not available");
+  }
   child.stdout.on("data", (chunk) => {
     stdout += String(chunk);
   });

@@ -118,8 +118,7 @@ export function claudeScenarios(): Scenario[] {
           "--no-session-persistence",
           "--permission-mode",
           "bypassPermissions",
-          prompt,
-        ], { timeoutMs: 300_000 });
+        ], { timeoutMs: 300_000, stdin: prompt });
         assert(result.status === 0, `exit ${result.status}`);
         assert(result.stdout.includes("CLAUDE_FINAL_CHECKSUM_6248"), "missing final checksum");
         assert(!looksLikeContextError(result.stderr + result.stdout), "context-length error surfaced");

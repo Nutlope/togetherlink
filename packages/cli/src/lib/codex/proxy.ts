@@ -158,6 +158,10 @@ type UpstreamTimingHooks = {
   onFirstByte?: () => void;
 };
 type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
+
+const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
+const MAX_TOGETHER_RETRIES = 3;
+
 type ResolvedCodexRequestModel = {
   requestedModelId: string;
   targetModelId: string;
@@ -552,18 +556,58 @@ async function postTogetherChat(
   signal?: AbortSignal,
   hooks?: UpstreamTimingHooks,
 ): Promise<Response> {
-  hooks?.onStart?.();
-  const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${options.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-    ...(signal ? { signal } : {}),
+  for (let attempt = 0; attempt <= MAX_TOGETHER_RETRIES; attempt += 1) {
+    hooks?.onStart?.();
+    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      ...(signal ? { signal } : {}),
+    });
+    hooks?.onHeaders?.();
+    if (response.ok || !RETRYABLE_CHAT_STATUSES.has(response.status) || attempt >= MAX_TOGETHER_RETRIES) {
+      return response;
+    }
+    debugLog(options, "retrying together request after transient error", {
+      status: response.status,
+      attempt,
+      model: payload.model,
+    });
+    await response.arrayBuffer().catch(() => undefined);
+    await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoffMs(attempt));
+  }
+  return new Response(JSON.stringify({ error: { message: "Together request failed after retries." } }), {
+    status: 503,
+    headers: { "content-type": "application/json" },
   });
-  hooks?.onHeaders?.();
-  return response;
+}
+
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const seconds = Number.parseInt(value, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return undefined;
+}
+
+function backoffMs(attempt: number): number {
+  const base = 1000 * 2 ** attempt;
+  const jitter = (attempt % 2 === 0 ? 1 : -1) * base * 0.2;
+  return Math.max(100, base + jitter);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toChatPayload(

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assert, assertCommandExists, looksLikeContextError } from "../assert.js";
 import { runCommand } from "../command.js";
@@ -36,6 +36,9 @@ export function codexScenarios(): Scenario[] {
     {
       name: "codex: bash tool call",
       run: async (context) => {
+        const token = `CODEX_TOOL_${Date.now().toString(36)}`;
+        const probePath = path.join(context.tmpDir, "codex-tool-probe.txt");
+        await writeFile(probePath, `${token}\n`, "utf8");
         const result = await runCommand(context, "codex-tool-pwd", process.execPath, [
           context.cliBin,
           "codex",
@@ -46,10 +49,10 @@ export function codexScenarios(): Scenario[] {
           "--skip-git-repo-check",
           "--ignore-user-config",
           "--ignore-rules",
-          "Run pwd and answer with the directory only.",
+          `Use a shell command to read this exact file path: ${probePath}. Answer with exactly the file contents and nothing else.`,
         ], { timeoutMs: 180_000 });
         assert(result.status === 0, `exit ${result.status}`);
-        assert(result.stdout.includes(context.repoRoot), "expected pwd result in output");
+        assert(result.stdout.includes(token), "expected probe file contents in output");
         assert(codexEvents(result.stdout).some((event) => event.type === "item.completed" && asRecord(event.item).type === "command_execution"), "missing command execution item");
       },
     },
@@ -122,8 +125,8 @@ export function codexScenarios(): Scenario[] {
           "--skip-git-repo-check",
           "--ignore-user-config",
           "--ignore-rules",
-          prompt,
-        ], { timeoutMs: 300_000 });
+          "-",
+        ], { timeoutMs: 300_000, stdin: prompt });
         assert(result.status === 0, `exit ${result.status}`);
         assert(result.stdout.includes("CODEX_FINAL_CHECKSUM_9371"), "missing final checksum");
         assert(!looksLikeContextError(result.stderr + result.stdout), "context-length error surfaced");
