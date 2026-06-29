@@ -80,8 +80,8 @@ jobs:
 
       - name: Build togetherlink CLI
         run: |
-          node_modules/.bin/tsc -p packages/cli/tsconfig.json
-          chmod +x packages/cli/dist/bin/togetherlink.js
+          pnpm --filter @togetherlink/models build
+          pnpm --filter @togetherlink/cli build
 
       - name: Typecheck live tests
         run: node_modules/.bin/tsc -p packages/tests/tsconfig.json --noEmit
