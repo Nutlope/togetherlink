@@ -7,6 +7,62 @@ function dayKey(timestampMs: number): string {
   return new Date(timestampMs).toISOString().slice(0, 10)
 }
 
+type UsageTotals = {
+  promptTokens: number
+  cachedTokens: number
+  completionTokens: number
+  costUsd: number
+}
+
+type InstallSummary = UsageTotals & {
+  installId: string
+  eventCount: number
+  sessionStarts: number
+  sessionEnds: number
+  failedSessions: number
+  firstSeenAt: number
+  lastSeenAt: number
+  os: string
+  countryCode: string
+  agents: Set<string>
+  versions: Set<string>
+}
+
+type SessionSummary = UsageTotals & {
+  sessionId: string
+  installId: string
+  agent: string
+  model: string
+  startedAt?: number
+  endedAt?: number
+  durationMs?: number
+  exitCode?: number
+  lastEventAt: number
+  status: 'started' | 'ended'
+}
+
+type InstallDailySummary = UsageTotals & {
+  installId: string
+  day: string
+  sessionsStarted: number
+  sessionsEnded: number
+}
+
+function emptyUsage(): UsageTotals {
+  return { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 }
+}
+
+function addUsage(target: UsageTotals, source: Partial<UsageTotals>) {
+  target.promptTokens += source.promptTokens ?? 0
+  target.cachedTokens += source.cachedTokens ?? 0
+  target.completionTokens += source.completionTokens ?? 0
+  target.costUsd += source.costUsd ?? 0
+}
+
+function modelLabel(event: { model?: string; finalModel?: string; initialModel?: string }) {
+  return event.model ?? event.finalModel ?? event.initialModel ?? 'unknown'
+}
+
 export const getDashboardSummary = query({
   args: {
     days: v.optional(v.number()),
@@ -29,11 +85,50 @@ export const getDashboardSummary = query({
     const osCounts = new Map<string, number>()
     const countryCounts = new Map<string, number>()
     const versionCounts = new Map<string, number>()
+    const installs = new Map<string, InstallSummary>()
+    const sessions = new Map<string, SessionSummary>()
+    const installDaily = new Map<string, InstallDailySummary>()
     let failedSessions = 0
     let totalEndedSessions = 0
 
     for (const event of events) {
       const day = dayKey(event.receivedAt)
+      const install =
+        installs.get(event.installId) ??
+        {
+          installId: event.installId,
+          ...emptyUsage(),
+          eventCount: 0,
+          sessionStarts: 0,
+          sessionEnds: 0,
+          failedSessions: 0,
+          firstSeenAt: event.receivedAt,
+          lastSeenAt: event.receivedAt,
+          os: event.os,
+          countryCode: event.countryCode,
+          agents: new Set<string>(),
+          versions: new Set<string>(),
+        }
+      install.eventCount += 1
+      install.firstSeenAt = Math.min(install.firstSeenAt, event.receivedAt)
+      install.lastSeenAt = Math.max(install.lastSeenAt, event.receivedAt)
+      install.os = event.os
+      install.countryCode = event.countryCode
+      if (event.agent) install.agents.add(event.agent)
+      if (event.cliVersion) install.versions.add(event.cliVersion)
+      installs.set(event.installId, install)
+
+      const dailyKey = `${event.installId}:${day}`
+      const daily =
+        installDaily.get(dailyKey) ??
+        {
+          installId: event.installId,
+          day,
+          sessionsStarted: 0,
+          sessionsEnded: 0,
+          ...emptyUsage(),
+        }
+      installDaily.set(dailyKey, daily)
 
       if (event.eventType === 'install_completed') {
         if (!installsByDay.has(day)) installsByDay.set(day, new Set())
@@ -45,14 +140,51 @@ export const getDashboardSummary = query({
 
       if (event.eventType === 'session_started') {
         sessionsStartedByDay.set(day, (sessionsStartedByDay.get(day) ?? 0) + 1)
+        install.sessionStarts += 1
+        daily.sessionsStarted += 1
       }
 
       if (event.eventType === 'session_ended') {
         sessionsEndedByDay.set(day, (sessionsEndedByDay.get(day) ?? 0) + 1)
         totalEndedSessions += 1
+        install.sessionEnds += 1
+        daily.sessionsEnded += 1
         if (event.exitCode !== undefined && event.exitCode !== 0) {
           failedSessions += 1
+          install.failedSessions += 1
         }
+      }
+
+      if (event.sessionId && (event.eventType === 'session_started' || event.eventType === 'session_ended')) {
+        const session =
+          sessions.get(event.sessionId) ??
+          {
+            sessionId: event.sessionId,
+            installId: event.installId,
+            ...emptyUsage(),
+            agent: event.agent ?? 'unknown',
+            model: modelLabel(event),
+            lastEventAt: event.receivedAt,
+            status: 'started',
+          }
+
+        session.agent = event.agent ?? session.agent
+        session.model = modelLabel(event)
+        session.lastEventAt = Math.max(session.lastEventAt, event.receivedAt)
+
+        if (event.eventType === 'session_started') {
+          session.startedAt = event.startedAt ?? event.receivedAt
+        }
+
+        if (event.eventType === 'session_ended') {
+          session.status = 'ended'
+          session.endedAt = event.endedAt ?? event.receivedAt
+          session.durationMs = event.durationMs
+          session.exitCode = event.exitCode
+          addUsage(session, event)
+        }
+
+        sessions.set(event.sessionId, session)
       }
 
       if (event.eventType === 'session_ended') {
@@ -85,6 +217,9 @@ export const getDashboardSummary = query({
           modelTotals.costUsd += event.costUsd ?? 0
           tokensByModel.set(model, modelTotals)
         }
+
+        addUsage(install, event)
+        addUsage(daily, event)
       }
 
       osCounts.set(event.os, (osCounts.get(event.os) ?? 0) + 1)
@@ -111,6 +246,19 @@ export const getDashboardSummary = query({
         .map(([countryCode, count]) => ({ countryCode, count }))
         .sort((a, b) => b.count - a.count),
       versionDistribution: Array.from(versionCounts.entries()).map(([version, count]) => ({ version, count })),
+      installSummaries: Array.from(installs.values())
+        .map(({ agents, versions, ...install }) => ({
+          ...install,
+          agents: Array.from(agents).sort(),
+          versions: Array.from(versions).sort(),
+        }))
+        .sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+      installDaily: Array.from(installDaily.values()).sort((a, b) =>
+        a.installId === b.installId ? (a.day < b.day ? -1 : 1) : a.installId < b.installId ? -1 : 1,
+      ),
+      recentSessions: Array.from(sessions.values())
+        .sort((a, b) => b.lastEventAt - a.lastEventAt)
+        .slice(0, 200),
       failedSessionRate: totalEndedSessions > 0 ? failedSessions / totalEndedSessions : 0,
       totalEvents: events.length,
     }
