@@ -1,12 +1,12 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { findModelById, MINIMAX_M3, type ModelDefinition } from "@togetherlink/models";
 import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
 import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
+import { writeDebugLogLine } from "../debug-log.js";
 
 type ResponsesContentPart = {
   type?: string;
@@ -2106,8 +2106,5 @@ function debugLog(options: CodexProxyOptions, label: string, payload: unknown): 
     return;
   }
   const line = `[togetherlink codex proxy] ${label}: ${JSON.stringify(payload)}\n`;
-  process.stderr.write(line);
-  if (process.env.TOGETHERLINK_DEBUG_LOG) {
-    appendFileSync(process.env.TOGETHERLINK_DEBUG_LOG, line);
-  }
+  writeDebugLogLine(line);
 }

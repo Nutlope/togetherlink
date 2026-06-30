@@ -1,6 +1,5 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
@@ -15,6 +14,7 @@ import {
 } from "./vision.js";
 import { stableHash } from "../stable-hash.js";
 import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
+import { writeDebugLogLine } from "../debug-log.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -2360,10 +2360,7 @@ function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): v
     return;
   }
   const line = `[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`;
-  process.stderr.write(line);
-  if (process.env.TOGETHERLINK_DEBUG_LOG) {
-    appendFileSync(process.env.TOGETHERLINK_DEBUG_LOG, line);
-  }
+  writeDebugLogLine(line);
 }
 
 export function requestPath(req: IncomingMessage): string {
