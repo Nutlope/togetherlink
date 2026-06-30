@@ -4,8 +4,8 @@
 
 **Current experimental reality** (from `proxy-performance.bench.ts` runs):
 
-- For _large synthetic payloads_, local proxy overhead is ~3-5 ms (p95), with JSON parse + stringify dominating the in-process time.
-- For _captured real headless coding sessions_, the numbers are already very low: Codex p95 ~0.34 ms, Claude p95 ~1.22 ms.
+- For _large synthetic payloads_, local proxy overhead is ~4.7-5.5 ms (p95), with JSON parse + stringify dominating the in-process time.
+- For _captured real headless coding sessions_, the numbers are already very low: Codex p95 ~0.42 ms, Claude p95 ~1.64 ms.
 - This implies that for typical usage, **real TTFT, upstream network latency, vision model calls, and Exa searches** are likely far more impactful than further shrinking local translation cost.
 
 ### Benchmark Evidence
@@ -14,9 +14,9 @@
 - **Date**: 2026-06-30
 - **Note**: mocked upstream, measures local proxy translation overhead only (no real Together latency)
 - **Key p95 results** (approximate, from latest run):
-  - Large synthetic (codex/claude buffered): 3–5 ms proxy overhead
-  - Captured real Codex headless: ~0.34 ms
-  - Captured real Claude headless: ~1.22 ms
+  - Large synthetic (codex/claude buffered): ~4.7-5.5 ms proxy overhead
+  - Captured real Codex headless: ~0.42 ms
+  - Captured real Claude headless: ~1.64 ms
   - JSON parse/stringify accounts for most of the in-process time on large payloads.
 
 ### Experiment Results
@@ -29,6 +29,7 @@
 - **Session-level proxy perf aggregation**: accepted as a measurement feature. With `TOGETHERLINK_PERF=1`, proxied daemon sessions now collect per-request totals, span totals, and first-delta timing in memory and expose them on session views/cost responses. Verified by `daemon-state.test.ts` and by `TOGETHERLINK_PERF=1` captured-headless proxy benchmark output, which emitted 180 structured `[togetherlink perf]` request payloads while passing.
 - **Cold daemon launch polling interval**: accepted. Five cold `ensureDaemon()` runs with isolated temp homes/ports averaged 212.901 ms (p50 210.157 ms) with the 200 ms health poll interval. Reducing the poll interval to 50 ms averaged 113.462 ms (p50 110.676 ms) across the same five-run shape, while each run reached health and shut down cleanly.
 - **Opt-in delayed vision failover race**: accepted only behind `TOGETHERLINK_VISION_FAILOVER_RACE_DELAY_MS`. The committed `claude-vision-default-primary-success` benchmark kept the default path at one vision request and averaged 21.061 ms (p50 21.171 ms) across five mocked primary-success runs. With a 5 ms opt-in race delay, a 40 ms primary, and a 5 ms fallback, `claude-vision-opt-in-delayed-failover-race` averaged 11.748 ms (p50 11.791 ms) but used two vision requests per image. This stays off by default because the speedup can double billable vision calls.
+- **Worker threads / Rust thin layer / HTTP/2 escalation gate**: rejected for now; no code change. The latest full `pnpm bench:proxy` run measured captured headless Codex at p50 0.235 ms / p95 0.417 ms / mean 0.360 ms, and captured headless Claude at p50 1.024 ms / p95 1.635 ms / mean 1.155 ms. Large in-process synthetic translation measured Codex p50 3.271 ms / p95 4.693 ms / mean 3.533 ms and Claude p50 4.569 ms / p95 6.950 ms / mean 4.861 ms, with most time in JSON parse/stringify rather than non-JSON translation. Large local HTTP proxy overhead versus control was p95 4.735 ms for Codex and 5.478 ms for Claude. That is not enough to justify worker/Rust complexity, and HTTP/2 cannot be validated by the mocked benchmark; it needs live Together A/B telemetry before another code experiment.
 - **Per-commit benchmark series** (`635e552` baseline → `8206a9e` current, `pnpm bench:proxy`, mocked upstream):
   - Captured real-ish payloads: Codex was neutral/slightly noisy (p50 0.233 → 0.242 ms, p95 0.324 → 0.353 ms); Claude improved (p50 1.129 → 0.972 ms, p95 1.577 → 1.286 ms).
   - Claude streaming hygiene: local Claude streamed TTFT p95 improved in the captured TTFT benchmark after the socket flags landed (8.195 → 4.832 ms), while p50 was roughly similar/slightly higher (4.160 → 4.460 ms). Treat as a local p95 consistency win, not a live-network proof.
@@ -56,7 +57,7 @@
 | Parallel native tool (Exa) execution when model emits several            | Faster tool-turn latency when multiple searches                         | Low                                                         | Tool-heavy captured sessions                                     | Implemented for Claude streamed search    |
 | Real session telemetry for proxy overhead / TTFT / vision cost           | Ground all future decisions in production data                          | Low (opt-in or debug-gated)                                 | Add to existing telemetry under perf flag or sampled             | Implemented opt-in session perf summary   |
 | Parallelize vision failover (delayed race / after first is slow)         | Faster image description on cold images                                 | **High** (can double billable vision calls)                 | Vision latency + cost tracking in live runs                      | Implemented opt-in env safeguard          |
-| Worker threads for translation / Rust thin layer / HTTP/2 to Together    | Big wins on CPU-bound or connection paths                               | High (complexity, maintenance)                              | Only after real telemetry shows local CPU is visible vs upstream | **Premature** — revisit after measurement |
+| Worker threads for translation / Rust thin layer / HTTP/2 to Together    | Big wins on CPU-bound or connection paths                               | High (complexity, maintenance)                              | Only after real telemetry shows local CPU is visible vs upstream | Rejected by timing gate; needs live A/B   |
 | Launch path slimming (daemon ensure, registration)                       | Lower time from `togetherlink claude` to first agent output             | Low                                                         | Instrument launcher timings                                      | Implemented cold daemon poll reduction    |
 
 ## Next 3 Steps
