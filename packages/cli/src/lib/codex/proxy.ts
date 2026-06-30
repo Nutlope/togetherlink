@@ -5,6 +5,7 @@ import { TOGETHER_BASE_URL } from "../together-core.js";
 import { findModelById, MINIMAX_M3, type ModelDefinition } from "@togetherlink/models";
 import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
+import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
 
 type ResponsesContentPart = {
@@ -231,6 +232,10 @@ export async function handleCodexProxyRequest(
   options: CodexProxyOptions,
 ): Promise<void> {
   const path = requestPath(req);
+  const perf = createProxyPerfTracer("codex.proxy", {
+    method: req.method,
+    path,
+  });
   debugLog(options, "http request", { method: req.method, url: req.url, path });
 
   if (req.method === "HEAD" && path === "/") {
@@ -254,17 +259,21 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  const body = (await readJsonBody(req)) as ResponsesRequest;
-  const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
-  const toolTranslation = translateCodexTools(body.tools);
-  const requestModel = resolveCodexRequestModel(body, options);
-  const translatedPayload = toChatPayload(
-    body,
-    options,
-    Boolean(body.stream),
-    toolTranslation,
-    requestModel,
-  );
+  const body = (await perf.span("body_read_parse", () => readJsonBody(req))) as ResponsesRequest;
+  const translated = perf.spanSync("translate_request", () => {
+    const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
+    const toolTranslation = translateCodexTools(body.tools);
+    const requestModel = resolveCodexRequestModel(body, options);
+    const translatedPayload = toChatPayload(
+      body,
+      options,
+      Boolean(body.stream),
+      toolTranslation,
+      requestModel,
+    );
+    return { nativeToolCount, toolTranslation, requestModel, translatedPayload };
+  });
+  const { nativeToolCount, toolTranslation, requestModel, translatedPayload } = translated;
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -288,27 +297,43 @@ export async function handleCodexProxyRequest(
   });
 
   if (body.stream) {
-    await streamResponseFromTogether(
-      res,
-      body,
-      options,
-      translatedPayload,
-      toolTranslation,
-      requestModel.definition,
-      upstreamAbort.signal,
+    await perf.span(
+      "stream_response",
+      () =>
+        streamResponseFromTogether(
+          res,
+          body,
+          options,
+          translatedPayload,
+          toolTranslation,
+          requestModel.definition,
+          upstreamAbort.signal,
+          perf,
+        ),
+      { nativeToolCount },
     );
+    perf.end({ status: res.statusCode, stream: true });
     return;
   }
 
-  const chatResponse = await callTogetherWithNativeTools(
-    translatedPayload,
-    toolTranslation,
-    options,
-    requestModel.definition,
-    upstreamAbort.signal,
+  const chatResponse = await perf.span(
+    "upstream_fetch_and_tool_loop",
+    () =>
+      callTogetherWithNativeTools(
+        translatedPayload,
+        toolTranslation,
+        options,
+        requestModel.definition,
+        upstreamAbort.signal,
+      ),
+    { nativeToolCount },
   );
   recordUsage(chatResponse.usage, options, requestModel.definition);
-  writeJson(res, 200, toResponsesResponse(chatResponse, body, options, toolTranslation));
+  const responseBody = perf.spanSync("response_map", () =>
+    toResponsesResponse(chatResponse, body, options, toolTranslation),
+  );
+  writeJson(res, 200, responseBody);
+  perf.end({ status: res.statusCode, stream: false });
 }
 
 async function callTogether(
@@ -1122,6 +1147,7 @@ async function streamResponseFromTogether(
   toolTranslation: CodexToolTranslation,
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<StreamProxyResult> {
   const responseId = `resp_${randomUUID().replaceAll("-", "")}`;
   res.writeHead(200, {
@@ -1171,6 +1197,7 @@ async function streamResponseFromTogether(
       outputState,
       responseId,
       signal,
+      perf,
     );
   }
 
@@ -1185,6 +1212,7 @@ async function streamResponseFromTogether(
       modelDefinition,
       outputState,
       signal,
+      perf,
     );
   } catch (err) {
     if (err instanceof SseIdleTimeoutError) {
@@ -1217,8 +1245,13 @@ async function streamTogetherTurn(
   modelDefinition: ModelDefinition,
   outputState: StreamOutputState,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<StreamTurnResult> {
-  const upstreamResult = await fetchTogetherChat(payload, options, modelDefinition, signal);
+  const upstreamResult = await (perf?.span(
+    "upstream_fetch",
+    () => fetchTogetherChat(payload, options, modelDefinition, signal),
+    { stream: true },
+  ) ?? fetchTogetherChat(payload, options, modelDefinition, signal));
   if (!upstreamResult.ok) {
     const message = `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}`;
     return { ok: false, status: upstreamResult.status, error: message };
@@ -1262,6 +1295,7 @@ async function streamTogetherTurn(
     const reasoningDelta = delta.reasoning ?? delta.reasoning_content;
     if (reasoningDelta) {
       madeProgress = true;
+      perf?.markOnce("first_delta", { kind: "reasoning" });
       openReasoningOutputItem(res, outputState);
       outputState.reasoningText += reasoningDelta;
       reasoningText += reasoningDelta;
@@ -1275,6 +1309,7 @@ async function streamTogetherTurn(
     }
     if (delta.content) {
       madeProgress = true;
+      perf?.markOnce("first_delta", { kind: "text" });
       openTextOutputItem(res, outputState);
       outputState.text += delta.content;
       text += delta.content;
@@ -1289,6 +1324,7 @@ async function streamTogetherTurn(
     for (const toolCall of delta.tool_calls ?? []) {
       if (toolCall.id || toolCall.function?.name || toolCall.function?.arguments) {
         madeProgress = true;
+        perf?.markOnce("first_delta", { kind: "tool_call" });
       }
       const index = toolCall.index ?? 0;
       const current = toolCalls.get(index) ?? {
@@ -1339,6 +1375,7 @@ async function streamResponseWithNativeTools(
   outputState: StreamOutputState,
   responseId: string,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<StreamProxyResult> {
   const messages = Array.isArray(payload.messages)
     ? ([...(payload.messages as ChatMessage[])] as ChatMessage[])
@@ -1359,6 +1396,7 @@ async function streamResponseWithNativeTools(
         modelDefinition,
         outputState,
         signal,
+        perf,
       );
     } catch (err) {
       if (err instanceof SseIdleTimeoutError) {
@@ -1479,6 +1517,7 @@ async function streamTogetherTurnWithIdleRetries(
   modelDefinition: ModelDefinition,
   outputState: StreamOutputState,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<StreamTurnResult> {
   const maxRetries = codexStreamIdleRetries();
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -1492,6 +1531,7 @@ async function streamTogetherTurnWithIdleRetries(
         modelDefinition,
         outputState,
         signal,
+        perf,
       );
     } catch (err) {
       if (

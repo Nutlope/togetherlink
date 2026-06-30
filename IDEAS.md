@@ -27,7 +27,7 @@
 
 | Idea                                                                     | Expected win                                                            | Risk                                                        | How to measure                                                   | Status                                    |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------- |
-| Add `TOGETHERLINK_PERF=1` phase timings in proxy handlers                | See real breakdown (parse, translate, vision, fetch, TTFT) vs synthetic | Very low                                                    | Instrumented runs + captured fixtures + live sessions            | **High priority**                         |
+| Add `TOGETHERLINK_PERF=1` phase timings in proxy handlers                | See real breakdown (parse, translate, vision, fetch, TTFT) vs synthetic | Very low                                                    | Instrumented runs + captured fixtures + live sessions            | Implemented                               |
 | Improve benchmarks: TTFT + concurrent daemon load + real payloads        | Know whether local overhead is material next to network/vision          | Low                                                         | Extend `proxy-performance.bench.ts` + add live smoke             | **High priority**                         |
 | Add Claude `flushHeaders()` + `setNoDelay(true)` (match Codex)           | Lower and more consistent TTFT on streaming                             | Very low                                                    | Streaming TTFT microbench + real Claude Code sessions            | **High priority**                         |
 | Guard / remove sync debug logging (`appendFileSync`)                     | Eliminate potential FS stalls when debug is on                          | Very low                                                    | Microbench with/without debug + `TOGETHERLINK_DEBUG_LOG`         | **High priority**                         |
@@ -43,7 +43,7 @@
 
 ## Next 3 Steps
 
-1. **This week**: Add `TOGETHERLINK_PERF=1` phase timings (body read, translate, vision, fetch, first delta, etc.) in the proxy handlers.
+1. **Done**: Add `TOGETHERLINK_PERF=1` phase timings (body read, translate, vision, fetch, first delta, etc.) in the proxy handlers.
 2. **Next**: Extend the benchmark with streaming TTFT measurement and implement Claude `flushHeaders()` + `setNoDelay(true)`.
 3. **Then**: Run live A/B tests against real Together (not mocked) for keep-alive tuning and end-to-end TTFT on actual sessions.
 

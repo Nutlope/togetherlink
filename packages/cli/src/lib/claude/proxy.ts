@@ -14,6 +14,7 @@ import {
   type UrlBlock,
 } from "./vision.js";
 import { stableHash } from "../stable-hash.js";
+import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -376,6 +377,10 @@ export async function handleProxyRequest(
   options: ClaudeProxyOptions,
 ): Promise<void> {
   const path = requestPath(req);
+  const perf = createProxyPerfTracer("claude.proxy", {
+    method: req.method,
+    path,
+  });
   debugLog(options, "http request", { method: req.method, url: req.url, path });
 
   if (req.method === "HEAD" && path === "/") {
@@ -447,7 +452,9 @@ export async function handleProxyRequest(
     return;
   }
 
-  const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
+  const body = (await perf.span("body_read_parse", () =>
+    readJsonBody(req),
+  )) as AnthropicMessagesRequest;
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -472,9 +479,15 @@ export async function handleProxyRequest(
   }
   // GLM-5.2 can't see images: describe each image/url block with a vision model
   // and replace it with a text block, so GLM reasons over the description.
-  await resolveImageBlocks(body, options);
+  await perf.span("vision_image_resolution", () => resolveImageBlocks(body, options), {
+    imageBlockCount: imageBlocks.length,
+  });
   if (body.stream) {
-    await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal);
+    await perf.span(
+      "stream_response",
+      () => streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, perf),
+      { nativeToolCount: nativeServerTools(body.tools).length },
+    );
     const delta = options.costTracker?.requestDelta;
     const totals = options.costTracker?.totals;
     if (options.debug && delta && totals) {
@@ -486,11 +499,19 @@ export async function handleProxyRequest(
         sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
       });
     }
+    perf.end({ status: res.statusCode, stream: true });
     return;
   }
 
-  const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal);
-  const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
+  const openAiResponse = await callTogetherChatCompletions(
+    body,
+    options,
+    upstreamAbort.signal,
+    perf,
+  );
+  const anthropicMessage = perf.spanSync("response_map", () =>
+    toAnthropicMessage(openAiResponse, body.model ?? options.modelId),
+  );
 
   const delta = options.costTracker?.requestDelta;
   const totals = options.costTracker?.totals;
@@ -505,6 +526,7 @@ export async function handleProxyRequest(
   }
 
   writeJson(res, 200, anthropicMessage);
+  perf.end({ status: res.statusCode, stream: false });
 }
 
 function trimPayloadInputForContextLengthRetry(
@@ -618,13 +640,26 @@ async function callTogetherChatCompletions(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<OpenAIChatResponse> {
-  const targetModel = resolveTargetModel(body.model, options);
-  const nativeTools = nativeServerTools(body.tools);
+  const translated =
+    perf?.spanSync("translate_request", () => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const nativeTools = nativeServerTools(body.tools);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const tools = toOpenAITools(body.tools, options);
+      return { targetModel, nativeTools, messages, tools };
+    }) ??
+    (() => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const nativeTools = nativeServerTools(body.tools);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const tools = toOpenAITools(body.tools, options);
+      return { targetModel, nativeTools, messages, tools };
+    })();
+  const { targetModel, nativeTools, messages, tools } = translated;
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
-  const messages = toOpenAIMessages(body, targetModel.definition);
-  const tools = toOpenAITools(body.tools, options);
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
@@ -655,7 +690,11 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    let response = await fetchTogether(payload, options, signal);
+    let response = await (perf?.span(
+      "upstream_fetch",
+      () => fetchTogether(payload, options, signal),
+      { turn },
+    ) ?? fetchTogether(payload, options, signal));
     if (!response.ok) {
       const initialError = response.error;
       const retryMaxTokens = maxTokensForContextLengthRetry(
@@ -672,7 +711,11 @@ async function callTogetherChatCompletions(
           originalError: initialError.message,
           turn,
         });
-        response = await fetchTogether(payload, options, signal);
+        response = await (perf?.span(
+          "upstream_fetch_retry",
+          () => fetchTogether(payload, options, signal),
+          { turn, reason: "max_tokens" },
+        ) ?? fetchTogether(payload, options, signal));
       } else if (canTrimInputForContextLengthRetry(initialError, targetModel.definition)) {
         const trimmed = trimPayloadInputForContextLengthRetry(
           payload,
@@ -686,7 +729,11 @@ async function callTogetherChatCompletions(
             originalError: initialError.message,
             turn,
           });
-          response = await fetchTogether(payload, options, signal);
+          response = await (perf?.span(
+            "upstream_fetch_retry",
+            () => fetchTogether(payload, options, signal),
+            { turn, reason: "trim_context" },
+          ) ?? fetchTogether(payload, options, signal));
         }
       }
     }
@@ -757,7 +804,11 @@ async function callTogetherChatCompletions(
         result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
       } else if (nativeTool?.kind === "web_search") {
         nativeToolUses.set(name, priorUses + 1);
-        result = await runExaSearch(input, nativeTool.definition, options);
+        result = await (perf?.span(
+          "native_tool",
+          () => runExaSearch(input, nativeTool.definition, options),
+          { name },
+        ) ?? runExaSearch(input, nativeTool.definition, options));
       } else {
         result = "Unsupported native server tool.";
       }
@@ -1421,15 +1472,49 @@ async function streamAnthropicFromTogether(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<StreamProxyResult> {
-  const targetModel = resolveTargetModel(body.model, options);
-  const messages = toOpenAIMessages(body, targetModel.definition);
-  const nativeTools = nativeServerTools(body.tools);
-  const upstreamMessages =
-    nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
-  const tools = toOpenAITools(body.tools, options);
-  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-  let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+  const translated =
+    perf?.spanSync("translate_request", () => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const nativeTools = nativeServerTools(body.tools);
+      const upstreamMessages =
+        nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+      const tools = toOpenAITools(body.tools, options);
+      const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+      const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+      return {
+        targetModel,
+        messages,
+        nativeTools,
+        upstreamMessages,
+        tools,
+        reasoningEffort,
+        maxTokens,
+      };
+    }) ??
+    (() => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const nativeTools = nativeServerTools(body.tools);
+      const upstreamMessages =
+        nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+      const tools = toOpenAITools(body.tools, options);
+      const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+      const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+      return {
+        targetModel,
+        messages,
+        nativeTools,
+        upstreamMessages,
+        tools,
+        reasoningEffort,
+        maxTokens,
+      };
+    })();
+  const { targetModel, nativeTools, upstreamMessages, tools, reasoningEffort } = translated;
+  let { maxTokens } = translated;
 
   const payload = {
     model: targetModel.definition.id,
@@ -1459,15 +1544,26 @@ async function streamAnthropicFromTogether(
 
   let response: Response;
   try {
-    response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
+    response = await (perf?.span("upstream_fetch", () =>
+      fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        ...(signal ? { signal } : {}),
+      }),
+    ) ??
+      fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        ...(signal ? { signal } : {}),
+      }));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1486,15 +1582,29 @@ async function streamAnthropicFromTogether(
         originalError: error.message,
       });
       try {
-        response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${options.apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-          ...(signal ? { signal } : {}),
-        });
+        response = await (perf?.span(
+          "upstream_fetch_retry",
+          () =>
+            fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${options.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+              ...(signal ? { signal } : {}),
+            }),
+          { reason: "max_tokens" },
+        ) ??
+          fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${options.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            ...(signal ? { signal } : {}),
+          }));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1512,15 +1622,29 @@ async function streamAnthropicFromTogether(
           originalError: error.message,
         });
         try {
-          response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${options.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-            ...(signal ? { signal } : {}),
-          });
+          response = await (perf?.span(
+            "upstream_fetch_retry",
+            () =>
+              fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${options.apiKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+                ...(signal ? { signal } : {}),
+              }),
+            { reason: "trim_context" },
+          ) ??
+            fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${options.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+              ...(signal ? { signal } : {}),
+            }));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1616,13 +1740,16 @@ async function streamAnthropicFromTogether(
         if (delta) {
           const reasoning = delta.reasoning ?? delta.reasoning_content;
           if (typeof reasoning === "string" && reasoning.length > 0) {
+            perf?.markOnce("first_delta", { kind: "thinking" });
             blockManager.emitThinking(reasoning);
           }
           if (typeof delta.content === "string" && delta.content.length > 0) {
+            perf?.markOnce("first_delta", { kind: "text" });
             blockManager.emitText(delta.content);
           }
           if (Array.isArray(delta.tool_calls)) {
             for (const toolCall of delta.tool_calls) {
+              perf?.markOnce("first_delta", { kind: "tool_call" });
               blockManager.emitToolCall(toolCall);
             }
           }
