@@ -2187,26 +2187,75 @@ function parseStreamData(data: string): {
  * into one payload before parsing.
  */
 function consumeSseLines(buffer: string, onData: (data: string) => void): string {
-  let remaining = buffer;
+  let consumed = 0;
   for (;;) {
-    // Find the next event boundary (blank line = \n\n, or \r\n\r\n).
-    const boundary = remaining.search(/\r?\n\r?\n/);
-    if (boundary === -1) {
+    const boundary = findSseBoundary(buffer, consumed);
+    if (!boundary) {
       break;
     }
-    const rawEvent = remaining.slice(0, boundary);
-    remaining = remaining.replace(/.*?(\r?\n){2}/s, "");
-    // Within one event, concatenate every `data:` line (strip the prefix). A
-    // multi-line data field arrives as separate `data:` lines per OpenAI SSE.
-    const dataLines = rawEvent
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).replace(/^ /, ""));
-    if (dataLines.length > 0) {
-      onData(dataLines.join("\n"));
+    const data = sseDataPayload(buffer.slice(consumed, boundary.index));
+    if (data !== undefined) {
+      onData(data);
     }
+    consumed = boundary.index + boundary.length;
   }
-  return remaining;
+  return buffer.slice(consumed);
+}
+
+function findSseBoundary(
+  buffer: string,
+  fromIndex: number,
+): { index: number; length: number } | undefined {
+  let newline = buffer.indexOf("\n", fromIndex);
+  while (newline !== -1) {
+    const next = newline + 1;
+    const nextCode = buffer.charCodeAt(next);
+    if (nextCode === 10) {
+      return { index: newline, length: 2 };
+    }
+    if (nextCode === 13 && buffer.charCodeAt(next + 1) === 10) {
+      return { index: newline, length: 3 };
+    }
+    if (newline > fromIndex && buffer.charCodeAt(newline - 1) === 13) {
+      if (nextCode === 10) {
+        return { index: newline - 1, length: 3 };
+      }
+      if (nextCode === 13 && buffer.charCodeAt(next + 1) === 10) {
+        return { index: newline - 1, length: 4 };
+      }
+    }
+    newline = buffer.indexOf("\n", next);
+  }
+  return undefined;
+}
+
+function sseDataPayload(rawEvent: string): string | undefined {
+  let payload = "";
+  let hasData = false;
+  let lineStart = 0;
+  for (;;) {
+    let lineEnd = rawEvent.indexOf("\n", lineStart);
+    if (lineEnd === -1) {
+      lineEnd = rawEvent.length;
+    }
+    const line =
+      lineEnd > lineStart && rawEvent.charCodeAt(lineEnd - 1) === 13
+        ? rawEvent.slice(lineStart, lineEnd - 1)
+        : rawEvent.slice(lineStart, lineEnd);
+    if (line.startsWith("data:")) {
+      const valueStart = line.charCodeAt(5) === 32 ? 6 : 5;
+      if (hasData) {
+        payload += "\n";
+      }
+      payload += line.slice(valueStart);
+      hasData = true;
+    }
+    if (lineEnd === rawEvent.length) {
+      break;
+    }
+    lineStart = lineEnd + 1;
+  }
+  return hasData ? payload : undefined;
 }
 
 /**
