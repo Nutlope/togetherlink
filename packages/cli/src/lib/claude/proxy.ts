@@ -1677,6 +1677,8 @@ async function streamAnthropicFromTogether(
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
+  res.flushHeaders();
+  res.socket?.setNoDelay(true);
 
   const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
   const model = body.model ?? options.modelId;
