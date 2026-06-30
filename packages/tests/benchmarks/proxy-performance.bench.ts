@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
 import { CostTracker } from "../../cli/src/lib/claude/cost.js";
 import { handleProxyRequest, type ClaudeProxyOptions } from "../../cli/src/lib/claude/proxy.js";
+import { describeImage } from "../../cli/src/lib/claude/vision.js";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
@@ -699,6 +700,75 @@ test("streamed native web search tool latency", async () => {
   expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
 }, 30_000);
 
+test("vision delayed failover timing", async () => {
+  const defaultResult = await benchmarkVisionScenario(
+    "claude-vision-default-primary-success",
+    5,
+    1,
+    async () => {
+      vi.unstubAllEnvs();
+      let requests = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+          requests += 1;
+          await sleep(20, init?.signal);
+          return visionJsonResponse("primary description");
+        }),
+      );
+
+      const result = await describeImage(visionBenchmarkImage(), { apiKey: "local-token" });
+      if (result.description !== "primary description") {
+        throw new Error(`unexpected default vision description: ${result.description}`);
+      }
+      return requests;
+    },
+  );
+  const raceResult = await benchmarkVisionScenario(
+    "claude-vision-opt-in-delayed-failover-race",
+    5,
+    1,
+    async () => {
+      vi.stubEnv("TOGETHERLINK_VISION_FAILOVER_RACE_DELAY_MS", "5");
+      let requests = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+          requests += 1;
+          if (requests === 1) {
+            await sleep(40, init?.signal);
+            return visionJsonResponse("slow primary description");
+          }
+          await sleep(5, init?.signal);
+          return visionJsonResponse("fast fallback description");
+        }),
+      );
+
+      const result = await describeImage(visionBenchmarkImage(), { apiKey: "local-token" });
+      if (result.description !== "fast fallback description") {
+        throw new Error(`unexpected raced vision description: ${result.description}`);
+      }
+      return requests;
+    },
+  );
+  const result = {
+    rows: [defaultResult.row, raceResult.row],
+    requestCounts: {
+      default: defaultResult.requestCounts,
+      optInRace: raceResult.requestCounts,
+    },
+    notes: [
+      "Mocks primary vision latency and delayed fallback latency through the real describeImage path.",
+      "The opt-in race is faster only in the slow-primary scenario and uses two vision requests per image.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(defaultResult.requestCounts.every((count) => count === 1)).toBe(true);
+  expect(raceResult.requestCounts.every((count) => count === 2)).toBe(true);
+  expect(raceResult.row.p50Ms).toBeLessThan(defaultResult.row.p50Ms);
+}, 30_000);
+
 async function benchmark(
   name: string,
   iterations: number,
@@ -738,6 +808,28 @@ function summarizeDurations(name: string, iterations: number, durations: number[
     iterations,
     ...summary,
   };
+}
+
+async function benchmarkVisionScenario(
+  name: string,
+  iterations: number,
+  warmup: number,
+  fn: () => Promise<number>,
+): Promise<{ row: BenchmarkRow; requestCounts: number[] }> {
+  for (let i = 0; i < warmup; i += 1) {
+    await fn();
+  }
+
+  const durations: number[] = [];
+  const requestCounts: number[] = [];
+  for (let i = 0; i < iterations; i += 1) {
+    const started = performance.now();
+    const requests = await fn();
+    durations.push(performance.now() - started);
+    requestCounts.push(requests);
+  }
+
+  return { row: summarizeDurations(name, iterations, durations), requestCounts };
 }
 
 async function benchmarkStreamingTtft(
@@ -1264,6 +1356,24 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+function visionJsonResponse(content: string): Response {
+  return jsonResponse({
+    choices: [{ message: { content } }],
+    usage: { prompt_tokens: 10, completion_tokens: 3 },
+  });
+}
+
+function visionBenchmarkImage() {
+  return {
+    type: "image" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "image/png",
+      data: "abc123",
+    },
+  };
+}
+
 function sseResponse(chunks: unknown[]): Response {
   return new Response(
     `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
@@ -1366,6 +1476,19 @@ async function fetchTextWithTtft(
   return { ttftMs };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
 }

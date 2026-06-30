@@ -61,6 +61,7 @@ async function callVisionModel(
   model: string,
   imageUrl: string,
   options: VisionRequestOptions,
+  signal?: AbortSignal,
 ): Promise<VisionOutcome> {
   const body = {
     model,
@@ -89,6 +90,7 @@ async function callVisionModel(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     });
     const text = await response.text();
     if (!response.ok) {
@@ -148,6 +150,14 @@ export async function describeImage(
     return { description: "[Image unavailable: could not read image data]", model: "none" };
   }
 
+  const raceDelayMs = visionFailoverRaceDelayMs();
+  if (raceDelayMs !== undefined && VISION_MODELS.length >= 2) {
+    const raced = await describeImageWithDelayedFailoverRace(imageUrl, options, raceDelayMs);
+    if (raced !== undefined) {
+      return raced;
+    }
+  }
+
   for (const model of VISION_MODELS) {
     const outcome = await callVisionModel(model.id, imageUrl, options);
     if (outcome.ok) {
@@ -159,6 +169,110 @@ export async function describeImage(
     description: "[Image description unavailable: all vision models failed]",
     model: "none",
   };
+}
+
+async function describeImageWithDelayedFailoverRace(
+  imageUrl: string,
+  options: VisionRequestOptions,
+  delayMs: number,
+): Promise<
+  | {
+      description: string;
+      model: string;
+      usage?: { promptTokens: number; completionTokens: number; cachedTokens: number };
+    }
+  | undefined
+> {
+  const primary = VISION_MODELS[0];
+  const fallback = VISION_MODELS[1];
+  if (!primary || !fallback) {
+    return undefined;
+  }
+
+  const primaryController = new AbortController();
+  let fallbackController: AbortController | undefined;
+  let fallbackStarted = false;
+  let fallbackPromise: Promise<{ source: "fallback"; outcome: VisionOutcome }> | undefined;
+  let fallbackTimer: NodeJS.Timeout | undefined;
+
+  const primaryPromise = callVisionModel(
+    primary.id,
+    imageUrl,
+    options,
+    primaryController.signal,
+  ).then((outcome) => ({ source: "primary" as const, outcome }));
+  const startFallback = () => {
+    fallbackStarted = true;
+    fallbackController = new AbortController();
+    fallbackPromise = callVisionModel(
+      fallback.id,
+      imageUrl,
+      options,
+      fallbackController.signal,
+    ).then((outcome) => ({ source: "fallback" as const, outcome }));
+    return fallbackPromise;
+  };
+  const delayedFallbackPromise = new Promise<{ source: "fallback"; outcome: VisionOutcome }>(
+    (resolve) => {
+      fallbackTimer = setTimeout(() => {
+        startFallback().then(resolve);
+      }, delayMs);
+    },
+  );
+
+  const first = await Promise.race([primaryPromise, delayedFallbackPromise]);
+  if (first.outcome.ok) {
+    if (fallbackTimer && !fallbackStarted) {
+      clearTimeout(fallbackTimer);
+    }
+    if (first.source === "primary") {
+      fallbackController?.abort();
+    } else {
+      primaryController.abort();
+    }
+    return {
+      description: first.outcome.description,
+      model: first.outcome.model,
+      usage: first.outcome.usage,
+    };
+  }
+
+  debug(options, "vision fallback", { from: first.outcome.model, reason: first.outcome.error });
+  if (fallbackTimer && !fallbackStarted) {
+    clearTimeout(fallbackTimer);
+    const second = await startFallback();
+    if (second.outcome.ok) {
+      return {
+        description: second.outcome.description,
+        model: second.outcome.model,
+        usage: second.outcome.usage,
+      };
+    }
+    debug(options, "vision fallback", {
+      from: second.outcome.model,
+      reason: second.outcome.error,
+    });
+    return undefined;
+  }
+
+  const second = first.source === "primary" ? await fallbackPromise : await primaryPromise;
+  if (second?.outcome.ok) {
+    return {
+      description: second.outcome.description,
+      model: second.outcome.model,
+      usage: second.outcome.usage,
+    };
+  }
+  if (second && !second.outcome.ok) {
+    debug(options, "vision fallback", { from: second.outcome.model, reason: second.outcome.error });
+  }
+  return undefined;
+}
+
+function visionFailoverRaceDelayMs(): number | undefined {
+  const raw = process.env.TOGETHERLINK_VISION_FAILOVER_RACE_DELAY_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 /** Convert an Anthropic image/url block into an OpenAI `image_url` data URL. */
