@@ -12,12 +12,17 @@ import type { ProxyPerfPayload } from "../../cli/src/lib/proxy-perf.js";
 const maybeTest = process.env.TOGETHERLINK_LIVE_PROXY_BENCH === "1" ? test : test.skip;
 const maybeConnectionTest =
   process.env.TOGETHERLINK_LIVE_CONNECTION_BENCH === "1" ? test : test.skip;
+const maybeGenerationConnectionTest =
+  process.env.TOGETHERLINK_LIVE_GENERATION_CONNECTION_BENCH === "1" ? test : test.skip;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const iterations = positiveInt(process.env.TOGETHERLINK_LIVE_PROXY_BENCH_ITERATIONS) ?? 5;
 const warmup = positiveInt(process.env.TOGETHERLINK_LIVE_PROXY_BENCH_WARMUP) ?? 1;
+const concurrentRequests = positiveInt(process.env.TOGETHERLINK_LIVE_PROXY_BENCH_CONCURRENCY) ?? 3;
+const realFetch = globalThis.fetch.bind(globalThis);
 
 afterEach(() => {
   delete process.env.TOGETHERLINK_PERF;
+  globalThis.fetch = realFetch;
 });
 
 maybeTest(
@@ -117,6 +122,100 @@ maybeConnectionTest(
   60_000,
 );
 
+maybeGenerationConnectionTest(
+  "live Together generation connection reuse diagnostic",
+  async () => {
+    const apiKey = await resolveTogetherApiKey();
+    const authToken = `live-generation-connection-${Date.now()}`;
+    const costTracker = new CostTracker(GLM_5_2);
+    const perfPayloads: ProxyPerfPayload[] = [];
+    let perfCondition = "unlabeled";
+    const { proxyUrl, close } = await startClaudeProxyServer({
+      apiKey,
+      authToken,
+      costTracker,
+      perfPayloads,
+      perfCondition: () => perfCondition,
+    });
+    const withPerfCondition = async <T>(condition: string, fn: () => Promise<T>): Promise<T> => {
+      const previous = perfCondition;
+      perfCondition = condition;
+      try {
+        return await fn();
+      } finally {
+        perfCondition = previous;
+      }
+    };
+
+    try {
+      const result = {
+        model: GLM_5_2.id,
+        prompt: "Reply with exactly: pong",
+        maxTokens: 12,
+        iterations,
+        warmup,
+        concurrentRequests,
+        sequential: [
+          await runPairedSeries(
+            "direct-generation-sequential",
+            () => directBuffered(apiKey),
+            () => withTogetherConnectionClose(() => directBuffered(apiKey)),
+          ),
+          await runPairedSeries(
+            "proxy-generation-sequential",
+            () =>
+              withPerfCondition("proxy-generation-default-sequential", () =>
+                proxyBuffered(proxyUrl, authToken),
+              ),
+            () =>
+              withTogetherConnectionClose(() =>
+                withPerfCondition("proxy-generation-close-sequential", () =>
+                  proxyBuffered(proxyUrl, authToken),
+                ),
+              ),
+          ),
+        ],
+        concurrent: [
+          await runPairedSeries(
+            "direct-generation-concurrent",
+            () => runConcurrentBatch(() => directBuffered(apiKey)),
+            () =>
+              withTogetherConnectionClose(() => runConcurrentBatch(() => directBuffered(apiKey))),
+          ),
+          await runPairedSeries(
+            "proxy-generation-concurrent",
+            () =>
+              withPerfCondition("proxy-generation-default-concurrent", () =>
+                runConcurrentBatch(() => proxyBuffered(proxyUrl, authToken)),
+              ),
+            () =>
+              withTogetherConnectionClose(() =>
+                withPerfCondition("proxy-generation-close-concurrent", () =>
+                  runConcurrentBatch(() => proxyBuffered(proxyUrl, authToken)),
+                ),
+              ),
+          ),
+        ],
+        proxyPerf: summarizeProxyPerf(perfPayloads),
+        proxyCost: costTracker.totals,
+        notes: [
+          "Hits real Together chat/completions and consumes API credits.",
+          "The forced-close proxy rows wrap benchmark fetch only for Together upstream URLs, leaving production code unchanged.",
+          "Concurrent rows measure wall-clock time for one batch of simultaneous requests.",
+        ],
+      };
+
+      console.log(JSON.stringify(result, null, 2));
+      expect(result.sequential).toHaveLength(2);
+      expect(result.concurrent).toHaveLength(2);
+      expect(perfPayloads.length).toBeGreaterThanOrEqual(iterations * 2);
+    } finally {
+      await close();
+    }
+  },
+  180_000,
+);
+
 async function runSeries(name: string, fn: () => Promise<number>): Promise<BenchmarkRow> {
   for (let i = 0; i < warmup; i += 1) {
     await fn();
@@ -127,6 +226,73 @@ async function runSeries(name: string, fn: () => Promise<number>): Promise<Bench
     values.push(await fn());
   }
   return summarize(name, values);
+}
+
+async function runConcurrentBatch(fn: () => Promise<number>): Promise<number> {
+  const started = performance.now();
+  await Promise.all(Array.from({ length: concurrentRequests }, () => fn()));
+  return performance.now() - started;
+}
+
+async function withTogetherConnectionClose<T>(fn: () => Promise<T>): Promise<T> {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const href =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (!href.startsWith(TOGETHER_BASE_URL)) {
+      return await previousFetch(input, init);
+    }
+    return await previousFetch(input, {
+      ...init,
+      headers: { ...headersObject(init?.headers), connection: "close" },
+    });
+  };
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+}
+
+async function runPairedSeries(
+  name: string,
+  defaultFetch: () => Promise<number>,
+  connectionClose: () => Promise<number>,
+): Promise<PairedBenchmarkRow> {
+  for (let i = 0; i < warmup; i += 1) {
+    if (i % 2 === 0) {
+      await defaultFetch();
+      await connectionClose();
+    } else {
+      await connectionClose();
+      await defaultFetch();
+    }
+  }
+
+  const defaultValues: number[] = [];
+  const closeValues: number[] = [];
+  const deltas: number[] = [];
+  for (let i = 0; i < iterations; i += 1) {
+    let defaultMs: number;
+    let closeMs: number;
+    if (i % 2 === 0) {
+      defaultMs = await defaultFetch();
+      closeMs = await connectionClose();
+    } else {
+      closeMs = await connectionClose();
+      defaultMs = await defaultFetch();
+    }
+    defaultValues.push(defaultMs);
+    closeValues.push(closeMs);
+    deltas.push(closeMs - defaultMs);
+  }
+
+  return {
+    name,
+    defaultFetch: summarize(`${name}-default-fetch`, defaultValues),
+    connectionClose: summarize(`${name}-connection-close`, closeValues),
+    closeMinusDefaultMs: summarize(`${name}-close-minus-default`, deltas),
+  };
 }
 
 async function fetchModels(apiKey: string, extraHeaders: Record<string, string>): Promise<number> {
@@ -220,6 +386,55 @@ async function proxyStream(proxyUrl: string, authToken: string): Promise<StreamT
   return await readStreamTiming(response, started, "content_block_delta");
 }
 
+async function startClaudeProxyServer({
+  apiKey,
+  authToken,
+  costTracker,
+  perfPayloads,
+  perfCondition,
+}: {
+  apiKey: string;
+  authToken: string;
+  costTracker: CostTracker;
+  perfPayloads: ProxyPerfPayload[];
+  perfCondition?: () => string;
+}): Promise<{ proxyUrl: string; close: () => Promise<void> }> {
+  const options: ClaudeProxyOptions = {
+    apiKey,
+    modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    targetModelId: GLM_5_2.id,
+    modelName: GLM_5_2.name,
+    modelDefinition: GLM_5_2,
+    authToken,
+    debug: false,
+    costTracker,
+    perfSink: (payload) =>
+      perfPayloads.push({
+        ...payload,
+        fields: { ...payload.fields, benchCondition: perfCondition?.() },
+      }),
+  };
+  process.env.TOGETHERLINK_PERF = "1";
+  const server = createServer((req, res) => {
+    handleProxyRequest(req, res, options).catch((err) => {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("live proxy benchmark server did not bind");
+  }
+  return {
+    proxyUrl: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      ),
+  };
+}
+
 async function readStreamTiming(
   response: Response,
   started: number,
@@ -288,9 +503,12 @@ async function resolveTogetherApiKey(): Promise<string> {
 function summarizeProxyPerf(payloads: ProxyPerfPayload[]): Record<string, unknown> {
   const byName = new Map<string, ProxyPerfPayload[]>();
   for (const payload of payloads) {
-    const rows = byName.get(payload.name) ?? [];
+    const condition =
+      typeof payload.fields.benchCondition === "string" ? payload.fields.benchCondition : undefined;
+    const name = condition ? `${payload.name}:${condition}` : payload.name;
+    const rows = byName.get(name) ?? [];
     rows.push(payload);
-    byName.set(payload.name, rows);
+    byName.set(name, rows);
   }
 
   return Object.fromEntries(
@@ -356,6 +574,19 @@ function positiveInt(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function headersObject(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return headers;
+}
+
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
@@ -368,6 +599,13 @@ type BenchmarkRow = {
   p95Ms: number;
   meanMs: number;
   maxMs: number;
+};
+
+type PairedBenchmarkRow = {
+  name: string;
+  defaultFetch: BenchmarkRow;
+  connectionClose: BenchmarkRow;
+  closeMinusDefaultMs: BenchmarkRow;
 };
 
 type StreamTiming = {
