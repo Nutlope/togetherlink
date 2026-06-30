@@ -9,6 +9,22 @@ import {
   type StoredSession,
 } from "./storage.js";
 
+const DEFAULT_NO_PID_SESSION_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_NO_PID_SESSIONS = 50;
+const DEFAULT_LAST_SEEN_PERSIST_INTERVAL_MS = 5 * 60 * 1000;
+const NO_PID_SESSION_IDLE_TTL_MS = envInt(
+  "TOGETHERLINK_DAEMON_NO_PID_SESSION_IDLE_TTL_MS",
+  DEFAULT_NO_PID_SESSION_IDLE_TTL_MS,
+);
+const MAX_NO_PID_SESSIONS = envInt(
+  "TOGETHERLINK_DAEMON_MAX_NO_PID_SESSIONS",
+  DEFAULT_MAX_NO_PID_SESSIONS,
+);
+const LAST_SEEN_PERSIST_INTERVAL_MS = envInt(
+  "TOGETHERLINK_DAEMON_LAST_SEEN_PERSIST_INTERVAL_MS",
+  DEFAULT_LAST_SEEN_PERSIST_INTERVAL_MS,
+);
+
 /**
  * Which coding agent a session belongs to. This selects how cost is tracked:
  * - `claude`: the daemon PROXIES the agent's traffic (it
@@ -45,6 +61,8 @@ export type SessionState = {
   /** agent child pid, if the launcher supplied it at register time. */
   pid?: number;
   startedAt: number;
+  lastSeenAt: number;
+  lastSeenPersistedAt?: number;
   endedAt?: number;
   /** Display label for local session status, e.g. "GLM 5.2". */
   modelLabel: string;
@@ -67,6 +85,7 @@ export type SessionPublicView = {
   modelLabel: string;
   pid?: number;
   startedAt: number;
+  lastSeenAt: number;
   endedAt?: number;
   status: "running" | "ended";
   costSummary: string;
@@ -118,10 +137,15 @@ class SessionRegistry {
   register(state: SessionState): void {
     this.map.set(state.token, state);
     this.persistSession(state);
+    this.enforceNoPidSessionLimit(Date.now());
   }
 
   get(token: string): SessionState | undefined {
-    return this.map.get(token);
+    const state = this.map.get(token);
+    if (state) {
+      this.markSeen(state);
+    }
+    return state;
   }
 
   delete(token: string): boolean {
@@ -163,18 +187,36 @@ class SessionRegistry {
     this.store = await createSessionStore();
     const persisted = this.store.restoreActiveSessions();
     let restored = 0;
+    const now = Date.now();
     for (const session of persisted) {
       if (session.pid !== undefined && !isAlive(session.pid)) {
         this.store.markSessionEnded(
           session.token,
-          Date.now(),
+          now,
           "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
           { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 },
         );
         continue;
       }
+      const lastSeenAt = session.lastSeenAt ?? session.startedAt;
+      if (session.pid === undefined && isNoPidSessionIdle(lastSeenAt, now)) {
+        this.store.markSessionEnded(
+          session.token,
+          now,
+          session.externalSummary ?? "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
+          {
+            promptTokens: session.promptTokens ?? 0,
+            cachedTokens: session.cachedTokens ?? 0,
+            completionTokens: session.completionTokens ?? 0,
+            costUsd: session.costUsd ?? 0,
+          },
+        );
+        continue;
+      }
       const state = buildSession(session);
       state.startedAt = session.startedAt;
+      state.lastSeenAt = lastSeenAt;
+      state.lastSeenPersistedAt = lastSeenAt;
       if (session.externalSummary !== undefined) {
         state.externalSummary = session.externalSummary;
       }
@@ -190,22 +232,27 @@ class SessionRegistry {
       this.map.set(state.token, state);
       restored += 1;
     }
+    restored -= this.enforceNoPidSessionLimit(now);
     return restored;
   }
 
   /**
-   * Drop sessions whose owning launcher is gone. A session registered with a
+   * Drop sessions whose owning launcher is gone or whose no-pid owner has gone
+   * idle too long. A session registered with a
    * `pid` (the agent child) is reaped when that pid is no longer alive — covers
    * the kill -9 / terminal-closed case where the launcher never gets to call
-   * DELETE. Sessions registered without a pid, or whose pid is owned by another
-   * user (EPERM — can't tell if alive), are left alone; they're reaped by
-   * deregister on the normal exit path, and a long-lived orphan there is a
-   * bounded, small per-session cost rather than an unbounded leak.
+   * DELETE. Sessions registered without a pid are kept for persistent app-style
+   * integrations, but only up to an idle TTL and count cap.
    */
   reapDead(): number {
     let removed = 0;
+    const now = Date.now();
     for (const state of this.map.values()) {
       if (state.pid === undefined) {
+        if (isNoPidSessionIdle(state.lastSeenAt, now)) {
+          this.delete(state.token);
+          removed += 1;
+        }
         continue;
       }
       if (!isAlive(state.pid)) {
@@ -213,6 +260,7 @@ class SessionRegistry {
         removed += 1;
       }
     }
+    removed += this.enforceNoPidSessionLimit(now);
     return removed;
   }
 
@@ -239,6 +287,36 @@ class SessionRegistry {
 
   private persistSession(state: SessionState): void {
     this.store?.upsertSession(toPersistedSession(state));
+  }
+
+  private markSeen(state: SessionState): void {
+    const now = Date.now();
+    state.lastSeenAt = now;
+    if (now - (state.lastSeenPersistedAt ?? 0) < LAST_SEEN_PERSIST_INTERVAL_MS) {
+      return;
+    }
+    state.lastSeenPersistedAt = now;
+    this.store?.updateSessionLastSeen(state.token, now);
+  }
+
+  private enforceNoPidSessionLimit(now: number): number {
+    const noPidSessions = [...this.map.values()]
+      .filter((state) => state.pid === undefined)
+      .sort((a, b) => a.lastSeenAt - b.lastSeenAt);
+    const overflow = noPidSessions.length - MAX_NO_PID_SESSIONS;
+    if (overflow <= 0) {
+      return 0;
+    }
+    let removed = 0;
+    for (const state of noPidSessions.slice(0, overflow)) {
+      if (state.lastSeenAt > now) {
+        continue;
+      }
+      if (this.delete(state.token)) {
+        removed += 1;
+      }
+    }
+    return removed;
   }
 }
 
@@ -271,10 +349,13 @@ export function isProxiedAgent(agent: AgentId): boolean {
 export function buildSession(req: RegisterSessionRequest): SessionState {
   const agent: AgentId = req.agent ?? "claude";
   const costTracker = new CostTracker(req.modelDefinition);
+  const now = Date.now();
   const state: SessionState = {
     token: req.token,
     agent,
-    startedAt: Date.now(),
+    startedAt: now,
+    lastSeenAt: now,
+    lastSeenPersistedAt: now,
     modelLabel: req.modelLabel,
     apiKey: req.apiKey,
     modelDefinition: req.modelDefinition,
@@ -305,6 +386,7 @@ export function toPublicSessionView(state: SessionState): SessionPublicView {
     startedAt: state.startedAt,
     ...(state.endedAt !== undefined ? { endedAt: state.endedAt } : {}),
     status: state.endedAt === undefined ? "running" : "ended",
+    lastSeenAt: state.lastSeenAt,
     costSummary: state.costTracker.summarize(),
   };
 }
@@ -320,6 +402,7 @@ function toPersistedSession(state: SessionState): PersistedSession {
     modelLabel: state.modelLabel,
     modelDefinition: state.modelDefinition,
     startedAt: state.startedAt,
+    lastSeenAt: state.lastSeenAt,
     costSummary: state.costTracker.summarize(),
     costTotals: state.costTracker.totals,
     ...(state.pid !== undefined ? { pid: state.pid } : {}),
@@ -335,9 +418,23 @@ function toPersistedSession(state: SessionState): PersistedSession {
   return base;
 }
 
+function isNoPidSessionIdle(lastSeenAt: number, now: number): boolean {
+  return now - lastSeenAt > NO_PID_SESSION_IDLE_TTL_MS;
+}
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function storedSessionToPersistInput(session: StoredSession): SessionPersistInput {
   return {
     ...session,
+    lastSeenAt: session.lastSeenAt ?? session.startedAt,
     costSummary:
       session.externalSummary ?? "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
     costTotals: {

@@ -18,6 +18,7 @@ type SqliteDatabase = {
 
 export type StoredSession = RegisterSessionRequest & {
   startedAt: number;
+  lastSeenAt?: number;
   endedAt?: number;
   promptTokens?: number;
   cachedTokens?: number;
@@ -28,6 +29,7 @@ export type StoredSession = RegisterSessionRequest & {
 
 export type SessionPersistInput = RegisterSessionRequest & {
   startedAt: number;
+  lastSeenAt: number;
   endedAt?: number;
   costSummary: string;
   costTotals: TokenUsage;
@@ -51,6 +53,7 @@ export type SessionStore = {
     costTotals: TokenUsage,
     externalSummary?: string,
   ): void;
+  updateSessionLastSeen(token: string, lastSeenAt: number): void;
   close(): void;
 };
 
@@ -192,6 +195,12 @@ class ResilientSessionStore implements SessionStore {
     );
   }
 
+  updateSessionLastSeen(token: string, lastSeenAt: number): void {
+    this.write("update session last seen", () =>
+      this.inner.updateSessionLastSeen(token, lastSeenAt),
+    );
+  }
+
   close(): void {
     try {
       this.inner.close();
@@ -232,15 +241,16 @@ class SqliteSessionStore implements SessionStore {
     this.db
       .prepare(`
         INSERT INTO sessions (
-          token, agent, pid, started_at, ended_at, model_label, api_key, auth_token,
+          token, agent, pid, started_at, last_seen_at, ended_at, model_label, api_key, auth_token,
           model_id, target_model_id, model_name, model_definition_json, debug,
           prompt_tokens, cached_tokens, completion_tokens, cost_usd, cost_summary,
           external_summary, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
           agent = excluded.agent,
           pid = excluded.pid,
           started_at = excluded.started_at,
+          last_seen_at = excluded.last_seen_at,
           ended_at = excluded.ended_at,
           model_label = excluded.model_label,
           api_key = excluded.api_key,
@@ -317,6 +327,12 @@ class SqliteSessionStore implements SessionStore {
       );
   }
 
+  updateSessionLastSeen(token: string, lastSeenAt: number): void {
+    this.db
+      .prepare("UPDATE sessions SET last_seen_at = ?, updated_at = ? WHERE token = ?")
+      .run(lastSeenAt, Date.now(), token);
+  }
+
   close(): void {
     this.db.close?.();
   }
@@ -331,6 +347,7 @@ class SqliteSessionStore implements SessionStore {
         agent TEXT NOT NULL,
         pid INTEGER,
         started_at INTEGER NOT NULL,
+        last_seen_at INTEGER,
         ended_at INTEGER,
         model_label TEXT NOT NULL,
         api_key TEXT NOT NULL,
@@ -351,6 +368,15 @@ class SqliteSessionStore implements SessionStore {
 
       CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions(ended_at DESC);
     `);
+    this.addColumnIfMissing("sessions", "last_seen_at", "INTEGER");
+  }
+
+  private addColumnIfMissing(table: string, column: string, type: string): void {
+    try {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch {
+      // Existing databases already have the column.
+    }
   }
 
   private toStoredSession(row: SessionRow): StoredSession {
@@ -381,6 +407,8 @@ class MemorySessionStore implements SessionStore {
 
   updateSessionUsage(): void {}
 
+  updateSessionLastSeen(): void {}
+
   close(): void {}
 }
 
@@ -390,6 +418,7 @@ function sessionParams(session: SessionPersistInput, updatedAt: number): unknown
     session.agent ?? "claude",
     session.pid ?? null,
     session.startedAt,
+    session.lastSeenAt,
     session.endedAt ?? null,
     session.modelLabel,
     session.apiKey,
@@ -414,6 +443,7 @@ type SessionRow = {
   agent: string;
   pid: number | null;
   started_at: number;
+  last_seen_at: number | null;
   ended_at: number | null;
   model_label: string;
   api_key: string;
@@ -445,6 +475,7 @@ function rowToSessionBase(row: SessionRow): StoredSession {
     ...(row.model_name ? { modelName: row.model_name } : {}),
     ...(row.debug !== null ? { debug: row.debug === 1 } : {}),
     startedAt: row.started_at,
+    ...(typeof row.last_seen_at === "number" ? { lastSeenAt: row.last_seen_at } : {}),
     ...(typeof row.ended_at === "number" ? { endedAt: row.ended_at } : {}),
   };
 }

@@ -13,6 +13,7 @@
     "dev:site": "pnpm --filter @togetherlink/site dev",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
+    "hooks:install": "lefthook install",
     "test": "pnpm -F @togetherlink/tests test",
     "bench:proxy": "pnpm -F @togetherlink/tests bench:proxy",
     "watch": "pnpm dev",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
+    "lefthook": "2.1.9",
     "oxfmt": "0.57.0",
     "typescript": "7.0.1-rc"
   },
