@@ -10,6 +10,8 @@ import { handleProxyRequest, type ClaudeProxyOptions } from "../../cli/src/lib/c
 import type { ProxyPerfPayload } from "../../cli/src/lib/proxy-perf.js";
 
 const maybeTest = process.env.TOGETHERLINK_LIVE_PROXY_BENCH === "1" ? test : test.skip;
+const maybeConnectionTest =
+  process.env.TOGETHERLINK_LIVE_CONNECTION_BENCH === "1" ? test : test.skip;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const iterations = positiveInt(process.env.TOGETHERLINK_LIVE_PROXY_BENCH_ITERATIONS) ?? 5;
 const warmup = positiveInt(process.env.TOGETHERLINK_LIVE_PROXY_BENCH_WARMUP) ?? 1;
@@ -88,6 +90,33 @@ maybeTest(
   120_000,
 );
 
+maybeConnectionTest(
+  "live Together connection reuse diagnostic",
+  async () => {
+    const apiKey = await resolveTogetherApiKey();
+    const result = {
+      endpoint: `${TOGETHER_BASE_URL}/models`,
+      iterations,
+      warmup,
+      rows: [
+        await runSeries("together-models-default-fetch", () => fetchModels(apiKey, {})),
+        await runSeries("together-models-connection-close", () =>
+          fetchModels(apiKey, { connection: "close" }),
+        ),
+      ],
+      notes: [
+        "Hits Together /models, not model generation, so it should not consume generation credits.",
+        "Default Node fetch should reuse pooled connections. The connection-close row forces a fresh close after each response.",
+        "Live network variance is high; use this as a sanity check before attempting keep-alive code changes.",
+      ],
+    };
+
+    console.log(JSON.stringify(result, null, 2));
+    expect(result.rows).toHaveLength(2);
+  },
+  60_000,
+);
+
 async function runSeries(name: string, fn: () => Promise<number>): Promise<BenchmarkRow> {
   for (let i = 0; i < warmup; i += 1) {
     await fn();
@@ -98,6 +127,18 @@ async function runSeries(name: string, fn: () => Promise<number>): Promise<Bench
     values.push(await fn());
   }
   return summarize(name, values);
+}
+
+async function fetchModels(apiKey: string, extraHeaders: Record<string, string>): Promise<number> {
+  const started = performance.now();
+  const response = await fetch(`${TOGETHER_BASE_URL}/models`, {
+    headers: { authorization: `Bearer ${apiKey}`, ...extraHeaders },
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`models fetch failed: ${response.status} ${text.slice(0, 500)}`);
+  }
+  return performance.now() - started;
 }
 
 async function runStreamSeries(
