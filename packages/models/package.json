@@ -2,6 +2,10 @@
   "name": "@togetherlink/models",
   "version": "0.1.0",
   "description": "Shared Together model definitions, capabilities, and pricing for togetherlink harnesses",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,16 +15,12 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "license": "Apache-2.0"
+  "engines": {
+    "node": ">=18"
+  }
 }

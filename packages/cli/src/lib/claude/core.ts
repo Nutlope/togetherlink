@@ -54,7 +54,12 @@ export function buildClaudeEnv({
   modelId,
   proxyUrl,
   authToken,
-}: ClaudeLaunchOptions & { modelId: string; modelName: string; proxyUrl: string; authToken: string }): NodeJS.ProcessEnv {
+}: ClaudeLaunchOptions & {
+  modelId: string;
+  modelName: string;
+  proxyUrl: string;
+  authToken: string;
+}): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of CONFLICTING_ENV_KEYS) {
     delete env[key];
@@ -98,7 +103,8 @@ export function buildClaudeEnv({
 function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string): void {
   const selected = resolveClaudeModel(selectedAlias);
   const defaultModel = CLAUDE_SUPPORTED_MODELS[0] ?? selected;
-  const secondaryModel = CLAUDE_SUPPORTED_MODELS.find((model) => model.alias !== defaultModel.alias) ?? selected;
+  const secondaryModel =
+    CLAUDE_SUPPORTED_MODELS.find((model) => model.alias !== defaultModel.alias) ?? selected;
 
   setTierModelEnv(env, "OPUS", defaultModel);
   setTierModelEnv(env, "SONNET", secondaryModel);
@@ -113,11 +119,16 @@ function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string):
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES = CLAUDE_MODEL_CAPABILITIES;
 }
 
-function setTierModelEnv(env: NodeJS.ProcessEnv, tier: "OPUS" | "SONNET" | "HAIKU", model: ClaudeModelSelection): void {
+function setTierModelEnv(
+  env: NodeJS.ProcessEnv,
+  tier: "OPUS" | "SONNET" | "HAIKU",
+  model: ClaudeModelSelection,
+): void {
   const prefix = `ANTHROPIC_DEFAULT_${tier}_MODEL`;
   env[prefix] = model.alias;
   env[`${prefix}_NAME`] = model.definition.name;
-  env[`${prefix}_DESCRIPTION`] = `Together AI (${model.definition.name}) via togetherlink — not Anthropic`;
+  env[`${prefix}_DESCRIPTION`] =
+    `Together AI (${model.definition.name}) via togetherlink — not Anthropic`;
 }
 
 export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<ClaudeLaunchResult> {
@@ -156,7 +167,9 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   try {
     await registerDaemonSession(proxyUrl, registration);
   } catch (err) {
-    throw new Error(`Could not register this Claude session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Could not register this Claude session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   const startedAt = Date.now();
@@ -172,7 +185,9 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   // to Together AI, not Anthropic — the model picker alone isn't
   // enough since most users never open it. Goes to stderr so it never
   // corrupts claude's stdout (which pipelines/headless mode depend on).
-  process.stderr.write(`togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`);
+  process.stderr.write(
+    `togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`,
+  );
   if (debug) {
     process.stderr.write(`[togetherlink proxy] daemon: ${proxyUrl}\n`);
     process.stderr.write(`[togetherlink proxy] session: ${agentProxyUrl}\n`);
@@ -232,7 +247,9 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   // (A kill -9 of this launcher skips this; the daemon reaps orphaned sessions
   // on a timer — see daemon/state.ts.)
   try {
-    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    });
   } catch {
     // best-effort
   }
@@ -258,22 +275,44 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
 
 type SessionCostResult = {
   usage?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
-  usageByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
+  usageByModel?: Array<{
+    model: string;
+    promptTokens: number;
+    cachedTokens: number;
+    completionTokens: number;
+    costUsd: number;
+  }>;
 };
 
 async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
   try {
-    const response = await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`);
+    const response = await daemonFetch(
+      `${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`,
+    );
     if (response.ok) {
       const { summary, totals, totalsByModel } = (await response.json()) as {
         summary?: string;
-        totals?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
-        totalsByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
+        totals?: {
+          promptTokens: number;
+          cachedTokens: number;
+          completionTokens: number;
+          costUsd: number;
+        };
+        totalsByModel?: Array<{
+          model: string;
+          promptTokens: number;
+          cachedTokens: number;
+          completionTokens: number;
+          costUsd: number;
+        }>;
       };
       if (summary) {
         process.stderr.write(`${summary}\n`);
       }
-      return { ...(totals ? { usage: totals } : {}), ...(totalsByModel ? { usageByModel: totalsByModel } : {}) };
+      return {
+        ...(totals ? { usage: totals } : {}),
+        ...(totalsByModel ? { usageByModel: totalsByModel } : {}),
+      };
     }
   } catch {
     // Daemon gone, unreachable, or timed out: skip the cost line rather than

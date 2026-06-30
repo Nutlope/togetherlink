@@ -12,16 +12,26 @@ export type FixtureRepo = {
 };
 
 export async function createFixtureRepo(context: TestContext, owner: string): Promise<FixtureRepo> {
-  const root = path.join(context.tmpDir, `${owner}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const root = path.join(
+    context.tmpDir,
+    `${owner}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
   await mkdir(path.join(root, "lib"), { recursive: true });
   await mkdir(path.join(root, "test"), { recursive: true });
 
-  await writeFile(path.join(root, "package.json"), `${JSON.stringify({
-    name: `togetherlink-fixture-${owner}`,
-    private: true,
-    type: "module",
-    scripts: { test: "node --test" },
-  }, null, 2)}\n`);
+  await writeFile(
+    path.join(root, "package.json"),
+    `${JSON.stringify(
+      {
+        name: `togetherlink-fixture-${owner}`,
+        private: true,
+        type: "module",
+        scripts: { test: "node --test" },
+      },
+      null,
+      2,
+    )}\n`,
+  );
   await writeFile(
     path.join(root, "README.md"),
     [

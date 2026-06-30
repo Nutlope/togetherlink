@@ -1,4 +1,9 @@
-import { GLM_5_2, SELECTABLE_MODELS, resolveModelByKeys, type ModelDefinition } from "@togetherlink/models";
+import {
+  GLM_5_2,
+  SELECTABLE_MODELS,
+  resolveModelByKeys,
+  type ModelDefinition,
+} from "@togetherlink/models";
 
 export const CODEX_DEFAULT_MODEL = GLM_5_2.id;
 export const CODEX_DEFAULT_MODEL_NAME = GLM_5_2.name;
@@ -10,10 +15,12 @@ export type CodexModelSelection = {
   definition: ModelDefinition;
 };
 
-export const CODEX_SUPPORTED_MODELS: readonly CodexModelSelection[] = SELECTABLE_MODELS.map((definition) => ({
-  id: definition.id,
-  definition,
-}));
+export const CODEX_SUPPORTED_MODELS: readonly CodexModelSelection[] = SELECTABLE_MODELS.map(
+  (definition) => ({
+    id: definition.id,
+    definition,
+  }),
+);
 
 export function resolveCodexModel(value: string | undefined): CodexModelSelection {
   if (CODEX_SUPPORTED_MODELS.length === 0) {

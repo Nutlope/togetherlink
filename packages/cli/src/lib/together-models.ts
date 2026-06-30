@@ -43,12 +43,16 @@ export function filterChatModels(catalog: TogetherModel[]): TogetherModel[] {
   return catalog.filter((model) => model.type === "chat");
 }
 
-export function filterCatalogBySearch(catalog: TogetherModel[], query: string | undefined): TogetherModel[] {
+export function filterCatalogBySearch(
+  catalog: TogetherModel[],
+  query: string | undefined,
+): TogetherModel[] {
   if (!query) {
     return catalog;
   }
   const needle = query.toLowerCase();
   return catalog.filter(
-    (model) => model.id.toLowerCase().includes(needle) || model.displayName.toLowerCase().includes(needle),
+    (model) =>
+      model.id.toLowerCase().includes(needle) || model.displayName.toLowerCase().includes(needle),
   );
 }

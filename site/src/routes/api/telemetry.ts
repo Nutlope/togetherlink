@@ -1,91 +1,91 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { ConvexHttpClient } from 'convex/browser'
-import { api } from '../../../convex/_generated/api'
+import { createFileRoute } from "@tanstack/react-router";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../../convex/_generated/api";
 
 const VALID_EVENT_TYPES = new Set([
-  'install_completed',
-  'cli_started',
-  'session_started',
-  'session_ended',
-])
+  "install_completed",
+  "cli_started",
+  "session_started",
+  "session_ended",
+]);
 
-const VALID_OS = new Set(['macos', 'linux', 'windows', 'unknown'])
+const VALID_OS = new Set(["macos", "linux", "windows", "unknown"]);
 
 interface TelemetryPayload {
-  installId: string
-  sessionId?: string
-  event: string
-  version?: string
-  agent?: string
-  initialModel?: string
-  finalModel?: string
-  model?: string
-  os?: string
-  arch?: string
-  startedAt?: number
-  endedAt?: number
-  durationMs?: number
+  installId: string;
+  sessionId?: string;
+  event: string;
+  version?: string;
+  agent?: string;
+  initialModel?: string;
+  finalModel?: string;
+  model?: string;
+  os?: string;
+  arch?: string;
+  startedAt?: number;
+  endedAt?: number;
+  durationMs?: number;
   usage?: {
-    promptTokens?: number
-    cachedTokens?: number
-    completionTokens?: number
-    costUsd?: number
-  }
+    promptTokens?: number;
+    cachedTokens?: number;
+    completionTokens?: number;
+    costUsd?: number;
+  };
   usageByModel?: Array<{
-    model: string
-    promptTokens?: number
-    cachedTokens?: number
-    completionTokens?: number
-    costUsd?: number
-  }>
-  metadata?: Record<string, unknown>
-  exitCode?: number
-  signal?: string
-  errorKind?: string
+    model: string;
+    promptTokens?: number;
+    cachedTokens?: number;
+    completionTokens?: number;
+    costUsd?: number;
+  }>;
+  metadata?: Record<string, unknown>;
+  exitCode?: number;
+  signal?: string;
+  errorKind?: string;
 }
 
 function isTelemetryPayload(value: unknown): value is TelemetryPayload {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
   return (
-    typeof v.installId === 'string' &&
+    typeof v.installId === "string" &&
     v.installId.length > 0 &&
-    typeof v.event === 'string' &&
+    typeof v.event === "string" &&
     VALID_EVENT_TYPES.has(v.event)
-  )
+  );
 }
 
 function normalizeOs(os: unknown): string {
-  return typeof os === 'string' && VALID_OS.has(os) ? os : 'unknown'
+  return typeof os === "string" && VALID_OS.has(os) ? os : "unknown";
 }
 
 function getConvexClient(): ConvexHttpClient | null {
-  const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL
-  if (!url) return null
-  return new ConvexHttpClient(url)
+  const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
+  if (!url) return null;
+  return new ConvexHttpClient(url);
 }
 
-export const Route = createFileRoute('/api/telemetry')({
+export const Route = createFileRoute("/api/telemetry")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        let body: unknown
+        let body: unknown;
         try {
-          body = await request.json()
+          body = await request.json();
         } catch {
-          return new Response(null, { status: 400 })
+          return new Response(null, { status: 400 });
         }
 
         if (!isTelemetryPayload(body)) {
-          return new Response(null, { status: 400 })
+          return new Response(null, { status: 400 });
         }
 
-        const countryCode = request.headers.get('x-vercel-ip-country') ?? 'unknown'
-        const receivedAt = Date.now()
+        const countryCode = request.headers.get("x-vercel-ip-country") ?? "unknown";
+        const receivedAt = Date.now();
 
-        const client = getConvexClient()
+        const client = getConvexClient();
         if (!client) {
-          return new Response(null, { status: 204 })
+          return new Response(null, { status: 204 });
         }
 
         try {
@@ -114,13 +114,13 @@ export const Route = createFileRoute('/api/telemetry')({
             signal: body.signal,
             errorKind: body.errorKind,
             receivedAt,
-          })
+          });
         } catch {
           // Telemetry must never break the caller. Swallow ingestion errors.
         }
 
-        return new Response(null, { status: 204 })
+        return new Response(null, { status: 204 });
       },
     },
   },
-})
+});

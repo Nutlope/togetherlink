@@ -10,7 +10,11 @@ import { GLM_5_2, VISION_MODELS, costPerToken, type ModelDefinition } from "@tog
  * selected model's rates from @togetherlink/models.
  */
 
-function pricingFor(model: ModelDefinition): { inputPerToken: number; cachedInputPerToken: number; outputPerToken: number } {
+function pricingFor(model: ModelDefinition): {
+  inputPerToken: number;
+  cachedInputPerToken: number;
+  outputPerToken: number;
+} {
   return {
     inputPerToken: costPerToken(model.cost.input),
     cachedInputPerToken: costPerToken(model.cost.cache_read),
@@ -21,17 +25,19 @@ function pricingFor(model: ModelDefinition): { inputPerToken: number; cachedInpu
 // Per-token pricing for the vision models used by the image intercept, keyed by
 // the API model string. Built from the shared VISION_MODELS manifest so the
 // rates can't drift from the rest of the codebase.
-const VISION_PRICING: Record<string, { inputPerToken: number; cachedPerToken: number; outputPerToken: number }> =
-  Object.fromEntries(
-    VISION_MODELS.map((model) => [
-      model.id,
-      {
-        inputPerToken: costPerToken(model.cost.input),
-        cachedPerToken: costPerToken(model.cost.cache_read),
-        outputPerToken: costPerToken(model.cost.output),
-      },
-    ]),
-  );
+const VISION_PRICING: Record<
+  string,
+  { inputPerToken: number; cachedPerToken: number; outputPerToken: number }
+> = Object.fromEntries(
+  VISION_MODELS.map((model) => [
+    model.id,
+    {
+      inputPerToken: costPerToken(model.cost.input),
+      cachedPerToken: costPerToken(model.cost.cache_read),
+      outputPerToken: costPerToken(model.cost.output),
+    },
+  ]),
+);
 
 export type TokenUsage = {
   promptTokens: number;
@@ -109,7 +115,12 @@ export class CostTracker {
     this.completionTokens += completionTokens;
     this.costUsd += cost;
 
-    const bucket = this.byModel.get(model.id) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 };
+    const bucket = this.byModel.get(model.id) ?? {
+      promptTokens: 0,
+      cachedTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+    };
     bucket.promptTokens += promptTokens;
     bucket.cachedTokens += cached;
     bucket.completionTokens += completionTokens;
@@ -136,7 +147,12 @@ export class CostTracker {
     this.visionCostUsd += cost;
     this.costUsd += cost;
 
-    const bucket = this.byModel.get(model) ?? { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 };
+    const bucket = this.byModel.get(model) ?? {
+      promptTokens: 0,
+      cachedTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+    };
     bucket.promptTokens += promptTokens;
     bucket.completionTokens += completionTokens;
     bucket.costUsd += cost;

@@ -70,7 +70,10 @@ async function runCodexHello(context: TestContext, model: MatrixModel): Promise<
   const helloToken = tokenFor("CODEX_HELLO", model);
   const hello = await runCodex(context, model, `Reply with exactly: ${helloToken}`, "hello");
   assert(hello.status === 0, `hello exit ${hello.status}`);
-  assert(codexAgentText(hello.stdout).some((text) => text.includes(helloToken)), `missing ${helloToken}`);
+  assert(
+    codexAgentText(hello.stdout).some((text) => text.includes(helloToken)),
+    `missing ${helloToken}`,
+  );
 }
 
 async function runCodexTool(context: TestContext, model: MatrixModel): Promise<void> {
@@ -88,7 +91,10 @@ async function runCodexTool(context: TestContext, model: MatrixModel): Promise<v
   );
   assert(tool.status === 0, `tool exit ${tool.status}`);
   assert(tool.stdout.includes(toolToken), `missing ${toolToken}`);
-  assert(codexEvents(tool.stdout).some(isCodexCommandExecution), "missing Codex command execution item");
+  assert(
+    codexEvents(tool.stdout).some(isCodexCommandExecution),
+    "missing Codex command execution item",
+  );
 }
 
 async function runCodexSubagent(context: TestContext, model: MatrixModel): Promise<void> {
@@ -106,7 +112,10 @@ async function runCodexSubagent(context: TestContext, model: MatrixModel): Promi
   );
   assert(subagent.status === 0, `subagent exit ${subagent.status}`);
   assert(subagent.stdout.includes(subagentToken), `missing ${subagentToken}`);
-  assert(hasToolName(codexEvents(subagent.stdout), ["multi_agent_v1__spawn_agent", "spawn_agent"]), "missing Codex subagent tool use");
+  assert(
+    hasToolName(codexEvents(subagent.stdout), ["multi_agent_v1__spawn_agent", "spawn_agent"]),
+    "missing Codex subagent tool use",
+  );
 }
 
 async function runClaudeHello(context: TestContext, model: MatrixModel): Promise<void> {
@@ -153,23 +162,25 @@ async function runClaudeSubagent(context: TestContext, model: MatrixModel): Prom
   );
   assert(subagent.status === 0, `subagent exit ${subagent.status}`);
   assert(subagent.stdout.includes(subagentToken), `missing ${subagentToken}`);
-  assert(hasToolName(jsonLines(subagent.stdout), ["Agent", "Task"]), "missing Claude Task subagent tool use");
+  assert(
+    hasToolName(jsonLines(subagent.stdout), ["Agent", "Task"]),
+    "missing Claude Task subagent tool use",
+  );
 }
 
 function liveModelCases(): LiveModelCase[] {
-  return [
-    ...modelProbeCases("codex", codexModels()),
-    ...modelProbeCases("claude", claudeModels()),
-  ];
+  return [...modelProbeCases("codex", codexModels()), ...modelProbeCases("claude", claudeModels())];
 }
 
 function modelProbeCases(harness: Harness, models: MatrixModel[]): LiveModelCase[] {
-  return models.flatMap((model) => (["hello", "tool", "subagent"] as const).map((probe) => ({
-    harness,
-    model,
-    probe,
-    name: `${harness}: ${probe}: ${model.name} (${model.id})`,
-  })));
+  return models.flatMap((model) =>
+    (["hello", "tool", "subagent"] as const).map((probe) => ({
+      harness,
+      model,
+      probe,
+      name: `${harness}: ${probe}: ${model.name} (${model.id})`,
+    })),
+  );
 }
 
 function codexModels(): MatrixModel[] {
@@ -195,16 +206,22 @@ async function runCodex(
   kind: string,
   timeoutMs = 180_000,
 ) {
-  return runCommand(context, artifactName("codex", kind, model), process.execPath, [
-    context.cliBin,
-    "--main",
-    model.selector,
-    "codex",
-    "--",
-    ...codexExecArgs(prompt, {
-      allowLocalTools: kind === "tool" || kind === "subagent",
-    }),
-  ], { timeoutMs });
+  return runCommand(
+    context,
+    artifactName("codex", kind, model),
+    process.execPath,
+    [
+      context.cliBin,
+      "--main",
+      model.selector,
+      "codex",
+      "--",
+      ...codexExecArgs(prompt, {
+        allowLocalTools: kind === "tool" || kind === "subagent",
+      }),
+    ],
+    { timeoutMs },
+  );
 }
 
 async function runClaudeJson(
@@ -214,20 +231,26 @@ async function runClaudeJson(
   kind: string,
   timeoutMs = 180_000,
 ) {
-  return runCommand(context, artifactName("claude", kind, model), process.execPath, [
-    context.cliBin,
-    "--main",
-    model.selector,
-    "claude",
-    "--",
-    "--print",
-    "--output-format",
-    "json",
-    "--no-session-persistence",
-    "--permission-mode",
-    "bypassPermissions",
-    prompt,
-  ], { timeoutMs });
+  return runCommand(
+    context,
+    artifactName("claude", kind, model),
+    process.execPath,
+    [
+      context.cliBin,
+      "--main",
+      model.selector,
+      "claude",
+      "--",
+      "--print",
+      "--output-format",
+      "json",
+      "--no-session-persistence",
+      "--permission-mode",
+      "bypassPermissions",
+      prompt,
+    ],
+    { timeoutMs },
+  );
 }
 
 async function runClaudeStream(
@@ -238,31 +261,35 @@ async function runClaudeStream(
   timeoutMs = 240_000,
   claudeArgs: string[] = [],
 ) {
-  return runCommand(context, artifactName("claude", kind, model), process.execPath, [
-    context.cliBin,
-    "--main",
-    model.selector,
-    "claude",
-    "--",
-    "--print",
-    "--verbose",
-    "--output-format",
-    "stream-json",
-    "--include-partial-messages",
-    "--no-session-persistence",
-    "--permission-mode",
-    "bypassPermissions",
-    ...claudeArgs,
-    prompt,
-  ], { timeoutMs });
+  return runCommand(
+    context,
+    artifactName("claude", kind, model),
+    process.execPath,
+    [
+      context.cliBin,
+      "--main",
+      model.selector,
+      "claude",
+      "--",
+      "--print",
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--no-session-persistence",
+      "--permission-mode",
+      "bypassPermissions",
+      ...claudeArgs,
+      prompt,
+    ],
+    { timeoutMs },
+  );
 }
 
 async function stopDaemon(context: TestContext, artifactName: string): Promise<void> {
-  await runCommand(context, artifactName, process.execPath, [
-    context.cliBin,
-    "daemon",
-    "stop",
-  ], { timeoutMs: 20_000 });
+  await runCommand(context, artifactName, process.execPath, [context.cliBin, "daemon", "stop"], {
+    timeoutMs: 20_000,
+  });
 }
 
 function codexEvents(stdout: string): Array<Record<string, unknown>> {
@@ -271,7 +298,9 @@ function codexEvents(stdout: string): Array<Record<string, unknown>> {
 
 function codexAgentText(eventsText: string): string[] {
   return codexEvents(eventsText)
-    .filter((event) => event.type === "item.completed" && asRecord(event.item).type === "agent_message")
+    .filter(
+      (event) => event.type === "item.completed" && asRecord(event.item).type === "agent_message",
+    )
     .map((event) => String(asRecord(event.item).text ?? ""));
 }
 
@@ -295,10 +324,21 @@ function hasToolNameInValue(value: unknown, names: ReadonlySet<string>): boolean
   const tool = record.tool;
   const type = record.type;
   const subtype = record.subtype;
-  if (typeof name === "string" && names.has(name) && (type === "tool_use" || type === "function_call" || type === "custom_tool_call" || type === undefined)) {
+  if (
+    typeof name === "string" &&
+    names.has(name) &&
+    (type === "tool_use" ||
+      type === "function_call" ||
+      type === "custom_tool_call" ||
+      type === undefined)
+  ) {
     return true;
   }
-  if (typeof tool === "string" && names.has(tool) && (type === "collab_tool_call" || type === undefined)) {
+  if (
+    typeof tool === "string" &&
+    names.has(tool) &&
+    (type === "collab_tool_call" || type === undefined)
+  ) {
     return true;
   }
   if (subtype === "task_started" && (names.has("Task") || names.has("Agent"))) {
@@ -323,9 +363,11 @@ async function writeProbeFile(
 
 async function removePreviousLiveModelArtifacts(context: TestContext): Promise<void> {
   const files = await readdir(context.artifactsDir).catch(() => []);
-  await Promise.all(files
-    .filter((file) => file.includes("live-models-check"))
-    .map((file) => rm(path.join(context.artifactsDir, file), { force: true })));
+  await Promise.all(
+    files
+      .filter((file) => file.includes("live-models-check"))
+      .map((file) => rm(path.join(context.artifactsDir, file), { force: true })),
+  );
 }
 
 function tokenFor(prefix: string, model: MatrixModel): string {
@@ -337,5 +379,8 @@ function artifactName(harness: "claude" | "codex", kind: string, model: MatrixMo
 }
 
 function safeSlug(value: string): string {
-  return value.replaceAll(/[^a-z0-9]+/gi, "-").replaceAll(/^-|-$/g, "").toLowerCase();
+  return value
+    .replaceAll(/[^a-z0-9]+/gi, "-")
+    .replaceAll(/^-|-$/g, "")
+    .toLowerCase();
 }

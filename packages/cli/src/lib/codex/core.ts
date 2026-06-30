@@ -55,7 +55,9 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   try {
     await registerDaemonSession(proxyUrl, registration);
   } catch (err) {
-    throw new Error(`Could not register this Codex session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Could not register this Codex session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   const startedAt = Date.now();
@@ -75,10 +77,17 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   }
 
   const catalog = writeCodexModelCatalog();
-  const child = spawn("codex", [...codexArgsWithoutModelOverrides(options.args ?? []), ...codexConfigArgs(agentProxyUrl, authToken, modelId, catalog.path)], {
-    env: buildCodexEnv(authToken),
-    stdio: "inherit",
-  });
+  const child = spawn(
+    "codex",
+    [
+      ...codexArgsWithoutModelOverrides(options.args ?? []),
+      ...codexConfigArgs(agentProxyUrl, authToken, modelId, catalog.path),
+    ],
+    {
+      env: buildCodexEnv(authToken),
+      stdio: "inherit",
+    },
+  );
 
   if (typeof child.pid === "number") {
     try {
@@ -104,7 +113,9 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
   keepalive.stop();
   try {
-    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    });
   } catch {
     // best-effort
   }
@@ -136,7 +147,12 @@ function buildCodexEnv(authToken: string): NodeJS.ProcessEnv {
   };
 }
 
-function codexConfigArgs(proxyUrl: string, authToken: string, modelId: string, catalogPath: string): string[] {
+function codexConfigArgs(
+  proxyUrl: string,
+  authToken: string,
+  modelId: string,
+  catalogPath: string,
+): string[] {
   void authToken;
   return [
     "-c",
@@ -193,22 +209,44 @@ function codexArgsWithoutModelOverrides(args: string[]): string[] {
 
 type SessionCostResult = {
   usage?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
-  usageByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
+  usageByModel?: Array<{
+    model: string;
+    promptTokens: number;
+    cachedTokens: number;
+    completionTokens: number;
+    costUsd: number;
+  }>;
 };
 
 async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
   try {
-    const response = await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`);
+    const response = await daemonFetch(
+      `${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`,
+    );
     if (response.ok) {
       const { summary, totals, totalsByModel } = (await response.json()) as {
         summary?: string;
-        totals?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
-        totalsByModel?: Array<{ model: string; promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }>;
+        totals?: {
+          promptTokens: number;
+          cachedTokens: number;
+          completionTokens: number;
+          costUsd: number;
+        };
+        totalsByModel?: Array<{
+          model: string;
+          promptTokens: number;
+          cachedTokens: number;
+          completionTokens: number;
+          costUsd: number;
+        }>;
       };
       if (summary) {
         process.stderr.write(`${summary}\n`);
       }
-      return { ...(totals ? { usage: totals } : {}), ...(totalsByModel ? { usageByModel: totalsByModel } : {}) };
+      return {
+        ...(totals ? { usage: totals } : {}),
+        ...(totalsByModel ? { usageByModel: totalsByModel } : {}),
+      };
     }
   } catch {
     // best-effort

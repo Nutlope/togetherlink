@@ -1,5 +1,10 @@
 import { assert, looksLikeContextError } from "./assert.js";
-import { deleteSession, registerClaudeSession, registerCodexSession, startTestDaemon } from "./daemon-session.js";
+import {
+  deleteSession,
+  registerClaudeSession,
+  registerCodexSession,
+  startTestDaemon,
+} from "./daemon-session.js";
 import { makeLongRecords } from "./long-context.js";
 import type { TestContext } from "./types.js";
 
@@ -25,7 +30,10 @@ export async function assertClaudeContextLimitRetry(context: TestContext): Promi
       }),
     });
     const text = await response.text();
-    assert(response.ok, `expected context-limit retry to recover, got ${response.status}: ${text.slice(0, 1000)}`);
+    assert(
+      response.ok,
+      `expected context-limit retry to recover, got ${response.status}: ${text.slice(0, 1000)}`,
+    );
     assert(!looksLikeContextError(text), "context-length error leaked to the client");
     const stderr = daemon.stderr();
     assert(
@@ -63,10 +71,21 @@ export async function assertCodexContextLimitRetry(context: TestContext): Promis
       }),
     });
     const text = await response.text();
-    assert(response.ok, `expected context-limit retry to recover, got ${response.status}: ${text.slice(0, 1000)}`);
+    assert(
+      response.ok,
+      `expected context-limit retry to recover, got ${response.status}: ${text.slice(0, 1000)}`,
+    );
     assert(!looksLikeContextError(text), "context-length error leaked to the client");
-    assert(daemon.stderr().includes("[togetherlink codex proxy] retrying together request with reduced max_tokens"), "daemon did not log Codex context-limit retry");
-    assert(/CODEX_CONTEXT_RETRY_OK/i.test(text), "retry response did not include expected final answer");
+    assert(
+      daemon
+        .stderr()
+        .includes("[togetherlink codex proxy] retrying together request with reduced max_tokens"),
+      "daemon did not log Codex context-limit retry",
+    );
+    assert(
+      /CODEX_CONTEXT_RETRY_OK/i.test(text),
+      "retry response did not include expected final answer",
+    );
   } finally {
     await deleteSession(daemon, token);
     await daemon.stop();

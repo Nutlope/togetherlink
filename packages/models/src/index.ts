@@ -205,10 +205,7 @@ export const QWEN_3_5_9B: ModelDefinition = {
  * take a single model. Reasoning is always disabled on these calls
  * (perception, not reasoning) — handled by callers, not encoded here.
  */
-export const VISION_MODELS: readonly ModelDefinition[] = [
-  KIMI_K2_7_CODE,
-  QWEN_3_5_9B,
-];
+export const VISION_MODELS: readonly ModelDefinition[] = [KIMI_K2_7_CODE, QWEN_3_5_9B];
 
 /** Primary vision model (first in VISION_MODELS). */
 export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {

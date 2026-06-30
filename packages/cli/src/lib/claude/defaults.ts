@@ -37,11 +37,11 @@ const selectableClaudeModels = SELECTABLE_MODELS.map((definition) => ({
 
 export const CLAUDE_SUPPORTED_MODELS: readonly ClaudeModelSelection[] = [
   ...selectableClaudeModels,
-  ...(
-    selectableClaudeModels.some((model) => model.definition.id === CLAUDE_HAIKU_MODEL_SELECTION.definition.id)
-      ? []
-      : [CLAUDE_HAIKU_MODEL_SELECTION]
-  ),
+  ...(selectableClaudeModels.some(
+    (model) => model.definition.id === CLAUDE_HAIKU_MODEL_SELECTION.definition.id,
+  )
+    ? []
+    : [CLAUDE_HAIKU_MODEL_SELECTION]),
 ];
 
 export function resolveClaudeModel(value: string | undefined): ClaudeModelSelection {

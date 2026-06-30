@@ -11,7 +11,9 @@ export const EXA_API_KEY_ENV_REF = "{env:EXA_API_KEY}";
 
 export type JsonObject = Record<string, unknown>;
 
-export async function readJsonIfExists<T extends JsonObject = JsonObject>(filePath: string): Promise<T> {
+export async function readJsonIfExists<T extends JsonObject = JsonObject>(
+  filePath: string,
+): Promise<T> {
   try {
     const raw = await readFile(filePath, "utf8");
     return raw.trim() ? (JSON.parse(raw) as T) : ({} as T);
@@ -40,7 +42,10 @@ type ResolveTogetherApiKeyOptions = {
   home?: string | undefined;
 };
 
-export async function resolveTogetherApiKey({ apiKey, home }: ResolveTogetherApiKeyOptions): Promise<string> {
+export async function resolveTogetherApiKey({
+  apiKey,
+  home,
+}: ResolveTogetherApiKeyOptions): Promise<string> {
   if (apiKey?.trim()) {
     return apiKey.trim();
   }

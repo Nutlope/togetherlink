@@ -22,32 +22,67 @@ export function piScenarios(): Scenario[] {
         ]);
         assert(result.status === 0, `exit ${result.status}`);
         const events = piEvents(result.stdout);
-        assert(events.some((event) => event.type === "session"), "missing session event");
-        assert(events.some((event) => event.type === "message_update" && asRecord(event.assistantMessageEvent).type === "text_delta"), "missing streamed text delta");
-        assert(piAssistantText(events).some((text) => /\bhi\b/i.test(text)), "missing expected text");
+        assert(
+          events.some((event) => event.type === "session"),
+          "missing session event",
+        );
+        assert(
+          events.some(
+            (event) =>
+              event.type === "message_update" &&
+              asRecord(event.assistantMessageEvent).type === "text_delta",
+          ),
+          "missing streamed text delta",
+        );
+        assert(
+          piAssistantText(events).some((text) => /\bhi\b/i.test(text)),
+          "missing expected text",
+        );
         const usage = finalAssistantUsage(events);
         assert(asNumber(usage.totalTokens) > 0, "missing token usage");
         assert(asNumber(asRecord(usage.cost).total) > 0, "missing cost total");
-        assert(events.some((event) => asRecord(event.message).provider === "together"), "missing together provider marker");
+        assert(
+          events.some((event) => asRecord(event.message).provider === "together"),
+          "missing together provider marker",
+        );
       },
     },
     {
       name: "pi: bash tool call with cost",
       run: async (context) => {
-        const result = await runCommand(context, "pi-tool-pwd", process.execPath, [
-          context.cliBin,
-          "pi",
-          "--",
-          "--mode",
-          "json",
-          "--no-session",
-          "-p",
-          "Run pwd and answer with the directory only.",
-        ], { timeoutMs: 180_000 });
+        const result = await runCommand(
+          context,
+          "pi-tool-pwd",
+          process.execPath,
+          [
+            context.cliBin,
+            "pi",
+            "--",
+            "--mode",
+            "json",
+            "--no-session",
+            "-p",
+            "Run pwd and answer with the directory only.",
+          ],
+          { timeoutMs: 180_000 },
+        );
         assert(result.status === 0, `exit ${result.status}`);
         const events = piEvents(result.stdout);
-        assert(events.some((event) => event.type === "tool_execution_start" && event.toolName === "bash"), "missing bash tool execution start");
-        assert(events.some((event) => event.type === "tool_execution_end" && event.toolName === "bash" && event.isError === false), "missing successful bash tool execution end");
+        assert(
+          events.some(
+            (event) => event.type === "tool_execution_start" && event.toolName === "bash",
+          ),
+          "missing bash tool execution start",
+        );
+        assert(
+          events.some(
+            (event) =>
+              event.type === "tool_execution_end" &&
+              event.toolName === "bash" &&
+              event.isError === false,
+          ),
+          "missing successful bash tool execution end",
+        );
         assert(result.stdout.includes(context.repoRoot), "expected pwd result in output");
         const usage = finalAssistantUsage(events);
         assert(asNumber(usage.totalTokens) > 0, "missing token usage after tool call");
@@ -57,16 +92,21 @@ export function piScenarios(): Scenario[] {
     {
       name: "pi: together model list includes multiple models and vision metadata",
       run: async (context) => {
-        const codexModelResult = await runCommand(context, "pi-model-list-codex-default", process.execPath, [
-          context.cliBin,
-          "pi",
-          "--",
-          "--list-models",
-          "GLM-5.2",
-        ]);
+        const codexModelResult = await runCommand(
+          context,
+          "pi-model-list-codex-default",
+          process.execPath,
+          [context.cliBin, "pi", "--", "--list-models", "GLM-5.2"],
+        );
         assert(codexModelResult.status === 0, `exit ${codexModelResult.status}`);
-        assert(codexModelResult.stdout.includes("zai-org/GLM-5.2"), "missing registered Codex default model");
-        assert(!codexModelResult.stderr.includes("Using custom model id"), "Codex default should be registered in Pi");
+        assert(
+          codexModelResult.stdout.includes("zai-org/GLM-5.2"),
+          "missing registered Codex default model",
+        );
+        assert(
+          !codexModelResult.stderr.includes("Using custom model id"),
+          "Codex default should be registered in Pi",
+        );
 
         const result = await runCommand(context, "pi-model-list", process.execPath, [
           context.cliBin,
@@ -78,7 +118,10 @@ export function piScenarios(): Scenario[] {
         assert(result.status === 0, `exit ${result.status}`);
         const lines = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("together  "));
         assert(lines.length >= 2, "expected multiple Together models");
-        assert(lines.some((line) => /MiniMaxAI\/MiniMax-M3/.test(line) && /\byes\b/.test(line)), "missing vision-capable MiniMax-M3 row");
+        assert(
+          lines.some((line) => /MiniMaxAI\/MiniMax-M3/.test(line) && /\byes\b/.test(line)),
+          "missing vision-capable MiniMax-M3 row",
+        );
       },
     },
   ];
@@ -92,7 +135,7 @@ function piAssistantText(events: Array<Record<string, unknown>>): string[] {
   return events
     .map((event) => asRecord(event.message))
     .filter((message) => message.role === "assistant")
-    .flatMap((message) => Array.isArray(message.content) ? message.content.map(asRecord) : [])
+    .flatMap((message) => (Array.isArray(message.content) ? message.content.map(asRecord) : []))
     .filter((part) => part.type === "text")
     .map((part) => String(part.text ?? ""));
 }

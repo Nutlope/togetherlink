@@ -13,8 +13,12 @@ if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
 
-const test = spawnSync(pnpm, ["exec", "vitest", "run", "--config", "vitest.config.ts", ...vitestArgs], {
-  stdio: "inherit",
-});
+const test = spawnSync(
+  pnpm,
+  ["exec", "vitest", "run", "--config", "vitest.config.ts", ...vitestArgs],
+  {
+    stdio: "inherit",
+  },
+);
 
 process.exit(test.status ?? 1);

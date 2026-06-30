@@ -74,18 +74,24 @@ describe("Claude proxy compatibility API", () => {
 
   test("trims Claude compaction-sized input before sacrificing the summary budget", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_budgeted",
-        choices: [{ message: { content: "BUDGETED_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 259_000, completion_tokens: 1, total_tokens: 259_001 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_budgeted",
+            choices: [{ message: { content: "BUDGETED_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 259_000, completion_tokens: 1, total_tokens: 259_001 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const nearFullContext = "context budget pressure ".repeat(44_000);
     const response = await callClaudeProxy({
@@ -106,23 +112,36 @@ describe("Claude proxy compatibility API", () => {
     if (typeof upstreamContent !== "string") {
       throw new Error("expected upstream user content to be a string");
     }
-    expect(upstreamContent).toContain("[togetherlink trimmed older context to fit the model window]");
+    expect(upstreamContent).toContain(
+      "[togetherlink trimmed older context to fit the model window]",
+    );
     expect(upstreamContent.length).toBeLessThan(nearFullContext.length);
     expect(upstreamBodies[0]?.max_tokens).toBeGreaterThanOrEqual(16_000);
   });
 
   test("uses compact thinking signatures instead of echoing full reasoning", async () => {
     const longReasoning = "reasoning trace ".repeat(10_000);
-    vi.stubGlobal("fetch", vi.fn(async () => {
-      return new Response(JSON.stringify({
-        id: "chatcmpl_reasoning_signature",
-        choices: [{ message: { reasoning: longReasoning, content: "SIGNATURE_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 10_000, total_tokens: 10_010 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_reasoning_signature",
+            choices: [
+              {
+                message: { reasoning: longReasoning, content: "SIGNATURE_OK" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 10_000, total_tokens: 10_010 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -145,29 +164,38 @@ describe("Claude proxy compatibility API", () => {
 
   test("recovers from Together input-over-context errors by trimming old prompt text", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      if (upstreamBodies.length === 1) {
-        return new Response(JSON.stringify({
-          error: {
-            message:
-              "This model's maximum context length is 262144 tokens, but the request resolved to 262323 input tokens (including image/vision expansion). Reduce the input length, image resolution, or the number of images.",
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        if (upstreamBodies.length === 1) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                message:
+                  "This model's maximum context length is 262144 tokens, but the request resolved to 262323 input tokens (including image/vision expansion). Reduce the input length, image resolution, or the number of images.",
+              },
+            }),
+            {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_trimmed",
+            choices: [{ message: { content: "TRIMMED_CONTEXT_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 262000, completion_tokens: 3, total_tokens: 262003 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
           },
-        }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({
-        id: "chatcmpl_trimmed",
-        choices: [{ message: { content: "TRIMMED_CONTEXT_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 262000, completion_tokens: 3, total_tokens: 262003 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+        );
+      }),
+    );
 
     const oldContext = "old context ".repeat(20_000);
     const response = await callClaudeProxy({
@@ -199,16 +227,19 @@ describe("Claude proxy compatibility API", () => {
 
   test("routes Claude Code Haiku-tier model requests without proxy subagent inference", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return sseResponse([
-        {
-          choices: [{ delta: { content: "EXPLORE_OK" }, finish_reason: "stop" }],
-          usage: { prompt_tokens: 100, completion_tokens: 3, total_tokens: 103 },
-        },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "EXPLORE_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 100, completion_tokens: 3, total_tokens: 103 },
+          },
+        ]);
+      }),
+    );
 
     const response = await callClaudeProxyRaw({
       method: "POST",
@@ -237,16 +268,21 @@ describe("Claude proxy compatibility API", () => {
 
   test("coalesces Claude title-generation system prompts for Haiku-tier requests", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return sseResponse([
-        {
-          choices: [{ delta: { content: "{\"title\":\"Debug title generation\"}" }, finish_reason: "stop" }],
-          usage: { prompt_tokens: 80, completion_tokens: 8, total_tokens: 88 },
-        },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return sseResponse([
+          {
+            choices: [
+              { delta: { content: '{"title":"Debug title generation"}' }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 80, completion_tokens: 8, total_tokens: 88 },
+          },
+        ]);
+      }),
+    );
 
     const response = await callClaudeProxyRaw({
       method: "POST",
@@ -275,18 +311,24 @@ describe("Claude proxy compatibility API", () => {
 
   test("keeps normal Claude requests on the selected GLM reasoning profile", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_normal",
-        choices: [{ message: { content: "NORMAL_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_normal",
+            choices: [{ message: { content: "NORMAL_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -313,26 +355,36 @@ describe("Claude proxy compatibility API", () => {
 
   test("does not treat a custom tool named web_search as native server search", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_custom_web_search",
-        choices: [{
-          finish_reason: "tool_calls",
-          message: {
-            tool_calls: [{
-              id: "call_custom_search",
-              function: { name: "web_search", arguments: "{\"query\":\"local\"}" },
-            }],
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_custom_web_search",
+            choices: [
+              {
+                finish_reason: "tool_calls",
+                message: {
+                  tool_calls: [
+                    {
+                      id: "call_custom_search",
+                      function: { name: "web_search", arguments: '{"query":"local"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
           },
-        }],
-        usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -341,39 +393,53 @@ describe("Claude proxy compatibility API", () => {
         model: GLM_5_2.anthropicAlias,
         max_tokens: 128,
         messages: [{ role: "user", content: "Call my search tool." }],
-        tools: [{
-          name: "web_search",
-          description: "A client-owned search tool.",
-          input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
-        }],
+        tools: [
+          {
+            name: "web_search",
+            description: "A client-owned search tool.",
+            input_schema: {
+              type: "object",
+              properties: { query: { type: "string" } },
+              required: ["query"],
+            },
+          },
+        ],
       }),
     });
 
     expect(response.status).toBe(200);
     expect(upstreamBodies).toHaveLength(1);
     expect(upstreamToolNames(upstreamBodies[0])).toEqual(["web_search"]);
-    expect(response.body.content).toEqual([{
-      type: "tool_use",
-      id: "call_custom_search",
-      name: "web_search",
-      input: { query: "local" },
-    }]);
+    expect(response.body.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_custom_search",
+        name: "web_search",
+        input: { query: "local" },
+      },
+    ]);
   });
 
   test("normalizes native web search and drops colliding custom web_search tools", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_native_collision",
-        choices: [{ message: { content: "COLLISION_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_native_collision",
+            choices: [{ message: { content: "COLLISION_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -409,18 +475,24 @@ describe("Claude proxy compatibility API", () => {
 
   test("converts server_tool_use history into OpenAI tool calls", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_server_tool_history",
-        choices: [{ message: { content: "SERVER_TOOL_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_server_tool_history",
+            choices: [{ message: { content: "SERVER_TOOL_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -428,41 +500,55 @@ describe("Claude proxy compatibility API", () => {
       body: JSON.stringify({
         model: GLM_5_2.anthropicAlias,
         max_tokens: 128,
-        messages: [{
-          role: "assistant",
-          content: [{
-            type: "server_tool_use",
-            id: "srvu_123",
-            name: "web_search",
-            input: { query: "Together AI" },
-          }],
-        }],
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "server_tool_use",
+                id: "srvu_123",
+                name: "web_search",
+                input: { query: "Together AI" },
+              },
+            ],
+          },
+        ],
       }),
     });
 
     expect(response.status).toBe(200);
-    const assistant = upstreamMessages(upstreamBodies[0]).find((message) => Array.isArray(message.tool_calls));
-    expect(assistant?.tool_calls).toEqual([{
-      id: "srvu_123",
-      type: "function",
-      function: { name: "web_search", arguments: "{\"query\":\"Together AI\"}" },
-    }]);
+    const assistant = upstreamMessages(upstreamBodies[0]).find((message) =>
+      Array.isArray(message.tool_calls),
+    );
+    expect(assistant?.tool_calls).toEqual([
+      {
+        id: "srvu_123",
+        type: "function",
+        function: { name: "web_search", arguments: '{"query":"Together AI"}' },
+      },
+    ]);
   });
 
   test("formats web_search_tool_result history into readable tool messages", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_web_result_history",
-        choices: [{ message: { content: "WEB_RESULT_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_web_result_history",
+            choices: [{ message: { content: "WEB_RESULT_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -470,27 +556,33 @@ describe("Claude proxy compatibility API", () => {
       body: JSON.stringify({
         model: GLM_5_2.anthropicAlias,
         max_tokens: 128,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "web_search_tool_result",
-              tool_use_id: "srvu_search",
-              content: [{ title: "Together docs", url: "https://docs.together.ai", text: "API docs" }],
-            },
-            {
-              type: "web_search_tool_result_error",
-              tool_use_id: "srvu_error",
-              error_code: "rate_limited",
-              content: "Try later",
-            },
-          ],
-        }],
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "web_search_tool_result",
+                tool_use_id: "srvu_search",
+                content: [
+                  { title: "Together docs", url: "https://docs.together.ai", text: "API docs" },
+                ],
+              },
+              {
+                type: "web_search_tool_result_error",
+                tool_use_id: "srvu_error",
+                error_code: "rate_limited",
+                content: "Try later",
+              },
+            ],
+          },
+        ],
       }),
     });
 
     expect(response.status).toBe(200);
-    const toolMessages = upstreamMessages(upstreamBodies[0]).filter((message) => message.role === "tool");
+    const toolMessages = upstreamMessages(upstreamBodies[0]).filter(
+      (message) => message.role === "tool",
+    );
     expect(toolMessages[0]).toMatchObject({
       tool_call_id: "srvu_search",
     });
@@ -504,18 +596,24 @@ describe("Claude proxy compatibility API", () => {
 
   test("formats rich tool_result content arrays and error status", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      return new Response(JSON.stringify({
-        id: "chatcmpl_rich_tool_result",
-        choices: [{ message: { content: "RICH_TOOL_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_rich_tool_result",
+            choices: [{ message: { content: "RICH_TOOL_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
 
     const response = await callClaudeProxy({
       method: "POST",
@@ -523,24 +621,33 @@ describe("Claude proxy compatibility API", () => {
       body: JSON.stringify({
         model: GLM_5_2.anthropicAlias,
         max_tokens: 128,
-        messages: [{
-          role: "user",
-          content: [{
-            type: "tool_result",
-            tool_use_id: "call_rich",
-            is_error: true,
+        messages: [
+          {
+            role: "user",
             content: [
-              { type: "text", text: "Async agent launched successfully." },
-              { type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
-              { type: "url", url: "https://example.com/image.png" },
+              {
+                type: "tool_result",
+                tool_use_id: "call_rich",
+                is_error: true,
+                content: [
+                  { type: "text", text: "Async agent launched successfully." },
+                  {
+                    type: "image",
+                    source: { type: "base64", media_type: "image/png", data: "abc" },
+                  },
+                  { type: "url", url: "https://example.com/image.png" },
+                ],
+              },
             ],
-          }],
-        }],
+          },
+        ],
       }),
     });
 
     expect(response.status).toBe(200);
-    const toolMessage = upstreamMessages(upstreamBodies[upstreamBodies.length - 1]).find((message) => message.role === "tool");
+    const toolMessage = upstreamMessages(upstreamBodies[upstreamBodies.length - 1]).find(
+      (message) => message.role === "tool",
+    );
     expect(toolMessage?.tool_call_id).toBe("call_rich");
     expect(String(toolMessage?.content)).toContain("[tool_result error]");
     expect(String(toolMessage?.content)).toContain("Async agent launched successfully.");
@@ -552,48 +659,60 @@ describe("Claude proxy compatibility API", () => {
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     const upstreamBodies: Array<Record<string, unknown>> = [];
     const urls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      urls.push(url);
-      if (url.includes("api.exa.ai/search")) {
-        return new Response(JSON.stringify({
-          results: [{
-            title: "Native search result",
-            url: "https://example.com/native",
-            text: "Result text from Exa.",
-          }],
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        urls.push(url);
+        if (url.includes("api.exa.ai/search")) {
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  title: "Native search result",
+                  url: "https://example.com/native",
+                  text: "Result text from Exa.",
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
 
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      if (upstreamBodies.length === 1) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        if (upstreamBodies.length === 1) {
+          return sseResponse([
+            {
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call_native_search",
+                        function: { name: "web_search", arguments: '{"query":"native search"}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+              usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+            },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+          ]);
+        }
+
         return sseResponse([
           {
-            choices: [{
-              delta: {
-                tool_calls: [{
-                  index: 0,
-                  id: "call_native_search",
-                  function: { name: "web_search", arguments: "{\"query\":\"native search\"}" },
-                }],
-              },
-            }],
-            usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+            choices: [{ delta: { content: "NATIVE_STREAM_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 40, completion_tokens: 3, total_tokens: 43 },
           },
-          { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
         ]);
-      }
-
-      return sseResponse([
-        {
-          choices: [{ delta: { content: "NATIVE_STREAM_OK" }, finish_reason: "stop" }],
-          usage: { prompt_tokens: 40, completion_tokens: 3, total_tokens: 43 },
-        },
-      ]);
-    }));
+      }),
+    );
 
     const response = await callClaudeProxyRaw({
       method: "POST",
@@ -611,33 +730,43 @@ describe("Claude proxy compatibility API", () => {
     expect(urls.some((url) => url.includes("api.exa.ai/search"))).toBe(true);
     expect(upstreamBodies).toHaveLength(2);
     expect(String(response.body)).toContain("NATIVE_STREAM_OK");
-    expect(String(response.body)).not.toContain("\"name\":\"web_search\"");
+    expect(String(response.body)).not.toContain('"name":"web_search"');
     const secondMessages = upstreamMessages(upstreamBodies[1]);
-    expect(secondMessages.some((message) => message.role === "tool" && message.tool_call_id === "call_native_search")).toBe(true);
+    expect(
+      secondMessages.some(
+        (message) => message.role === "tool" && message.tool_call_id === "call_native_search",
+      ),
+    ).toBe(true);
   });
 
   test("passes stop_sequences upstream in buffered and streaming requests", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      upstreamBodies.push(body);
-      if (body.stream) {
-        return sseResponse([
-          {
-            choices: [{ delta: { content: "STOP_STREAM_OK" }, finish_reason: "stop" }],
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        if (body.stream) {
+          return sseResponse([
+            {
+              choices: [{ delta: { content: "STOP_STREAM_OK" }, finish_reason: "stop" }],
+              usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+            },
+          ]);
+        }
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_stop_buffered",
+            choices: [{ message: { content: "STOP_BUFFERED_OK" }, finish_reason: "stop" }],
             usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
           },
-        ]);
-      }
-      return new Response(JSON.stringify({
-        id: "chatcmpl_stop_buffered",
-        choices: [{ message: { content: "STOP_BUFFERED_OK" }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }));
+        );
+      }),
+    );
 
     const buffered = await callClaudeProxy({
       method: "POST",
@@ -670,9 +799,15 @@ describe("Claude proxy compatibility API", () => {
 function firstUserContent(body: Record<string, unknown> | undefined): unknown {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const userMessage = messages.find((message) => {
-    return typeof message === "object" && message !== null && (message as { role?: unknown }).role === "user";
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      (message as { role?: unknown }).role === "user"
+    );
   });
-  return typeof userMessage === "object" && userMessage !== null ? (userMessage as { content?: unknown }).content : undefined;
+  return typeof userMessage === "object" && userMessage !== null
+    ? (userMessage as { content?: unknown }).content
+    : undefined;
 }
 
 function upstreamMessages(body: Record<string, unknown> | undefined): Array<{
@@ -682,13 +817,20 @@ function upstreamMessages(body: Record<string, unknown> | undefined): Array<{
   tool_calls?: unknown;
 }> {
   return Array.isArray(body?.messages)
-    ? body.messages as Array<{ role?: unknown; content?: unknown; tool_call_id?: unknown; tool_calls?: unknown }>
+    ? (body.messages as Array<{
+        role?: unknown;
+        content?: unknown;
+        tool_call_id?: unknown;
+        tool_calls?: unknown;
+      }>)
     : [];
 }
 
-function upstreamTools(body: Record<string, unknown> | undefined): Array<{ function?: { name?: string; parameters?: unknown } }> {
+function upstreamTools(
+  body: Record<string, unknown> | undefined,
+): Array<{ function?: { name?: string; parameters?: unknown } }> {
   return Array.isArray(body?.tools)
-    ? body.tools as Array<{ function?: { name?: string; parameters?: unknown } }>
+    ? (body.tools as Array<{ function?: { name?: string; parameters?: unknown } }>)
     : [];
 }
 
@@ -774,18 +916,21 @@ class MemoryResponse extends EventEmitter {
 
 function sseResponse(events: unknown[]): Response {
   const encoder = new TextEncoder();
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const event of events) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-      }
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
     },
-  }), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
+  );
 }
 
 function proxyOptions(): ClaudeProxyOptions {

@@ -10,12 +10,7 @@ import { resolveTogetherApiKey } from "../together-core.js";
 const PI_PROVIDER_ID = "together";
 const PI_SUPPORTED_MODELS = CODEX_SUPPORTED_MODELS.map((model) => model.id).join(",");
 
-const VALUE_FLAGS = new Set([
-  "--api-key",
-  "--provider",
-  "--model",
-  "--models",
-]);
+const VALUE_FLAGS = new Set(["--api-key", "--provider", "--model", "--models"]);
 
 function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
   const sanitized: string[] = [];
@@ -59,14 +54,18 @@ function writePiModelsJson(agentDir: string, apiKey: string): void {
 
   writeFileSync(
     join(agentDir, "models.json"),
-    `${JSON.stringify({
-      providers: {
-        [PI_PROVIDER_ID]: {
-          apiKey,
-          models,
+    `${JSON.stringify(
+      {
+        providers: {
+          [PI_PROVIDER_ID]: {
+            apiKey,
+            models,
+          },
         },
       },
-    }, null, 2)}\n`,
+      null,
+      2,
+    )}\n`,
     "utf8",
   );
 }
@@ -85,7 +84,9 @@ export default defineHarness({
     }
 
     const agentDir = mkdtempSync(join(tmpdir(), "togetherlink-pi-"));
-    const sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR ?? join(ctx.home || homedir(), ".pi", "agent", "sessions");
+    const sessionDir =
+      process.env.PI_CODING_AGENT_SESSION_DIR ??
+      join(ctx.home || homedir(), ".pi", "agent", "sessions");
     writePiModelsJson(agentDir, apiKey);
     const selectedModel = resolveCodexModel(ctx.main);
     const args = [

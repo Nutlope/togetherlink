@@ -18,7 +18,8 @@ const BOOLEAN_FLAG_KEYS = {
 
 export type ParsedArgs = {
   positional: string[];
-  flags: Partial<HarnessContext> & Record<BooleanFlag, boolean> & { passthroughSeparator?: boolean };
+  flags: Partial<HarnessContext> &
+    Record<BooleanFlag, boolean> & { passthroughSeparator?: boolean };
 };
 
 /**

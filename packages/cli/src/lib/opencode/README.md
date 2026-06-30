@@ -59,14 +59,14 @@ field. The provider label stays the full `Together AI`, and the model names are
 kept short so the per-line provider suffix OpenCode appends does not push them
 past the picker's truncation width.
 
-| Model id | Vision | Use case |
-|---|---|---|
-| `zai-org/GLM-5.2` | No | default, agentic coding (text-only) |
-| `moonshotai/Kimi-K2.6` | Yes | reasoning + vision |
-| `moonshotai/Kimi-K2.7-Code` | Yes | code; also the `@vision` subagent model |
-| `MiniMaxAI/MiniMax-M3` | Yes | cheapest vision, 512K context |
-| `Qwen/Qwen3.7-Max` | Yes | strongest Qwen, 1M context |
-| `deepseek-ai/DeepSeek-V4-Pro` | No | long-context reasoning (512K) |
+| Model id                      | Vision | Use case                                |
+| ----------------------------- | ------ | --------------------------------------- |
+| `zai-org/GLM-5.2`             | No     | default, agentic coding (text-only)     |
+| `moonshotai/Kimi-K2.6`        | Yes    | reasoning + vision                      |
+| `moonshotai/Kimi-K2.7-Code`   | Yes    | code; also the `@vision` subagent model |
+| `MiniMaxAI/MiniMax-M3`        | Yes    | cheapest vision, 512K context           |
+| `Qwen/Qwen3.7-Max`            | Yes    | strongest Qwen, 1M context              |
+| `deepseek-ai/DeepSeek-V4-Pro` | No     | long-context reasoning (512K)           |
 
 That's all users see in `/models`. The curated set lives in
 [`@togetherlink/models`](../../../../models/src/index.ts) (`SELECTABLE_MODELS`).

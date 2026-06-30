@@ -35,54 +35,56 @@ export function claudeScenarios(): Scenario[] {
     {
       name: "claude: stream-json response",
       run: async (context) => {
-        const result = await runCommand(context, "claude-stream-json", process.execPath, [
-          context.cliBin,
-          "claude",
-          "--",
-          "--print",
-          "--verbose",
-          "--output-format",
-          "stream-json",
-          "--include-partial-messages",
-          "--no-session-persistence",
-          "--permission-mode",
-          "bypassPermissions",
-          "Reply with exactly: hi",
-        ], { timeoutMs: 180_000 });
+        const result = await runCommand(
+          context,
+          "claude-stream-json",
+          process.execPath,
+          [
+            context.cliBin,
+            "claude",
+            "--",
+            "--print",
+            "--verbose",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--no-session-persistence",
+            "--permission-mode",
+            "bypassPermissions",
+            "Reply with exactly: hi",
+          ],
+          { timeoutMs: 180_000 },
+        );
         assert(result.status === 0, `exit ${result.status}`);
         const events = jsonLines(result.stdout).map(asRecord);
-        assert(events.some((event) => event.type === "stream_event" && asRecord(event.event).type === "message_start"), "missing message_start stream event");
-        assert(events.some((event) => event.type === "stream_event" && asRecord(event.event).type === "content_block_delta"), "missing content delta stream event");
-        assert(events.some((event) => event.type === "result" && event.is_error === false), "missing successful stream-json result");
+        assert(
+          events.some(
+            (event) =>
+              event.type === "stream_event" && asRecord(event.event).type === "message_start",
+          ),
+          "missing message_start stream event",
+        );
+        assert(
+          events.some(
+            (event) =>
+              event.type === "stream_event" && asRecord(event.event).type === "content_block_delta",
+          ),
+          "missing content delta stream event",
+        );
+        assert(
+          events.some((event) => event.type === "result" && event.is_error === false),
+          "missing successful stream-json result",
+        );
       },
     },
     {
       name: "claude: read tool call",
       run: async (context) => {
-        const result = await runCommand(context, "claude-read", process.execPath, [
-          context.cliBin,
-          "claude",
-          "--",
-          "--print",
-          "--output-format",
-          "json",
-          "--no-session-persistence",
-          "--permission-mode",
-          "bypassPermissions",
-          "Read README.md and answer in one sentence what this project does.",
-        ], { timeoutMs: 180_000 });
-        assert(result.status === 0, `exit ${result.status}`);
-        const parsed = parseLastJsonObject(result.stdout);
-        assert(parsed?.is_error === false, "is_error should be false");
-        assert(/Together|Claude|Codex|OpenCode|AI/i.test(String(parsed?.result ?? "")), "answer does not look README-based");
-      },
-    },
-    {
-      name: "claude: coding task in temporary git repo",
-      run: async (context) => {
-        const repo = await createFixtureRepo(context, "claude");
-        try {
-          const result = await runCommand(context, "claude-coding-task", process.execPath, [
+        const result = await runCommand(
+          context,
+          "claude-read",
+          process.execPath,
+          [
             context.cliBin,
             "claude",
             "--",
@@ -92,8 +94,42 @@ export function claudeScenarios(): Scenario[] {
             "--no-session-persistence",
             "--permission-mode",
             "bypassPermissions",
-            codingTaskPrompt(),
-          ], { cwd: repo.path, timeoutMs: 300_000 });
+            "Read README.md and answer in one sentence what this project does.",
+          ],
+          { timeoutMs: 180_000 },
+        );
+        assert(result.status === 0, `exit ${result.status}`);
+        const parsed = parseLastJsonObject(result.stdout);
+        assert(parsed?.is_error === false, "is_error should be false");
+        assert(
+          /Together|Claude|Codex|OpenCode|AI/i.test(String(parsed?.result ?? "")),
+          "answer does not look README-based",
+        );
+      },
+    },
+    {
+      name: "claude: coding task in temporary git repo",
+      run: async (context) => {
+        const repo = await createFixtureRepo(context, "claude");
+        try {
+          const result = await runCommand(
+            context,
+            "claude-coding-task",
+            process.execPath,
+            [
+              context.cliBin,
+              "claude",
+              "--",
+              "--print",
+              "--output-format",
+              "json",
+              "--no-session-persistence",
+              "--permission-mode",
+              "bypassPermissions",
+              codingTaskPrompt(),
+            ],
+            { cwd: repo.path, timeoutMs: 300_000 },
+          );
           assert(result.status === 0, `exit ${result.status}`);
           await assertFixtureRepoSolved(repo.path);
         } finally {
@@ -108,20 +144,29 @@ export function claudeScenarios(): Scenario[] {
           "You are testing long-context handling. Read the repeated records below and answer with only the checksum token from the final record.",
           makeLongRecords(500, "CLAUDE_FINAL_CHECKSUM_6248"),
         ].join("\n\n");
-        const result = await runCommand(context, "claude-long-context", process.execPath, [
-          context.cliBin,
-          "claude",
-          "--",
-          "--print",
-          "--output-format",
-          "json",
-          "--no-session-persistence",
-          "--permission-mode",
-          "bypassPermissions",
-        ], { timeoutMs: 300_000, stdin: prompt });
+        const result = await runCommand(
+          context,
+          "claude-long-context",
+          process.execPath,
+          [
+            context.cliBin,
+            "claude",
+            "--",
+            "--print",
+            "--output-format",
+            "json",
+            "--no-session-persistence",
+            "--permission-mode",
+            "bypassPermissions",
+          ],
+          { timeoutMs: 300_000, stdin: prompt },
+        );
         assert(result.status === 0, `exit ${result.status}`);
         assert(result.stdout.includes("CLAUDE_FINAL_CHECKSUM_6248"), "missing final checksum");
-        assert(!looksLikeContextError(result.stderr + result.stdout), "context-length error surfaced");
+        assert(
+          !looksLikeContextError(result.stderr + result.stdout),
+          "context-length error surfaced",
+        );
       },
     },
     {

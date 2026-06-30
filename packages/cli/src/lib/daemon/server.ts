@@ -93,7 +93,9 @@ async function listenOrExitOnRace(server: Server, port: number): Promise<void> {
           if (healthy) {
             process.exit(0);
           }
-          process.stderr.write(`[togetherlink daemon] port ${port} in use by a non-daemon process.\n`);
+          process.stderr.write(
+            `[togetherlink daemon] port ${port} in use by a non-daemon process.\n`,
+          );
           process.exit(1);
         });
         return;
@@ -136,7 +138,9 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   await mkdir(path.dirname(daemonPidPath()), { recursive: true });
   await writeFile(daemonPidPath(), `${process.pid}\n`, { encoding: "utf8" });
   if (debug) {
-    process.stderr.write(`[togetherlink daemon] listening: ${daemonUrl(port)} (pid ${process.pid})\n`);
+    process.stderr.write(
+      `[togetherlink daemon] listening: ${daemonUrl(port)} (pid ${process.pid})\n`,
+    );
     if (restored > 0) {
       process.stderr.write(`[togetherlink daemon] restored ${restored} active session(s).\n`);
     }
@@ -280,12 +284,20 @@ async function handleDaemonRequest(
     // and so isn't accounted by the proxy path). Account once against this
     // session's tracker so the cost endpoint shows it uniformly.
     if (promptTokens > 0 || completionTokens > 0) {
-      state.costTracker.addUsage(promptTokens, cachedTokens, completionTokens, state.modelDefinition);
+      state.costTracker.addUsage(
+        promptTokens,
+        cachedTokens,
+        completionTokens,
+        state.modelDefinition,
+      );
     }
     if (typeof body?.summary === "string" && body.summary) {
       state.costTracker.setExternalSummary(body.summary);
     }
-    sessions.updateUsage(state.token, typeof body?.summary === "string" && body.summary ? body.summary : undefined);
+    sessions.updateUsage(
+      state.token,
+      typeof body?.summary === "string" && body.summary ? body.summary : undefined,
+    );
     writeJson(res, 200, { ok: true });
     return;
   }
@@ -378,9 +390,12 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
   // modelDefinition (for CostTracker pricing), and a display modelLabel.
   const coreMissing =
     !body ||
-    typeof body.token !== "string" || !body.token ||
-    typeof body.apiKey !== "string" || !body.apiKey ||
-    typeof body.modelLabel !== "string" || !body.modelLabel ||
+    typeof body.token !== "string" ||
+    !body.token ||
+    typeof body.apiKey !== "string" ||
+    !body.apiKey ||
+    typeof body.modelLabel !== "string" ||
+    !body.modelLabel ||
     typeof body.modelDefinition !== "object" ||
     body.modelDefinition === null;
   if (coreMissing) {
@@ -397,8 +412,10 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
   const agent = body.agent ?? "claude";
   if (isProxiedAgent(agent)) {
     const proxyMissing =
-      typeof body.modelId !== "string" || !body.modelId ||
-      typeof body.targetModelId !== "string" || !body.targetModelId;
+      typeof body.modelId !== "string" ||
+      !body.modelId ||
+      typeof body.targetModelId !== "string" ||
+      !body.targetModelId;
     if (proxyMissing) {
       writeAnthropicError(
         res,
@@ -440,26 +457,32 @@ export async function probeDaemonHealth(port: number): Promise<DaemonHealth | un
     if (!response.ok) {
       return undefined;
     }
-    const body = (await response.json().catch(() => undefined)) as Partial<DaemonHealth> | undefined;
+    const body = (await response.json().catch(() => undefined)) as
+      | Partial<DaemonHealth>
+      | undefined;
     if (body?.ok !== true) {
       return undefined;
     }
-      return {
-        ok: true,
-        pid: typeof body.pid === "number" ? body.pid : 0,
-        version: typeof body.version === "string" ? body.version : "",
-        home: typeof body.home === "string" ? body.home : null,
-        scriptPath: typeof body.scriptPath === "string" ? body.scriptPath : null,
-        scriptSize: typeof body.scriptSize === "number" ? body.scriptSize : null,
-        scriptMtimeMs: typeof body.scriptMtimeMs === "number" ? body.scriptMtimeMs : null,
-      activeSessionCount: typeof body.activeSessionCount === "number" ? body.activeSessionCount : -1,
+    return {
+      ok: true,
+      pid: typeof body.pid === "number" ? body.pid : 0,
+      version: typeof body.version === "string" ? body.version : "",
+      home: typeof body.home === "string" ? body.home : null,
+      scriptPath: typeof body.scriptPath === "string" ? body.scriptPath : null,
+      scriptSize: typeof body.scriptSize === "number" ? body.scriptSize : null,
+      scriptMtimeMs: typeof body.scriptMtimeMs === "number" ? body.scriptMtimeMs : null,
+      activeSessionCount:
+        typeof body.activeSessionCount === "number" ? body.activeSessionCount : -1,
     };
   } catch {
     return undefined;
   }
 }
 
-function daemonIdentityAtStartup(): Pick<DaemonHealth, "scriptPath" | "scriptSize" | "scriptMtimeMs"> {
+function daemonIdentityAtStartup(): Pick<
+  DaemonHealth,
+  "scriptPath" | "scriptSize" | "scriptMtimeMs"
+> {
   const scriptPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
   if (!scriptPath) {
     return { scriptPath: null, scriptSize: null, scriptMtimeMs: null };

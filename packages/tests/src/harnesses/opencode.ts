@@ -22,28 +22,49 @@ export function opencodeScenarios(): Scenario[] {
         ]);
         assert(result.status === 0, `exit ${result.status}`);
         const events = openCodeEvents(result.stdout);
-        assert(events.some((event) => event.type === "step_start"), "missing step_start event");
-        assert(events.some((event) => event.type === "text"), "missing streamed text event");
-        assert(events.some((event) => event.type === "step_finish"), "missing step_finish event");
-        assert(openCodeText(events).some((text) => /\bhi\b/i.test(text)), "missing expected text");
+        assert(
+          events.some((event) => event.type === "step_start"),
+          "missing step_start event",
+        );
+        assert(
+          events.some((event) => event.type === "text"),
+          "missing streamed text event",
+        );
+        assert(
+          events.some((event) => event.type === "step_finish"),
+          "missing step_finish event",
+        );
+        assert(
+          openCodeText(events).some((text) => /\bhi\b/i.test(text)),
+          "missing expected text",
+        );
       },
     },
     {
       name: "opencode: bash tool call",
       run: async (context) => {
-        const result = await runCommand(context, "opencode-tool-pwd", process.execPath, [
-          context.cliBin,
-          "opencode",
-          "--",
-          "run",
-          "--format",
-          "json",
-          "--dangerously-skip-permissions",
-          "Run pwd and answer with the directory only.",
-        ], { timeoutMs: 180_000 });
+        const result = await runCommand(
+          context,
+          "opencode-tool-pwd",
+          process.execPath,
+          [
+            context.cliBin,
+            "opencode",
+            "--",
+            "run",
+            "--format",
+            "json",
+            "--dangerously-skip-permissions",
+            "Run pwd and answer with the directory only.",
+          ],
+          { timeoutMs: 180_000 },
+        );
         assert(result.status === 0, `exit ${result.status}`);
         const events = openCodeEvents(result.stdout);
-        assert(events.some((event) => event.type === "tool_use" && asRecord(event.part).tool === "bash"), "missing bash tool_use event");
+        assert(
+          events.some((event) => event.type === "tool_use" && asRecord(event.part).tool === "bash"),
+          "missing bash tool_use event",
+        );
         assert(result.stdout.includes(context.repoRoot), "expected pwd result in output");
       },
     },
@@ -54,19 +75,28 @@ export function opencodeScenarios(): Scenario[] {
           "You are testing long-context handling. Read the repeated records below and answer with only the checksum token from the final record.",
           makeLongRecords(250, "OPENCODE_FINAL_CHECKSUM_4185"),
         ].join("\n\n");
-        const result = await runCommand(context, "opencode-long-context", process.execPath, [
-          context.cliBin,
-          "opencode",
-          "--",
-          "run",
-          "--format",
-          "json",
-          "--dangerously-skip-permissions",
-          prompt,
-        ], { timeoutMs: 180_000 });
+        const result = await runCommand(
+          context,
+          "opencode-long-context",
+          process.execPath,
+          [
+            context.cliBin,
+            "opencode",
+            "--",
+            "run",
+            "--format",
+            "json",
+            "--dangerously-skip-permissions",
+            prompt,
+          ],
+          { timeoutMs: 180_000 },
+        );
         assert(result.status === 0, `exit ${result.status}`);
         assert(result.stdout.includes("OPENCODE_FINAL_CHECKSUM_4185"), "missing final checksum");
-        assert(!looksLikeContextError(result.stderr + result.stdout), "context-length error surfaced");
+        assert(
+          !looksLikeContextError(result.stderr + result.stdout),
+          "context-length error surfaced",
+        );
       },
     },
   ];

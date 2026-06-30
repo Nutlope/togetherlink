@@ -10,7 +10,9 @@ export async function dispatchHarnessCommand(
   flags: Partial<HarnessContext>,
 ): Promise<void> {
   if (!isKnownHarness(harnessName)) {
-    throw new Error(`Unknown harness "${harnessName}". Expected one of: ${ALL_HARNESSES.join(", ")}`);
+    throw new Error(
+      `Unknown harness "${harnessName}". Expected one of: ${ALL_HARNESSES.join(", ")}`,
+    );
   }
   if (!isHarnessImplemented(harnessName)) {
     throw new Error(

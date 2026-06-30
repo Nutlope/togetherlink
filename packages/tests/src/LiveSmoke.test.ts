@@ -34,10 +34,7 @@ maybeDescribe("live headless harness smoke", () => {
 
 function smokeScenarios(): Scenario[] {
   return [
-    ...pickScenarios(codexScenarios(), [
-      "codex: basic headless response",
-      "codex: bash tool call",
-    ]),
+    ...pickScenarios(codexScenarios(), ["codex: basic headless response", "codex: bash tool call"]),
     ...pickScenarios(claudeScenarios(), [
       "claude: basic headless response",
       "claude: read tool call",
@@ -64,9 +61,7 @@ function pickScenarios(scenarios: Scenario[], names: string[]): Scenario[] {
 }
 
 async function stopDaemon(context: TestContext, artifactName: string): Promise<void> {
-  await runCommand(context, artifactName, process.execPath, [
-    context.cliBin,
-    "daemon",
-    "stop",
-  ], { timeoutMs: 20_000 });
+  await runCommand(context, artifactName, process.execPath, [context.cliBin, "daemon", "stop"], {
+    timeoutMs: 20_000,
+  });
 }

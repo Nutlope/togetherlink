@@ -15,28 +15,31 @@ afterEach(() => {
 
 test("local proxy translation overhead", async () => {
   let upstreamRequests = 0;
-  vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const href = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
-    if (href.startsWith("http://127.0.0.1:")) {
-      return realFetch(url, init);
-    }
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+      if (href.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
 
-    upstreamRequests += 1;
-    const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
-    if (body.stream) {
-      return sseResponse([
-        { choices: [{ delta: { reasoning_content: "ok " } }] },
-        { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] },
-        { usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 } },
-      ]);
-    }
+      upstreamRequests += 1;
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream) {
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: "ok " } }] },
+          { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] },
+          { usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 } },
+        ]);
+      }
 
-    return jsonResponse({
-      id: "chatcmpl_bench",
-      choices: [{ message: { reasoning: "ok", content: "hello" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 },
-    });
-  }));
+      return jsonResponse({
+        id: "chatcmpl_bench",
+        choices: [{ message: { reasoning: "ok", content: "hello" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 },
+      });
+    }),
+  );
 
   const codexProxyOptions = codexOptions();
   const claudeProxyOptions = claudeOptions();
@@ -75,7 +78,7 @@ test("local proxy translation overhead", async () => {
         headers: { "content-type": "application/json", authorization: "Bearer local-token" },
         body: JSON.stringify(codexPayload),
       });
-      const json = await response.json() as { output?: unknown };
+      const json = (await response.json()) as { output?: unknown };
       if (!json.output) {
         throw new Error("missing Codex output");
       }
@@ -97,7 +100,7 @@ test("local proxy translation overhead", async () => {
         headers: { "content-type": "application/json", authorization: "Bearer local-token" },
         body: JSON.stringify(claudePayload),
       });
-      const json = await response.json() as { content?: unknown };
+      const json = (await response.json()) as { content?: unknown };
       if (!json.content) {
         throw new Error("missing Claude output");
       }
@@ -126,14 +129,21 @@ test("local proxy translation overhead", async () => {
 
     const overheadCeiling = optionalOverheadCeilingMs();
     if (overheadCeiling !== undefined) {
-      expect(approximateProxyOverhead.every((row) => row.p95MinusControlMs <= overheadCeiling)).toBe(true);
+      expect(
+        approximateProxyOverhead.every((row) => row.p95MinusControlMs <= overheadCeiling),
+      ).toBe(true);
     }
   } finally {
     await Promise.all([control.close(), codex.close(), claude.close()]);
   }
 }, 30_000);
 
-async function benchmark(name: string, iterations: number, warmup: number, fn: () => Promise<void>): Promise<BenchmarkRow> {
+async function benchmark(
+  name: string,
+  iterations: number,
+  warmup: number,
+  fn: () => Promise<void>,
+): Promise<BenchmarkRow> {
   for (let i = 0; i < warmup; i += 1) {
     await fn();
   }
@@ -171,7 +181,10 @@ type BenchmarkRow = {
 };
 
 function percentile(sorted: number[], rank: number): number {
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((rank / 100) * sorted.length) - 1));
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil((rank / 100) * sorted.length) - 1),
+  );
   return sorted[index] ?? 0;
 }
 
@@ -244,14 +257,30 @@ function codexBenchmarkPayload(): Record<string, unknown> {
         type: "namespace",
         name: "multi_agent_v1",
         tools: [
-          { type: "function", name: "spawn_agent", parameters: { type: "object", properties: { task: { type: "string" } } } },
-          { type: "function", name: "read_result", parameters: { type: "object", properties: { id: { type: "string" } } } },
+          {
+            type: "function",
+            name: "spawn_agent",
+            parameters: { type: "object", properties: { task: { type: "string" } } },
+          },
+          {
+            type: "function",
+            name: "read_result",
+            parameters: { type: "object", properties: { id: { type: "string" } } },
+          },
         ],
       },
-      { type: "custom", name: "apply_patch", format: { type: "grammar", syntax: "lark", definition: "start: /.+/" } },
+      {
+        type: "custom",
+        name: "apply_patch",
+        format: { type: "grammar", syntax: "lark", definition: "start: /.+/" },
+      },
     ],
     input: [
-      { type: "message", role: "user", content: [{ type: "input_text", text: "Summarize the local proxy path." }] },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Summarize the local proxy path." }],
+      },
       ...Array.from({ length: 12 }, (_, index) => ({
         type: "message",
         role: index % 2 === 0 ? "assistant" : "user",
@@ -295,7 +324,8 @@ async function createServer(
   }
   return {
     url: `http://127.0.0.1:${address.port}`,
-    close: () => new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve())),
+    close: () =>
+      new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
   };
 }
 

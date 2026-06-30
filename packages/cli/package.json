@@ -2,16 +2,14 @@
   "name": "@togetherlink/cli",
   "version": "0.5.4",
   "description": "CLI for routing Claude Code, OpenCode, Codex, and Pi Code through Together AI",
-  "type": "module",
+  "license": "Apache-2.0",
   "bin": {
     "togetherlink": "./dist/bin/togetherlink.js"
   },
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=18"
-  },
+  "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/bin/togetherlink.js', 0o755)\"",
     "dev": "pnpm build && sh -c 'node scripts/watch-bin-mode.mjs & tsc -p tsconfig.json --watch --preserveWatchOutput'",
@@ -24,5 +22,7 @@
     "@clack/prompts": "^0.8.2",
     "@togetherlink/models": "workspace:*"
   },
-  "license": "Apache-2.0"
+  "engines": {
+    "node": ">=18"
+  }
 }

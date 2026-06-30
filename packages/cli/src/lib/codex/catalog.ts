@@ -16,14 +16,19 @@ const CODEX_MODEL_MESSAGES = {
 };
 
 export function codexModelCatalog(): { models: Array<Record<string, unknown>> } {
-  return { models: CODEX_SUPPORTED_MODELS.map((model, index) => toCodexModelCatalogEntry(model, index)) };
+  return {
+    models: CODEX_SUPPORTED_MODELS.map((model, index) => toCodexModelCatalogEntry(model, index)),
+  };
 }
 
 export function codexModelCatalogJson(): string {
   return JSON.stringify(codexModelCatalog());
 }
 
-export function toCodexModelCatalogEntry(model: { id: string; definition: ModelDefinition }, priority = 50): Record<string, unknown> {
+export function toCodexModelCatalogEntry(
+  model: { id: string; definition: ModelDefinition },
+  priority = 50,
+): Record<string, unknown> {
   const reasoningLevels = model.definition.reasoning
     ? [
         { effort: "low", description: "Fast responses with lighter reasoning" },

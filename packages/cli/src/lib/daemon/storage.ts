@@ -38,9 +38,19 @@ export type SessionStore = {
   kind: "sqlite" | "memory";
   restoreActiveSessions(): StoredSession[];
   upsertSession(session: SessionPersistInput): void;
-  markSessionEnded(token: string, endedAt: number, costSummary: string, costTotals: TokenUsage): void;
+  markSessionEnded(
+    token: string,
+    endedAt: number,
+    costSummary: string,
+    costTotals: TokenUsage,
+  ): void;
   updateSessionPid(token: string, pid: number): void;
-  updateSessionUsage(token: string, costSummary: string, costTotals: TokenUsage, externalSummary?: string): void;
+  updateSessionUsage(
+    token: string,
+    costSummary: string,
+    costTotals: TokenUsage,
+    externalSummary?: string,
+  ): void;
   close(): void;
 };
 
@@ -68,7 +78,9 @@ function resolveTogetherlinkHome(): string {
 }
 
 async function openSqlite(file: string): Promise<SqliteDatabase | undefined> {
-  const dynamicImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>;
+  const dynamicImport = new Function("specifier", "return import(specifier)") as (
+    specifier: string,
+  ) => Promise<unknown>;
   const preferBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
   const attempts = preferBun ? ["bun:sqlite", "node:sqlite"] : ["node:sqlite", "bun:sqlite"];
   for (const specifier of attempts) {
@@ -78,7 +90,9 @@ async function openSqlite(file: string): Promise<SqliteDatabase | undefined> {
         return new BunSqliteDatabase(new (mod.Database as new (path: string) => unknown)(file));
       }
       if (specifier === "node:sqlite" && typeof mod.DatabaseSync === "function") {
-        return new NodeSqliteDatabase(new (mod.DatabaseSync as new (path: string) => unknown)(file));
+        return new NodeSqliteDatabase(
+          new (mod.DatabaseSync as new (path: string) => unknown)(file),
+        );
       }
     } catch {
       // Try the next runtime. Older Node and some bundled runtimes do not expose
@@ -100,7 +114,8 @@ class BunSqliteDatabase implements SqliteDatabase {
     return {
       run: (...params) => (statement as { run: (...params: unknown[]) => unknown }).run(...params),
       get: (...params) => (statement as { get: (...params: unknown[]) => unknown }).get(...params),
-      all: (...params) => (statement as { all: (...params: unknown[]) => unknown[] }).all(...params),
+      all: (...params) =>
+        (statement as { all: (...params: unknown[]) => unknown[] }).all(...params),
     };
   }
 
@@ -121,7 +136,8 @@ class NodeSqliteDatabase implements SqliteDatabase {
     return {
       run: (...params) => (statement as { run: (...params: unknown[]) => unknown }).run(...params),
       get: (...params) => (statement as { get: (...params: unknown[]) => unknown }).get(...params),
-      all: (...params) => (statement as { all: (...params: unknown[]) => unknown[] }).all(...params),
+      all: (...params) =>
+        (statement as { all: (...params: unknown[]) => unknown[] }).all(...params),
     };
   }
 
@@ -150,16 +166,30 @@ class ResilientSessionStore implements SessionStore {
     this.write("persist session", () => this.inner.upsertSession(session));
   }
 
-  markSessionEnded(token: string, endedAt: number, costSummary: string, costTotals: TokenUsage): void {
-    this.write("mark session ended", () => this.inner.markSessionEnded(token, endedAt, costSummary, costTotals));
+  markSessionEnded(
+    token: string,
+    endedAt: number,
+    costSummary: string,
+    costTotals: TokenUsage,
+  ): void {
+    this.write("mark session ended", () =>
+      this.inner.markSessionEnded(token, endedAt, costSummary, costTotals),
+    );
   }
 
   updateSessionPid(token: string, pid: number): void {
     this.write("update session pid", () => this.inner.updateSessionPid(token, pid));
   }
 
-  updateSessionUsage(token: string, costSummary: string, costTotals: TokenUsage, externalSummary?: string): void {
-    this.write("update session usage", () => this.inner.updateSessionUsage(token, costSummary, costTotals, externalSummary));
+  updateSessionUsage(
+    token: string,
+    costSummary: string,
+    costTotals: TokenUsage,
+    externalSummary?: string,
+  ): void {
+    this.write("update session usage", () =>
+      this.inner.updateSessionUsage(token, costSummary, costTotals, externalSummary),
+    );
   }
 
   close(): void {
@@ -231,7 +261,12 @@ class SqliteSessionStore implements SessionStore {
       .run(...sessionParams(session, Date.now()));
   }
 
-  markSessionEnded(token: string, endedAt: number, costSummary: string, costTotals: TokenUsage): void {
+  markSessionEnded(
+    token: string,
+    endedAt: number,
+    costSummary: string,
+    costTotals: TokenUsage,
+  ): void {
     this.db
       .prepare(`
         UPDATE sessions
@@ -252,10 +287,17 @@ class SqliteSessionStore implements SessionStore {
   }
 
   updateSessionPid(token: string, pid: number): void {
-    this.db.prepare("UPDATE sessions SET pid = ?, updated_at = ? WHERE token = ?").run(pid, Date.now(), token);
+    this.db
+      .prepare("UPDATE sessions SET pid = ?, updated_at = ? WHERE token = ?")
+      .run(pid, Date.now(), token);
   }
 
-  updateSessionUsage(token: string, costSummary: string, costTotals: TokenUsage, externalSummary?: string): void {
+  updateSessionUsage(
+    token: string,
+    costSummary: string,
+    costTotals: TokenUsage,
+    externalSummary?: string,
+  ): void {
     this.db
       .prepare(`
         UPDATE sessions

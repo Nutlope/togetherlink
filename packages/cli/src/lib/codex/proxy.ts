@@ -63,7 +63,11 @@ type ChatMessage = {
   content?: string | ChatContentPart[] | null;
   reasoning_content?: string;
   tool_call_id?: string;
-  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
 };
 
 type ChatContentPart =
@@ -78,7 +82,11 @@ type ChatResponse = {
       content?: string | null;
       reasoning?: string | null;
       reasoning_content?: string | null;
-      tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+      tool_calls?: Array<{
+        id?: string;
+        type?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
     };
   }>;
   usage?: {
@@ -128,7 +136,10 @@ type CodexToolMapping =
   | { kind: "web_search"; sourceName: string; modelName: string; definition: ResponsesTool };
 
 type CodexToolTranslation = {
-  tools: Array<{ type: "function"; function: { name: string; description: string; parameters: unknown } }>;
+  tools: Array<{
+    type: "function";
+    function: { name: string; description: string; parameters: unknown };
+  }>;
   mappings: Map<string, CodexToolMapping>;
   nativeTools: CodexToolMapping[];
 };
@@ -149,7 +160,9 @@ type TogetherChatResult =
   | { ok: true; response: Response; error?: undefined }
   | { ok: false; status: number; text: string; error?: undefined };
 
-type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
+type StreamProxyResult =
+  | { ok: true; status?: number }
+  | { ok: false; status: number; error: string };
 
 const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
 const MAX_TOGETHER_RETRIES = 3;
@@ -232,7 +245,12 @@ export async function handleCodexProxyRequest(
   }
 
   if (req.method !== "POST" || path !== "/v1/responses") {
-    writeOpenAIError(res, 404, "not_found_error", `Unsupported route ${req.method ?? ""} ${req.url ?? ""}`.trim());
+    writeOpenAIError(
+      res,
+      404,
+      "not_found_error",
+      `Unsupported route ${req.method ?? ""} ${req.url ?? ""}`.trim(),
+    );
     return;
   }
 
@@ -240,7 +258,13 @@ export async function handleCodexProxyRequest(
   const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
   const toolTranslation = translateCodexTools(body.tools);
   const requestModel = resolveCodexRequestModel(body, options);
-  const translatedPayload = toChatPayload(body, options, Boolean(body.stream), toolTranslation, requestModel);
+  const translatedPayload = toChatPayload(
+    body,
+    options,
+    Boolean(body.stream),
+    toolTranslation,
+    requestModel,
+  );
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -311,14 +335,18 @@ async function callTogetherWithNativeTools(
     return callTogether(payload, options, modelDefinition, signal);
   }
 
-  const messages = Array.isArray(payload.messages) ? ([...(payload.messages as ChatMessage[])] as ChatMessage[]) : [];
+  const messages = Array.isArray(payload.messages)
+    ? ([...(payload.messages as ChatMessage[])] as ChatMessage[])
+    : [];
   const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
   const nativeToolUses = new Map<string, number>();
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
     const json = await callTogether({ ...payload, messages }, options, modelDefinition, signal);
     const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
-    const nativeToolCalls = toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function?.name ?? ""));
+    const nativeToolCalls = toolCalls.filter((toolCall) =>
+      nativeToolNames.has(toolCall.function?.name ?? ""),
+    );
     if (nativeToolCalls.length === 0) {
       return json;
     }
@@ -331,7 +359,8 @@ async function callTogetherWithNativeTools(
           const nativeTool = toolTranslation.mappings.get(name);
           const input = parseJsonOrEmpty(toolCall.function?.arguments);
           const priorUses = nativeToolUses.get(name) ?? 0;
-          const maxUses = nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
+          const maxUses =
+            nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
           let result: string;
           if (priorUses >= maxUses) {
             result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
@@ -343,13 +372,17 @@ async function callTogetherWithNativeTools(
           }
           nativeResults.push(`Native ${name} result:\n${result}`);
         }
-        message.tool_calls = toolCalls.filter((toolCall) => !nativeToolNames.has(toolCall.function?.name ?? ""));
-        message.content = [message.content?.trim(), ...nativeResults].filter(Boolean).join("\n\n") || null;
+        message.tool_calls = toolCalls.filter(
+          (toolCall) => !nativeToolNames.has(toolCall.function?.name ?? ""),
+        );
+        message.content =
+          [message.content?.trim(), ...nativeResults].filter(Boolean).join("\n\n") || null;
       }
       return json;
     }
 
-    const reasoning = json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
+    const reasoning =
+      json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
     messages.push({
       role: "assistant",
       content: json.choices?.[0]?.message?.content ?? null,
@@ -370,7 +403,8 @@ async function callTogetherWithNativeTools(
       const nativeTool = toolTranslation.mappings.get(name);
       const input = parseJsonOrEmpty(toolCall.function?.arguments);
       const priorUses = nativeToolUses.get(name) ?? 0;
-      const maxUses = nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
+      const maxUses =
+        nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
       let result: string;
       if (priorUses >= maxUses) {
         result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
@@ -441,7 +475,11 @@ async function postTogetherChat(
       body: JSON.stringify(payload),
       ...(signal ? { signal } : {}),
     });
-    if (response.ok || !RETRYABLE_CHAT_STATUSES.has(response.status) || attempt >= MAX_TOGETHER_RETRIES) {
+    if (
+      response.ok ||
+      !RETRYABLE_CHAT_STATUSES.has(response.status) ||
+      attempt >= MAX_TOGETHER_RETRIES
+    ) {
       return response;
     }
     debugLog(options, "retrying together request after transient error", {
@@ -452,10 +490,13 @@ async function postTogetherChat(
     await response.arrayBuffer().catch(() => undefined);
     await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoffMs(attempt));
   }
-  return new Response(JSON.stringify({ error: { message: "Together request failed after retries." } }), {
-    status: 503,
-    headers: { "content-type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify({ error: { message: "Together request failed after retries." } }),
+    {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    },
+  );
 }
 
 function parseRetryAfter(value: string | null): number | undefined {
@@ -493,7 +534,9 @@ function toChatPayload(
   const messages = toChatMessages(body, options, toolTranslation);
   const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
   const messagesWithNativePrompt =
-    toolTranslation.nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, toolTranslation.nativeTools) : messages;
+    toolTranslation.nativeTools.length > 0
+      ? withNativeToolSystemPrompt(messages, toolTranslation.nativeTools)
+      : messages;
   return {
     model: requestModel.targetModelId,
     messages: messagesWithNativePrompt,
@@ -509,7 +552,10 @@ function toChatPayload(
   };
 }
 
-function resolveCodexRequestModel(body: ResponsesRequest, options: CodexProxyOptions): ResolvedCodexRequestModel {
+function resolveCodexRequestModel(
+  body: ResponsesRequest,
+  options: CodexProxyOptions,
+): ResolvedCodexRequestModel {
   const requestedModelId = body.model ?? options.modelId;
   if (isCodexMemoryRequest(body, requestedModelId)) {
     const configured = process.env[CODEX_MEMORY_MODEL_ENV]?.trim();
@@ -617,14 +663,21 @@ function toChatHistoryToolName(
 ): string {
   const sourceName = item.name ?? "tool";
   for (const mapping of toolTranslation.mappings.values()) {
-    if (item.namespace && mapping.kind === "namespace" && mapping.namespace === item.namespace && mapping.sourceName === sourceName) {
+    if (
+      item.namespace &&
+      mapping.kind === "namespace" &&
+      mapping.namespace === item.namespace &&
+      mapping.sourceName === sourceName
+    ) {
       return mapping.modelName;
     }
     if (!item.namespace && mapping.kind === preferredKind && mapping.sourceName === sourceName) {
       return mapping.modelName;
     }
   }
-  return item.namespace ? `${sanitizeToolName(item.namespace)}__${sanitizeToolName(sourceName)}` : sourceName;
+  return item.namespace
+    ? `${sanitizeToolName(item.namespace)}__${sanitizeToolName(sourceName)}`
+    : sourceName;
 }
 
 function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTranslation {
@@ -648,7 +701,12 @@ function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTrans
     if (isWebSearchTool(tool)) {
       const sourceName = tool.name ?? "web_search";
       const modelName = uniqueName(sourceName);
-      const mapping: CodexToolMapping = { kind: "web_search", sourceName, modelName, definition: tool };
+      const mapping: CodexToolMapping = {
+        kind: "web_search",
+        sourceName,
+        modelName,
+        definition: tool,
+      };
       mappings.set(modelName, mapping);
       nativeTools.push(mapping);
       translated.push(
@@ -679,16 +737,14 @@ function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTrans
       const mapping: CodexToolMapping = { kind: "custom", sourceName: tool.name, modelName };
       mappings.set(modelName, mapping);
       translated.push(
-        toChatFunctionTool(
-          modelName,
-          customToolDescription(tool),
-          {
-            type: "object",
-            properties: { input: { type: "string", description: "The complete freeform input for this tool." } },
-            required: ["input"],
-            additionalProperties: false,
+        toChatFunctionTool(modelName, customToolDescription(tool), {
+          type: "object",
+          properties: {
+            input: { type: "string", description: "The complete freeform input for this tool." },
           },
-        ),
+          required: ["input"],
+          additionalProperties: false,
+        }),
       );
       continue;
     }
@@ -711,7 +767,6 @@ function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTrans
       }
       continue;
     }
-
   }
 
   return { tools: translated, mappings, nativeTools };
@@ -740,19 +795,31 @@ function sanitizeToolName(name: string): string {
 function customToolDescription(tool: ResponsesTool): string {
   const pieces = [tool.description ?? ""];
   if (tool.format?.syntax || tool.format?.definition) {
-    pieces.push(`Input format: ${[tool.format.syntax, tool.format.definition].filter(Boolean).join("\n")}`);
+    pieces.push(
+      `Input format: ${[tool.format.syntax, tool.format.definition].filter(Boolean).join("\n")}`,
+    );
   }
   return pieces.filter(Boolean).join("\n\n") || "Call this custom freeform tool.";
 }
 
 function isWebSearchTool(tool: ResponsesTool): boolean {
-  return tool.type === "web_search" || tool.type?.startsWith("web_search") === true || tool.name === "web_search";
+  return (
+    tool.type === "web_search" ||
+    tool.type?.startsWith("web_search") === true ||
+    tool.name === "web_search"
+  );
 }
 
-function withNativeToolSystemPrompt(messages: ChatMessage[], nativeTools: CodexToolMapping[]): ChatMessage[] {
+function withNativeToolSystemPrompt(
+  messages: ChatMessage[],
+  nativeTools: CodexToolMapping[],
+): ChatMessage[] {
   const prompt = [
     "Native server tools are available through function calls.",
-    ...nativeTools.map((tool) => `- ${tool.modelName}: call this for live web search. Always provide a concise non-empty query.`),
+    ...nativeTools.map(
+      (tool) =>
+        `- ${tool.modelName}: call this for live web search. Always provide a concise non-empty query.`,
+    ),
     "After tool results are returned, answer from the provided sources and include source URLs when relevant.",
   ].join("\n");
   return [{ role: "system", content: prompt }, ...messages];
@@ -763,7 +830,11 @@ function nativeToolMaxUses(tool: ResponsesTool): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 5;
 }
 
-async function runExaSearch(input: unknown, tool: ResponsesTool, options: CodexProxyOptions): Promise<string> {
+async function runExaSearch(
+  input: unknown,
+  tool: ResponsesTool,
+  options: CodexProxyOptions,
+): Promise<string> {
   const query = webSearchQuery(input);
   if (!query) {
     return "Web search error: missing query.";
@@ -857,7 +928,9 @@ function trimSearchText(text: string): string {
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
 }
 
 function toChatRole(role: string | undefined): ChatMessage["role"] {
@@ -885,7 +958,9 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
     .join("\n");
 }
 
-function toChatMessageContent(content: ResponsesInputItem["content"]): string | ChatContentPart[] | null {
+function toChatMessageContent(
+  content: ResponsesInputItem["content"],
+): string | ChatContentPart[] | null {
   if (typeof content === "string") {
     return content;
   }
@@ -898,7 +973,10 @@ function toChatMessageContent(content: ResponsesInputItem["content"]): string | 
       if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
         return part.text ? { type: "text", text: part.text } : undefined;
       }
-      if ((part.type === "input_image" || part.type === "image_url") && typeof part.image_url === "string") {
+      if (
+        (part.type === "input_image" || part.type === "image_url") &&
+        typeof part.image_url === "string"
+      ) {
         return {
           type: "image_url",
           image_url: {
@@ -924,7 +1002,10 @@ function toChatToolChoice(toolChoice: unknown, toolTranslation: CodexToolTransla
     return "required";
   }
   if (choice.type === "function" && typeof choice.name === "string") {
-    return { type: "function", function: { name: toChatToolChoiceName(choice.name, toolTranslation) } };
+    return {
+      type: "function",
+      function: { name: toChatToolChoiceName(choice.name, toolTranslation) },
+    };
   }
   return undefined;
 }
@@ -1000,7 +1081,10 @@ function toResponsesResponse(
   };
 }
 
-function toResponsesOutput(chatResponse: ChatResponse, toolTranslation: CodexToolTranslation): Record<string, unknown>[] {
+function toResponsesOutput(
+  chatResponse: ChatResponse,
+  toolTranslation: CodexToolTranslation,
+): Record<string, unknown>[] {
   const message = chatResponse.choices?.[0]?.message ?? {};
   const output: Record<string, unknown>[] = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
@@ -1016,11 +1100,16 @@ function toResponsesOutput(chatResponse: ChatResponse, toolTranslation: CodexToo
     output.push(messageOutputItem(message.content));
   }
   for (const toolCall of message.tool_calls ?? []) {
-    output.push(responseToolCallOutputItem({
-      id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
-      name: toolCall.function?.name ?? "tool",
-      arguments: toolCall.function?.arguments ?? "{}",
-    }, toolTranslation));
+    output.push(
+      responseToolCallOutputItem(
+        {
+          id: toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`,
+          name: toolCall.function?.name ?? "tool",
+          arguments: toolCall.function?.arguments ?? "{}",
+        },
+        toolTranslation,
+      ),
+    );
   }
   return output;
 }
@@ -1106,7 +1195,17 @@ async function streamResponseFromTogether(
   if (!turn.ok) {
     return failStream(res, responseId, turn.status, turn.error);
   }
-  return completeStreamResponse(res, body, options, responseId, outputState, turn.toolCalls, turn.usage, modelDefinition, toolTranslation);
+  return completeStreamResponse(
+    res,
+    body,
+    options,
+    responseId,
+    outputState,
+    turn.toolCalls,
+    turn.usage,
+    modelDefinition,
+    toolTranslation,
+  );
 }
 
 async function streamTogetherTurn(
@@ -1241,7 +1340,9 @@ async function streamResponseWithNativeTools(
   responseId: string,
   signal?: AbortSignal,
 ): Promise<StreamProxyResult> {
-  const messages = Array.isArray(payload.messages) ? ([...(payload.messages as ChatMessage[])] as ChatMessage[]) : [];
+  const messages = Array.isArray(payload.messages)
+    ? ([...(payload.messages as ChatMessage[])] as ChatMessage[])
+    : [];
   const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
   const nativeToolUses = new Map<string, number>();
   let usage: ChatResponse["usage"] | undefined;
@@ -1271,7 +1372,17 @@ async function streamResponseWithNativeTools(
     usage = mergeUsage(usage, turn.usage);
     const nativeToolCalls = turn.toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.name));
     if (nativeToolCalls.length === 0) {
-      return completeStreamResponse(res, body, options, responseId, outputState, turn.toolCalls, usage, modelDefinition, toolTranslation);
+      return completeStreamResponse(
+        res,
+        body,
+        options,
+        responseId,
+        outputState,
+        turn.toolCalls,
+        usage,
+        modelDefinition,
+        toolTranslation,
+      );
     }
 
     const assistantToolCalls = turn.toolCalls.map((toolCall) => ({
@@ -1282,11 +1393,19 @@ async function streamResponseWithNativeTools(
         arguments: toolCall.arguments || "{}",
       },
     }));
-    const nativeResultMessages = await runNativeToolCalls(nativeToolCalls, nativeToolUses, toolTranslation, options);
+    const nativeResultMessages = await runNativeToolCalls(
+      nativeToolCalls,
+      nativeToolUses,
+      toolTranslation,
+      options,
+    );
 
     if (nativeToolCalls.length !== turn.toolCalls.length) {
       const nativeText = nativeResultMessages
-        .map((message) => `Native ${toolTranslation.mappings.get(message.name)?.sourceName ?? message.name} result:\n${message.content}`)
+        .map(
+          (message) =>
+            `Native ${toolTranslation.mappings.get(message.name)?.sourceName ?? message.name} result:\n${message.content}`,
+        )
         .join("\n\n");
       if (nativeText) {
         openTextOutputItem(res, outputState);
@@ -1300,8 +1419,20 @@ async function streamResponseWithNativeTools(
           delta,
         });
       }
-      const clientToolCalls = turn.toolCalls.filter((toolCall) => !nativeToolNames.has(toolCall.name));
-      return completeStreamResponse(res, body, options, responseId, outputState, clientToolCalls, usage, modelDefinition, toolTranslation);
+      const clientToolCalls = turn.toolCalls.filter(
+        (toolCall) => !nativeToolNames.has(toolCall.name),
+      );
+      return completeStreamResponse(
+        res,
+        body,
+        options,
+        responseId,
+        outputState,
+        clientToolCalls,
+        usage,
+        modelDefinition,
+        toolTranslation,
+      );
     }
 
     messages.push({
@@ -1316,7 +1447,8 @@ async function streamResponseWithNativeTools(
   }
 
   openTextOutputItem(res, outputState);
-  const fallback = "I could not complete native web search because the model kept requesting additional search tool calls.";
+  const fallback =
+    "I could not complete native web search because the model kept requesting additional search tool calls.";
   outputState.text += fallback;
   writeResponsesSse(res, "response.output_text.delta", {
     type: "response.output_text.delta",
@@ -1325,7 +1457,17 @@ async function streamResponseWithNativeTools(
     content_index: 0,
     delta: fallback,
   });
-  return completeStreamResponse(res, body, options, responseId, outputState, [], usage, modelDefinition, toolTranslation);
+  return completeStreamResponse(
+    res,
+    body,
+    options,
+    responseId,
+    outputState,
+    [],
+    usage,
+    modelDefinition,
+    toolTranslation,
+  );
 }
 
 async function streamTogetherTurnWithIdleRetries(
@@ -1341,9 +1483,22 @@ async function streamTogetherTurnWithIdleRetries(
   const maxRetries = codexStreamIdleRetries();
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      return await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal);
+      return await streamTogetherTurn(
+        res,
+        body,
+        options,
+        payload,
+        toolTranslation,
+        modelDefinition,
+        outputState,
+        signal,
+      );
     } catch (err) {
-      if (!(err instanceof SseIdleTimeoutError) || streamOutputStarted(outputState) || attempt >= maxRetries) {
+      if (
+        !(err instanceof SseIdleTimeoutError) ||
+        streamOutputStarted(outputState) ||
+        attempt >= maxRetries
+      ) {
         throw err;
       }
       debugLog(options, "retrying together stream after idle timeout", {
@@ -1374,7 +1529,8 @@ async function runNativeToolCalls(
     const nativeTool = toolTranslation.mappings.get(name);
     const input = parseJsonOrEmpty(toolCall.arguments);
     const priorUses = nativeToolUses.get(name) ?? 0;
-    const maxUses = nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
+    const maxUses =
+      nativeTool?.kind === "web_search" ? nativeToolMaxUses(nativeTool.definition) : 0;
     let content: string;
     if (priorUses >= maxUses) {
       content = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
@@ -1474,7 +1630,9 @@ function completeStreamResponse(
         ...(outputState.textItemId !== undefined
           ? [messageOutputItem(outputState.text, outputState.textItemId)]
           : []),
-        ...[...toolCalls.values()].map((toolCall) => responseToolCallOutputItem(toolCall, toolTranslation)),
+        ...[...toolCalls.values()].map((toolCall) =>
+          responseToolCallOutputItem(toolCall, toolTranslation),
+        ),
       ],
       usage: toResponsesUsage(usage),
     },
@@ -1483,7 +1641,12 @@ function completeStreamResponse(
   return { ok: true, status: res.statusCode };
 }
 
-function failStream(res: ServerResponse, responseId: string, status: number, message: string): StreamProxyResult {
+function failStream(
+  res: ServerResponse,
+  responseId: string,
+  status: number,
+  message: string,
+): StreamProxyResult {
   writeResponsesSse(res, "response.failed", {
     type: "response.failed",
     response: { id: responseId, status: "failed" },
@@ -1504,11 +1667,11 @@ function mergeUsage(
     return current;
   }
   const cachedTokens =
-    (current.prompt_tokens_details?.cached_tokens ?? current.cached_tokens ?? 0)
-    + (next.prompt_tokens_details?.cached_tokens ?? next.cached_tokens ?? 0);
+    (current.prompt_tokens_details?.cached_tokens ?? current.cached_tokens ?? 0) +
+    (next.prompt_tokens_details?.cached_tokens ?? next.cached_tokens ?? 0);
   const reasoningTokens =
-    (current.completion_tokens_details?.reasoning_tokens ?? current.reasoning_tokens ?? 0)
-    + (next.completion_tokens_details?.reasoning_tokens ?? next.reasoning_tokens ?? 0);
+    (current.completion_tokens_details?.reasoning_tokens ?? current.reasoning_tokens ?? 0) +
+    (next.completion_tokens_details?.reasoning_tokens ?? next.reasoning_tokens ?? 0);
   return {
     prompt_tokens: (current.prompt_tokens ?? 0) + (next.prompt_tokens ?? 0),
     completion_tokens: (current.completion_tokens ?? 0) + (next.completion_tokens ?? 0),
@@ -1530,7 +1693,13 @@ function openReasoningOutputItem(res: ServerResponse, state: StreamOutputState):
   writeResponsesSse(res, "response.output_item.added", {
     type: "response.output_item.added",
     output_index: state.reasoningOutputIndex,
-    item: { id: state.reasoningItemId, type: "reasoning", status: "in_progress", summary: [], content: [] },
+    item: {
+      id: state.reasoningItemId,
+      type: "reasoning",
+      status: "in_progress",
+      summary: [],
+      content: [],
+    },
   });
 }
 
@@ -1541,7 +1710,13 @@ function openTextOutputItem(res: ServerResponse, state: StreamOutputState): void
   state.textItemId = `msg_${randomUUID().replaceAll("-", "")}`;
   state.textOutputIndex = state.nextOutputIndex;
   state.nextOutputIndex += 1;
-  const item = { id: state.textItemId, type: "message", role: "assistant", status: "in_progress", content: [] };
+  const item = {
+    id: state.textItemId,
+    type: "message",
+    role: "assistant",
+    status: "in_progress",
+    content: [],
+  };
   writeResponsesSse(res, "response.output_item.added", {
     type: "response.output_item.added",
     output_index: state.textOutputIndex,
@@ -1556,7 +1731,10 @@ function openTextOutputItem(res: ServerResponse, state: StreamOutputState): void
   });
 }
 
-function reasoningOutputItem(text: string, id = `rs_${randomUUID().replaceAll("-", "")}`): Record<string, unknown> {
+function reasoningOutputItem(
+  text: string,
+  id = `rs_${randomUUID().replaceAll("-", "")}`,
+): Record<string, unknown> {
   return {
     id,
     type: "reasoning",
@@ -1566,7 +1744,10 @@ function reasoningOutputItem(text: string, id = `rs_${randomUUID().replaceAll("-
   };
 }
 
-function messageOutputItem(text: string, id = `msg_${randomUUID().replaceAll("-", "")}`): Record<string, unknown> {
+function messageOutputItem(
+  text: string,
+  id = `msg_${randomUUID().replaceAll("-", "")}`,
+): Record<string, unknown> {
   return {
     id,
     type: "message",
@@ -1705,7 +1886,9 @@ function codexStreamTurnTimeoutMs(): number {
 function codexStreamIdleRetries(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : MAX_TOGETHER_STREAM_IDLE_RETRIES;
+  return Number.isFinite(parsed) && parsed >= 0
+    ? Math.floor(parsed)
+    : MAX_TOGETHER_STREAM_IDLE_RETRIES;
 }
 
 function* takeSseEvents(buffer: string): Generator<{ payload: string; remaining: string }> {
@@ -1756,7 +1939,8 @@ function writeResponsesSse(res: ServerResponse, event: string, data: unknown): v
 function toResponsesUsage(usage: ChatResponse["usage"]): Record<string, unknown> {
   const inputTokens = usage?.prompt_tokens ?? 0;
   const outputTokens = usage?.completion_tokens ?? 0;
-  const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens ?? usage?.reasoning_tokens ?? 0;
+  const reasoningTokens =
+    usage?.completion_tokens_details?.reasoning_tokens ?? usage?.reasoning_tokens ?? 0;
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
@@ -1767,7 +1951,11 @@ function toResponsesUsage(usage: ChatResponse["usage"]): Record<string, unknown>
   };
 }
 
-function recordUsage(usage: ChatResponse["usage"], options: CodexProxyOptions, modelDefinition: ModelDefinition): void {
+function recordUsage(
+  usage: ChatResponse["usage"],
+  options: CodexProxyOptions,
+  modelDefinition: ModelDefinition,
+): void {
   if (!usage) {
     return;
   }
@@ -1788,7 +1976,10 @@ function maxTokensForContextLengthRetry(
   if (inputTokens === undefined) {
     return undefined;
   }
-  const availableOutputTokens = Math.min(modelDefinition.limit.context - inputTokens, modelDefinition.limit.output);
+  const availableOutputTokens = Math.min(
+    modelDefinition.limit.context - inputTokens,
+    modelDefinition.limit.output,
+  );
   if (availableOutputTokens < 1) {
     return undefined;
   }
@@ -1800,7 +1991,9 @@ function maxTokensForContextLengthRetry(
 }
 
 function parseTogetherContextLengthInputTokens(message: string): number | undefined {
-  const parentheticalMatch = message.match(/maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is);
+  const parentheticalMatch = message.match(
+    /maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is,
+  );
   if (parentheticalMatch) {
     return parseTokenCount(parentheticalMatch[1]);
   }
@@ -1816,7 +2009,9 @@ function parseTokenCount(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function summarizeResponsesTools(tools: ResponsesTool[] | undefined): Array<Record<string, unknown>> | undefined {
+function summarizeResponsesTools(
+  tools: ResponsesTool[] | undefined,
+): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) {
     return undefined;
   }
@@ -1832,7 +2027,12 @@ function objectKeys(value: unknown): string[] | undefined {
   return typeof value === "object" && value !== null ? Object.keys(value) : undefined;
 }
 
-function writeOpenAIError(res: ServerResponse, status: number, type: string, message: string): void {
+function writeOpenAIError(
+  res: ServerResponse,
+  status: number,
+  type: string,
+  message: string,
+): void {
   writeJson(res, status, { error: { type, message } });
 }
 

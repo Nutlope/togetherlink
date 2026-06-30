@@ -5,7 +5,13 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
 import { codexModelCatalogJson } from "./codex/catalog.js";
-import { daemonFetch, daemonSessionUrl, ensureDaemon, localProxyAuthToken, registerDaemonSession } from "./daemon/launch.js";
+import {
+  daemonFetch,
+  daemonSessionUrl,
+  ensureDaemon,
+  localProxyAuthToken,
+  registerDaemonSession,
+} from "./daemon/launch.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
@@ -46,7 +52,9 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     home: ctx.home,
   });
   if (!apiKey) {
-    throw new Error("No Together API key found. Pass --api-key, run `togetherlink configure`, or set TOGETHER_API_KEY.");
+    throw new Error(
+      "No Together API key found. Pass --api-key, run `togetherlink configure`, or set TOGETHER_API_KEY.",
+    );
   }
 
   const selectedModel = resolveCodexModel(ctx.main);
@@ -126,7 +134,9 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     "Restore your previous Codex App profile with: togetherlink codex-app --restore",
     `Backup: ${backup}`,
     codexAppLaunchMessage(launch),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return { message: intro };
 }
@@ -155,12 +165,18 @@ export function buildCodexAppConfig(
     model: tomlString(options.modelId),
     model_provider: tomlString(options.providerId),
     model_catalog_json: tomlString(options.catalogPath),
-    ...(options.contextWindow ? {
-      model_context_window: String(options.contextWindow),
-      model_auto_compact_token_limit: String(Math.floor(options.contextWindow * 0.7)),
-    } : {}),
+    ...(options.contextWindow
+      ? {
+          model_context_window: String(options.contextWindow),
+          model_auto_compact_token_limit: String(Math.floor(options.contextWindow * 0.7)),
+        }
+      : {}),
   });
-  const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, ["model_reasoning_effort", "openai_base_url", "profile"]);
+  const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, [
+    "model_reasoning_effort",
+    "openai_base_url",
+    "profile",
+  ]);
   const providerBlock = [
     CODEX_APP_CONFIG_MARKER_START,
     "# togetherlink codex-app configures a dedicated alpha provider for Codex Desktop.",
@@ -210,7 +226,10 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   try {
     const authToken = await localProxyAuthToken();
     const { url } = await ensureDaemon();
-    await daemonFetch(`${url}/internal/sessions/${encodeURIComponent(codexAppSessionToken(authToken))}`, { method: "DELETE" });
+    await daemonFetch(
+      `${url}/internal/sessions/${encodeURIComponent(codexAppSessionToken(authToken))}`,
+      { method: "DELETE" },
+    );
   } catch {
     // Restore should still succeed if the daemon is not reachable.
   }
@@ -254,7 +273,9 @@ async function backupCodexAppConfig(home: string, configPath: string): Promise<s
       try {
         const manifest = JSON.parse(existing) as BackupManifest;
         if (manifest.files.some((entry) => entry.path === configPath)) {
-          return path.dirname(manifest.files.find((entry) => entry.path === configPath)?.backupPath ?? manifestPath);
+          return path.dirname(
+            manifest.files.find((entry) => entry.path === configPath)?.backupPath ?? manifestPath,
+          );
         }
       } catch {
         // Fall through and create a fresh backup if the manifest is invalid.
@@ -294,7 +315,10 @@ type CodexAppLaunchResult = {
 
 type CodexAppLaunchReason = "configured" | "restored";
 
-async function launchCodexApp(options: { reason: CodexAppLaunchReason; openIfClosed: boolean }): Promise<CodexAppLaunchResult> {
+async function launchCodexApp(options: {
+  reason: CodexAppLaunchReason;
+  openIfClosed: boolean;
+}): Promise<CodexAppLaunchResult> {
   const wasRunning = await isCodexAppRunning();
   let restarted = false;
   let restartDeclined = false;
@@ -337,7 +361,10 @@ async function shouldRestartCodexApp(reason: CodexAppLaunchReason): Promise<bool
     return false;
   }
   const clack = await import("@clack/prompts");
-  const action = reason === "restored" ? "reload your restored Codex profile" : "reload the Togetherlink profile";
+  const action =
+    reason === "restored"
+      ? "reload your restored Codex profile"
+      : "reload the Togetherlink profile";
   const restart = await clack.confirm({
     message: `Codex App is already open. Restart it now to ${action}?`,
     initialValue: false,
@@ -362,7 +389,10 @@ async function openCodexApp(): Promise<boolean> {
 async function isCodexAppRunning(): Promise<boolean> {
   if (process.platform === "darwin") {
     try {
-      const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", 'application "Codex" is running']);
+      const { stdout } = await execFileAsync("/usr/bin/osascript", [
+        "-e",
+        'application "Codex" is running',
+      ]);
       return stdout.trim() === "true";
     } catch {
       return false;
@@ -437,7 +467,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 function backupDir(home: string): string {
-  return path.join(process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink"), "backup", "codex-app");
+  return path.join(
+    process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink"),
+    "backup",
+    "codex-app",
+  );
 }
 
 function modelCatalogPath(home: string): string {
@@ -463,7 +497,11 @@ async function bustStaleModelsCache(home: string): Promise<void> {
 }
 
 function appSessionLockPath(home: string): string {
-  return path.join(process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink"), "codex-app", "session.json");
+  return path.join(
+    process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink"),
+    "codex-app",
+    "session.json",
+  );
 }
 
 function codexAppSessionToken(authToken: string): string {
@@ -471,7 +509,13 @@ function codexAppSessionToken(authToken: string): string {
 }
 
 function backupNameFor(file: string): string {
-  return file.replace(/^[a-zA-Z]:/, "").split(path.sep).filter(Boolean).join("__") || "file";
+  return (
+    file
+      .replace(/^[a-zA-Z]:/, "")
+      .split(path.sep)
+      .filter(Boolean)
+      .join("__") || "file"
+  );
 }
 
 async function readTextIfExists(file: string): Promise<string | undefined> {
@@ -555,9 +599,11 @@ async function isManagedCodexAppConfig(home: string): Promise<boolean> {
   if (raw.includes(CODEX_APP_CONFIG_MARKER_START)) {
     return true;
   }
-  return raw.includes('model_provider = "openai"')
-    && raw.includes('openai_base_url = "http://127.0.0.1:')
-    && raw.includes(modelCatalogPath(home));
+  return (
+    raw.includes('model_provider = "openai"') &&
+    raw.includes('openai_base_url = "http://127.0.0.1:') &&
+    raw.includes(modelCatalogPath(home))
+  );
 }
 
 function isProcessAlive(pid: number): boolean {

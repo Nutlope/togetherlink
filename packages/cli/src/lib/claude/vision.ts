@@ -38,7 +38,9 @@ export type VisionRequestOptions = {
 
 /** Whether a content block is an image we should intercept. */
 export function isImageBlock(block: unknown): block is ImageBlock {
-  return typeof block === "object" && block !== null && (block as { type?: string }).type === "image";
+  return (
+    typeof block === "object" && block !== null && (block as { type?: string }).type === "image"
+  );
 }
 
 /** Whether a content block is a URL image (newer Anthropic beta form). */
@@ -47,10 +49,19 @@ export function isUrlImageBlock(block: unknown): block is UrlBlock {
 }
 
 type VisionOutcome =
-  | { ok: true; description: string; model: string; usage: { promptTokens: number; completionTokens: number; cachedTokens: number } }
+  | {
+      ok: true;
+      description: string;
+      model: string;
+      usage: { promptTokens: number; completionTokens: number; cachedTokens: number };
+    }
   | { ok: false; error: string; model: string };
 
-async function callVisionModel(model: string, imageUrl: string, options: VisionRequestOptions): Promise<VisionOutcome> {
+async function callVisionModel(
+  model: string,
+  imageUrl: string,
+  options: VisionRequestOptions,
+): Promise<VisionOutcome> {
   const body = {
     model,
     messages: [
@@ -110,7 +121,10 @@ async function callVisionModel(model: string, imageUrl: string, options: VisionR
       },
     };
   } catch (err) {
-    debug(options, "vision error", { model, error: err instanceof Error ? err.message : String(err) });
+    debug(options, "vision error", {
+      model,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { ok: false, model, error: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -124,7 +138,11 @@ async function callVisionModel(model: string, imageUrl: string, options: VisionR
 export async function describeImage(
   block: ImageBlock | UrlBlock,
   options: VisionRequestOptions,
-): Promise<{ description: string; model: string; usage?: { promptTokens: number; completionTokens: number; cachedTokens: number } }> {
+): Promise<{
+  description: string;
+  model: string;
+  usage?: { promptTokens: number; completionTokens: number; cachedTokens: number };
+}> {
   const imageUrl = toDataUrl(block);
   if (!imageUrl) {
     return { description: "[Image unavailable: could not read image data]", model: "none" };
@@ -137,7 +155,10 @@ export async function describeImage(
     }
     debug(options, "vision fallback", { from: outcome.model, reason: outcome.error });
   }
-  return { description: "[Image description unavailable: all vision models failed]", model: "none" }
+  return {
+    description: "[Image description unavailable: all vision models failed]",
+    model: "none",
+  };
 }
 
 /** Convert an Anthropic image/url block into an OpenAI `image_url` data URL. */

@@ -1,6 +1,4 @@
-import {
-  resolveClaudeModel,
-} from "../claude/defaults.js";
+import { resolveClaudeModel } from "../claude/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness } from "../harness-types.js";
 import { resolveTogetherApiKey } from "../together-core.js";

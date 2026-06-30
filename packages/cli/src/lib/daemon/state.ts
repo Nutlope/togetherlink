@@ -131,7 +131,12 @@ class SessionRegistry {
     }
     this.map.delete(token);
     state.endedAt = Date.now();
-    this.store?.markSessionEnded(state.token, state.endedAt, state.costTracker.summarize(), state.costTracker.totals);
+    this.store?.markSessionEnded(
+      state.token,
+      state.endedAt,
+      state.costTracker.summarize(),
+      state.costTracker.totals,
+    );
     emitDaemonSessionEndedTelemetry(state);
     return true;
   }
@@ -219,7 +224,12 @@ class SessionRegistry {
     if (externalSummary) {
       state.externalSummary = externalSummary;
     }
-    this.store?.updateSessionUsage(token, state.costTracker.summarize(), state.costTracker.totals, state.externalSummary);
+    this.store?.updateSessionUsage(
+      token,
+      state.costTracker.summarize(),
+      state.costTracker.totals,
+      state.externalSummary,
+    );
   }
 
   closeStore(): void {
@@ -304,7 +314,9 @@ function toPersistedSession(state: SessionState): PersistedSession {
     token: state.token,
     agent: state.agent,
     apiKey: state.apiKey,
-    ...(state.options?.authToken !== undefined && state.options.authToken !== state.token ? { authToken: state.options.authToken } : {}),
+    ...(state.options?.authToken !== undefined && state.options.authToken !== state.token
+      ? { authToken: state.options.authToken }
+      : {}),
     modelLabel: state.modelLabel,
     modelDefinition: state.modelDefinition,
     startedAt: state.startedAt,
@@ -326,7 +338,8 @@ function toPersistedSession(state: SessionState): PersistedSession {
 function storedSessionToPersistInput(session: StoredSession): SessionPersistInput {
   return {
     ...session,
-    costSummary: session.externalSummary ?? "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
+    costSummary:
+      session.externalSummary ?? "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
     costTotals: {
       promptTokens: session.promptTokens ?? 0,
       cachedTokens: session.cachedTokens ?? 0,

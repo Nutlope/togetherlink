@@ -32,9 +32,11 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.display_name).toBe("GLM 5.2 · default");
     expect(first?.default_reasoning_level).toBe("medium");
     expect(first?.default_reasoning_summary).toBe("auto");
-    expect(first?.model_messages).toEqual(expect.objectContaining({
-      instructions_template: expect.stringContaining("{{ personality }}"),
-    }));
+    expect(first?.model_messages).toEqual(
+      expect.objectContaining({
+        instructions_template: expect.stringContaining("{{ personality }}"),
+      }),
+    );
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
     expect(first?.truncation_policy).toEqual({ mode: "tokens", limit: GLM_5_2.limit.context });
@@ -44,32 +46,35 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("maps custom tool calls back to Codex custom_tool_call items", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({
-        id: "chatcmpl_custom",
-        choices: [
-          {
-            message: {
-              tool_calls: [
-                {
-                  id: "call_patch",
-                  type: "function",
-                  function: {
-                    name: "apply_patch",
-                    arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch\n" }),
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          id: "chatcmpl_custom",
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "call_patch",
+                    type: "function",
+                    function: {
+                      name: "apply_patch",
+                      arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch\n" }),
+                    },
                   },
-                },
-              ],
+                ],
+              },
             },
-          },
-        ],
-        usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      });
-    }));
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+        });
+      }),
+    );
 
     const response = await postResponses({
       model: GLM_5_2.id,
@@ -81,7 +86,9 @@ describe("Codex Responses proxy tool compatibility", () => {
           format: { type: "grammar", syntax: "lark", definition: "start: /.+/" },
         },
       ],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Patch it." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Patch it." }] },
+      ],
     });
 
     expect(response.output).toEqual([
@@ -99,30 +106,33 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("flattens namespace tools for Together and restores namespace in Codex output", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({
-        choices: [
-          {
-            message: {
-              tool_calls: [
-                {
-                  id: "call_agent",
-                  type: "function",
-                  function: {
-                    name: "multi_agent_v1__spawn_agent",
-                    arguments: JSON.stringify({ task: "inspect the repo" }),
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "call_agent",
+                    type: "function",
+                    function: {
+                      name: "multi_agent_v1__spawn_agent",
+                      arguments: JSON.stringify({ task: "inspect the repo" }),
+                    },
                   },
-                },
-              ],
+                ],
+              },
             },
-          },
-        ],
-      });
-    }));
+          ],
+        });
+      }),
+    );
 
     const response = await postResponses({
       model: GLM_5_2.id,
@@ -145,7 +155,9 @@ describe("Codex Responses proxy tool compatibility", () => {
           ],
         },
       ],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Use an agent." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Use an agent." }] },
+      ],
     });
 
     expect(firstToolName(requests)).toBe("multi_agent_v1__spawn_agent");
@@ -164,18 +176,21 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("preserves parallel namespace tool-call groups when continuing streamed responses", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return sseResponse([
-        {
-          choices: [{ delta: { content: "Hello World" } }],
-        },
-        { choices: [{ finish_reason: "stop", delta: {} }] },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "Hello World" } }],
+          },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+        ]);
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
@@ -200,7 +215,11 @@ describe("Codex Responses proxy tool compatibility", () => {
         },
       ],
       input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Use two agents." }] },
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Use two agents." }],
+        },
         {
           type: "function_call",
           namespace: "multi_agent_v1",
@@ -221,7 +240,11 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
 
     const upstream = requests[0] as {
-      messages: Array<{ role: string; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string } }> }>;
+      messages: Array<{
+        role: string;
+        tool_call_id?: string;
+        tool_calls?: Array<{ id: string; function: { name: string } }>;
+      }>;
     };
     expect(upstream.messages).toEqual(
       expect.arrayContaining([
@@ -232,12 +255,18 @@ describe("Codex Responses proxy tool compatibility", () => {
             {
               id: "call_hello",
               type: "function",
-              function: { name: "multi_agent_v1__spawn_agent", arguments: JSON.stringify({ task: "Say Hello." }) },
+              function: {
+                name: "multi_agent_v1__spawn_agent",
+                arguments: JSON.stringify({ task: "Say Hello." }),
+              },
             },
             {
               id: "call_world",
               type: "function",
-              function: { name: "multi_agent_v1__spawn_agent", arguments: JSON.stringify({ task: "Say World." }) },
+              function: {
+                name: "multi_agent_v1__spawn_agent",
+                arguments: JSON.stringify({ task: "Say World." }),
+              },
             },
           ],
         },
@@ -249,48 +278,51 @@ describe("Codex Responses proxy tool compatibility", () => {
   });
 
   test("keeps streamed client tool calls in Codex-compatible completed item events", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      return sseResponse([
-        {
-          choices: [
-            {
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "call_alpha",
-                    type: "function",
-                    function: { name: "multi_agent_v1__spawn_agent", arguments: "{\"task\":\"Say " },
-                  },
-                  {
-                    index: 1,
-                    id: "call_beta",
-                    type: "function",
-                    function: { name: "multi_agent_v1__spawn_agent", arguments: "{\"task\":\"Say " },
-                  },
-                ],
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return sseResponse([
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_alpha",
+                      type: "function",
+                      function: { name: "multi_agent_v1__spawn_agent", arguments: '{"task":"Say ' },
+                    },
+                    {
+                      index: 1,
+                      id: "call_beta",
+                      type: "function",
+                      function: { name: "multi_agent_v1__spawn_agent", arguments: '{"task":"Say ' },
+                    },
+                  ],
+                },
               },
-            },
-          ],
-        },
-        {
-          choices: [
-            {
-              delta: {
-                tool_calls: [
-                  { index: 0, function: { arguments: "alpha\"}" } },
-                  { index: 1, function: { arguments: "beta\"}" } },
-                ],
+            ],
+          },
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    { index: 0, function: { arguments: 'alpha"}' } },
+                    { index: 1, function: { arguments: 'beta"}' } },
+                  ],
+                },
               },
-            },
-          ],
-        },
-        { choices: [{ finish_reason: "tool_calls", delta: {} }] },
-      ]);
-    }));
+            ],
+          },
+          { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+        ]);
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
@@ -314,7 +346,13 @@ describe("Codex Responses proxy tool compatibility", () => {
           ],
         },
       ],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Use two agents." }] }],
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Use two agents." }],
+        },
+      ],
     });
 
     const firstAdded = response.indexOf('"call_id":"call_alpha"');
@@ -330,20 +368,28 @@ describe("Codex Responses proxy tool compatibility", () => {
   });
 
   test("parses CRLF-delimited upstream SSE streams", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      return sseResponse([
-        { choices: [{ delta: { content: "hi" } }] },
-        { choices: [{ finish_reason: "stop", delta: {} }] },
-      ], { lineEnding: "\r\n" });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return sseResponse(
+          [
+            { choices: [{ delta: { content: "hi" } }] },
+            { choices: [{ finish_reason: "stop", delta: {} }] },
+          ],
+          { lineEnding: "\r\n" },
+        );
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(response).toContain("response.output_text.delta");
@@ -354,22 +400,27 @@ describe("Codex Responses proxy tool compatibility", () => {
   test("streams ordinary Codex turns upstream by default", async () => {
     const requests: Array<{ body: any }> = [];
     vi.unstubAllEnvs();
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push({ body: JSON.parse(String(init?.body)) });
-      return sseResponse([
-        { choices: [{ delta: { content: "hi" } }] },
-        { choices: [{ finish_reason: "stop", delta: {} }] },
-        { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push({ body: JSON.parse(String(init?.body)) });
+        return sseResponse([
+          { choices: [{ delta: { content: "hi" } }] },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+          { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
+        ]);
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(requests[0]?.body.stream).toBe(true);
@@ -383,25 +434,30 @@ describe("Codex Responses proxy tool compatibility", () => {
     const requests: Array<{ body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES", "1");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push({ body: JSON.parse(String(init?.body)) });
-      if (requests.length === 1) {
-        return hangingSseResponse([]);
-      }
-      return sseResponse([
-        { choices: [{ delta: { content: "recovered" } }] },
-        { choices: [{ finish_reason: "stop", delta: {} }] },
-        { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push({ body: JSON.parse(String(init?.body)) });
+        if (requests.length === 1) {
+          return hangingSseResponse([]);
+        }
+        return sseResponse([
+          { choices: [{ delta: { content: "recovered" } }] },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+          { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
+        ]);
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(requests).toHaveLength(2);
@@ -413,26 +469,31 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("retries transient Together rate limits before returning a Codex response", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      if (requests.length === 1) {
-        return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
-          status: 429,
-          headers: { "content-type": "application/json", "retry-after": "0" },
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        if (requests.length === 1) {
+          return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+            status: 429,
+            headers: { "content-type": "application/json", "retry-after": "0" },
+          });
+        }
+        return jsonResponse({
+          choices: [{ message: { content: "Recovered after retry." } }],
+          usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 },
         });
-      }
-      return jsonResponse({
-        choices: [{ message: { content: "Recovered after retry." } }],
-        usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 },
-      });
-    }));
+      }),
+    );
 
     const response = await postResponses({
       model: GLM_5_2.id,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(requests).toHaveLength(2);
@@ -445,22 +506,30 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("forwards streamed Codex deltas before the response completes", async () => {
     vi.unstubAllEnvs();
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      return delayedSseResponse([
-        { delayMs: 0, chunk: { choices: [{ delta: { content: "hel" } }] } },
-        { delayMs: 80, chunk: { choices: [{ delta: { content: "lo" } }] } },
-        { delayMs: 80, chunk: { choices: [{ finish_reason: "stop", delta: {} }] } },
-        { delayMs: 80, chunk: { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } } },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return delayedSseResponse([
+          { delayMs: 0, chunk: { choices: [{ delta: { content: "hel" } }] } },
+          { delayMs: 80, chunk: { choices: [{ delta: { content: "lo" } }] } },
+          { delayMs: 80, chunk: { choices: [{ finish_reason: "stop", delta: {} }] } },
+          {
+            delayMs: 80,
+            chunk: { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } },
+          },
+        ]);
+      }),
+    );
 
     const timeline = await postResponsesStreamingTimeline({
       model: GLM_5_2.id,
       stream: true,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hello." }] },
+      ],
     });
 
     const firstDelta = timeline.find((entry) => entry.text.includes("response.output_text.delta"));
@@ -475,18 +544,21 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("preserves namespace tool-call groups with more than five parallel calls", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return sseResponse([
-        {
-          choices: [{ delta: { content: "A B C D E F" } }],
-        },
-        { choices: [{ finish_reason: "stop", delta: {} }] },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "A B C D E F" } }],
+          },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+        ]);
+      }),
+    );
 
     const calls = ["A", "B", "C", "D", "E", "F"].map((letter) => ({
       type: "function_call",
@@ -524,16 +596,26 @@ describe("Codex Responses proxy tool compatibility", () => {
         },
       ],
       input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Use six agents." }] },
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Use six agents." }],
+        },
         ...calls,
         ...outputs,
       ],
     });
 
     const upstream = requests[0] as {
-      messages: Array<{ role: string; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string } }> }>;
+      messages: Array<{
+        role: string;
+        tool_call_id?: string;
+        tool_calls?: Array<{ id: string; function: { name: string } }>;
+      }>;
     };
-    const assistantToolGroup = upstream.messages.find((message) => message.role === "assistant" && message.tool_calls);
+    const assistantToolGroup = upstream.messages.find(
+      (message) => message.role === "assistant" && message.tool_calls,
+    );
     expect(assistantToolGroup?.tool_calls).toHaveLength(6);
     expect(assistantToolGroup?.tool_calls?.map((toolCall) => toolCall.id)).toEqual([
       "call_a",
@@ -543,118 +625,163 @@ describe("Codex Responses proxy tool compatibility", () => {
       "call_e",
       "call_f",
     ]);
-    expect(assistantToolGroup?.tool_calls?.every((toolCall) => toolCall.function.name === "multi_agent_v1__spawn_agent")).toBe(true);
-    expect(upstream.messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id)).toEqual([
-      "call_a",
-      "call_b",
-      "call_c",
-      "call_d",
-      "call_e",
-      "call_f",
-    ]);
+    expect(
+      assistantToolGroup?.tool_calls?.every(
+        (toolCall) => toolCall.function.name === "multi_agent_v1__spawn_agent",
+      ),
+    ).toBe(true);
+    expect(
+      upstream.messages
+        .filter((message) => message.role === "tool")
+        .map((message) => message.tool_call_id),
+    ).toEqual(["call_a", "call_b", "call_c", "call_d", "call_e", "call_f"]);
   });
 
   test("runs web_search internally with Exa and returns the final assistant answer", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      const body = JSON.parse(String(init?.body));
-      requests.push({ url, body });
-      if (url.includes("api.exa.ai")) {
-        return jsonResponse({
-          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
-        });
-      }
-      if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
-        return jsonResponse({
-          choices: [
-            {
-              message: {
-                tool_calls: [
-                  {
-                    id: "call_search",
-                    type: "function",
-                    function: { name: "web_search", arguments: JSON.stringify({ query: "Codex docs" }) },
-                  },
-                ],
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ url, body });
+        if (url.includes("api.exa.ai")) {
+          return jsonResponse({
+            results: [
+              {
+                title: "Codex docs",
+                url: "https://developers.openai.com/codex",
+                text: "Codex helps with coding.",
               },
-            },
-          ],
+            ],
+          });
+        }
+        if (requests.filter((request) => request.url.includes("api.together.ai")).length === 1) {
+          return jsonResponse({
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      id: "call_search",
+                      type: "function",
+                      function: {
+                        name: "web_search",
+                        arguments: JSON.stringify({ query: "Codex docs" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+        }
+        return jsonResponse({
+          choices: [{ message: { content: "Codex docs: https://developers.openai.com/codex" } }],
         });
-      }
-      return jsonResponse({
-        choices: [{ message: { content: "Codex docs: https://developers.openai.com/codex" } }],
-      });
-    }));
+      }),
+    );
 
     const response = await postResponses({
       model: GLM_5_2.id,
       tools: [{ type: "web_search", name: "web_search" }],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Search Codex docs." }] }],
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Search Codex docs." }],
+        },
+      ],
     });
 
     expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
     expect(response.output[0]).toMatchObject({
       type: "message",
       role: "assistant",
-      content: [{ type: "output_text", text: "Codex docs: https://developers.openai.com/codex", annotations: [] }],
+      content: [
+        {
+          type: "output_text",
+          text: "Codex docs: https://developers.openai.com/codex",
+          annotations: [],
+        },
+      ],
     });
   });
 
   test("streams native web_search thinking and final answer deltas instead of buffering", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      const body = JSON.parse(String(init?.body));
-      requests.push({ url, body });
-      if (url.includes("api.exa.ai")) {
-        return jsonResponse({
-          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
-        });
-      }
-      const togetherRequestCount = requests.filter((request) => request.url.includes("api.together.ai")).length;
-      if (togetherRequestCount === 1) {
-        return sseResponse([
-          { choices: [{ delta: { reasoning_content: "Need current docs. " } }] },
-          {
-            choices: [
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ url, body });
+        if (url.includes("api.exa.ai")) {
+          return jsonResponse({
+            results: [
               {
-                delta: {
-                  tool_calls: [
-                    {
-                      index: 0,
-                      id: "call_search",
-                      type: "function",
-                      function: { name: "web_search", arguments: JSON.stringify({ query: "Codex docs" }) },
-                    },
-                  ],
-                },
+                title: "Codex docs",
+                url: "https://developers.openai.com/codex",
+                text: "Codex helps with coding.",
               },
             ],
-          },
-          { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+          });
+        }
+        const togetherRequestCount = requests.filter((request) =>
+          request.url.includes("api.together.ai"),
+        ).length;
+        if (togetherRequestCount === 1) {
+          return sseResponse([
+            { choices: [{ delta: { reasoning_content: "Need current docs. " } }] },
+            {
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call_search",
+                        type: "function",
+                        function: {
+                          name: "web_search",
+                          arguments: JSON.stringify({ query: "Codex docs" }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+          ]);
+        }
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: "Found it. " } }] },
+          { choices: [{ delta: { content: "Codex docs: " } }] },
+          { choices: [{ delta: { content: "https://developers.openai.com/codex" } }] },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+          { usage: { prompt_tokens: 15, completion_tokens: 7, total_tokens: 22 } },
         ]);
-      }
-      return sseResponse([
-        { choices: [{ delta: { reasoning_content: "Found it. " } }] },
-        { choices: [{ delta: { content: "Codex docs: " } }] },
-        { choices: [{ delta: { content: "https://developers.openai.com/codex" } }] },
-        { choices: [{ finish_reason: "stop", delta: {} }] },
-        { usage: { prompt_tokens: 15, completion_tokens: 7, total_tokens: 22 } },
-      ]);
-    }));
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
       tools: [{ type: "web_search", name: "web_search" }],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Search Codex docs." }] }],
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Search Codex docs." }],
+        },
+      ],
     });
 
     const reasoningIndex = response.indexOf("response.reasoning_text.delta");
@@ -677,25 +804,36 @@ describe("Codex Responses proxy tool compatibility", () => {
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES", "1");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      const body = JSON.parse(String(init?.body));
-      requests.push({ url, body });
-      if (url.includes("api.exa.ai")) {
-        return jsonResponse({
-          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
-        });
-      }
-      return hangingSseResponse([{ choices: [{ delta: {} }] }]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ url, body });
+        if (url.includes("api.exa.ai")) {
+          return jsonResponse({
+            results: [
+              {
+                title: "Codex docs",
+                url: "https://developers.openai.com/codex",
+                text: "Codex helps with coding.",
+              },
+            ],
+          });
+        }
+        return hangingSseResponse([{ choices: [{ delta: {} }] }]);
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
       tools: [{ type: "web_search", name: "web_search" }],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(response).toContain("response.failed");
@@ -709,19 +847,24 @@ describe("Codex Responses proxy tool compatibility", () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_RETRIES", "1");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push({ url, body: JSON.parse(String(init?.body)) });
-      return noProgressSseResponse();
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push({ url, body: JSON.parse(String(init?.body)) });
+        return noProgressSseResponse();
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
       tools: [{ type: "web_search", name: "web_search" }],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(response).toContain("response.failed");
@@ -734,19 +877,24 @@ describe("Codex Responses proxy tool compatibility", () => {
   test("fails when native stream emits reasoning but never final output", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS", "100");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push({ url, body: JSON.parse(String(init?.body)) });
-      return reasoningOnlySseResponse();
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push({ url, body: JSON.parse(String(init?.body)) });
+        return reasoningOnlySseResponse();
+      }),
+    );
 
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
       tools: [{ type: "web_search", name: "web_search" }],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] }],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
     });
 
     expect(response).toContain("response.reasoning_text.delta");
@@ -761,38 +909,53 @@ describe("Codex Responses proxy tool compatibility", () => {
   test("does not leak native web_search when a client tool call is returned in the same group", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      const body = JSON.parse(String(init?.body));
-      requests.push({ url, body });
-      if (url.includes("api.exa.ai")) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ url, body });
+        if (url.includes("api.exa.ai")) {
+          return jsonResponse({
+            results: [
+              {
+                title: "Codex docs",
+                url: "https://developers.openai.com/codex",
+                text: "Codex helps with coding.",
+              },
+            ],
+          });
+        }
         return jsonResponse({
-          results: [{ title: "Codex docs", url: "https://developers.openai.com/codex", text: "Codex helps with coding." }],
-        });
-      }
-      return jsonResponse({
-        choices: [
-          {
-            message: {
-              tool_calls: [
-                {
-                  id: "call_search",
-                  type: "function",
-                  function: { name: "web_search", arguments: JSON.stringify({ query: "Codex docs" }) },
-                },
-                {
-                  id: "call_patch",
-                  type: "function",
-                  function: { name: "apply_patch", arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch\n" }) },
-                },
-              ],
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "call_search",
+                    type: "function",
+                    function: {
+                      name: "web_search",
+                      arguments: JSON.stringify({ query: "Codex docs" }),
+                    },
+                  },
+                  {
+                    id: "call_patch",
+                    type: "function",
+                    function: {
+                      name: "apply_patch",
+                      arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch\n" }),
+                    },
+                  },
+                ],
+              },
             },
-          },
-        ],
-      });
-    }));
+          ],
+        });
+      }),
+    );
 
     const response = await postResponses({
       model: GLM_5_2.id,
@@ -814,7 +977,13 @@ describe("Codex Responses proxy tool compatibility", () => {
           format: { type: "grammar", syntax: "lark", definition: "start: /.+/" },
         },
       ],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Search and patch." }] }],
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Search and patch." }],
+        },
+      ],
     });
 
     expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);
@@ -828,7 +997,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         content: [
           {
             type: "output_text",
-            text: expect.stringContaining("Web search results for \"Codex docs\" via Exa"),
+            text: expect.stringContaining('Web search results for "Codex docs" via Exa'),
             annotations: [],
           },
         ],
@@ -846,15 +1015,18 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("forwards Responses input_image parts to Together vision message content", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({
-        choices: [{ message: { content: "I can see the image." } }],
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "I can see the image." } }],
+        });
+      }),
+    );
 
     await postResponses({
       model: GLM_5_2.id,
@@ -884,15 +1056,18 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("routes Desktop per-turn vision model selections instead of the session default", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return sseResponse([
-        { choices: [{ delta: { content: "I can see the image." }, finish_reason: "stop" }] },
-      ]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([
+          { choices: [{ delta: { content: "I can see the image." }, finish_reason: "stop" }] },
+        ]);
+      }),
+    );
 
     const response = await postResponsesText({
       model: QWEN_3_7_MAX.id,
@@ -926,15 +1101,18 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("translates forced namespace tool_choice to the flattened Together tool name", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({
-        choices: [{ message: { content: "ok" } }],
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "ok" } }],
+        });
+      }),
+    );
 
     await postResponses({
       model: GLM_5_2.id,
@@ -943,31 +1121,49 @@ describe("Codex Responses proxy tool compatibility", () => {
         {
           type: "namespace",
           name: "multi_agent_v1",
-          tools: [{ type: "function", name: "spawn_agent", parameters: { type: "object", properties: {} } }],
+          tools: [
+            {
+              type: "function",
+              name: "spawn_agent",
+              parameters: { type: "object", properties: {} },
+            },
+          ],
         },
       ],
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Use the agent." }] }],
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Use the agent." }],
+        },
+      ],
     });
 
     const upstream = requests[0] as { tool_choice?: unknown };
-    expect(upstream.tool_choice).toEqual({ type: "function", function: { name: "multi_agent_v1__spawn_agent" } });
+    expect(upstream.tool_choice).toEqual({
+      type: "function",
+      function: { name: "multi_agent_v1__spawn_agent" },
+    });
   });
 
   test("maps Together reasoning token usage into Responses usage details", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      return jsonResponse({
-        choices: [{ message: { content: "943" } }],
-        usage: {
-          prompt_tokens: 12,
-          completion_tokens: 7,
-          total_tokens: 19,
-          completion_tokens_details: { reasoning_tokens: 5 },
-        },
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return jsonResponse({
+          choices: [{ message: { content: "943" } }],
+          usage: {
+            prompt_tokens: 12,
+            completion_tokens: 7,
+            total_tokens: 19,
+            completion_tokens_details: { reasoning_tokens: 5 },
+          },
+        });
+      }),
+    );
 
     const response = await postResponses({
       model: GLM_5_2.id,
@@ -984,31 +1180,42 @@ describe("Codex Responses proxy tool compatibility", () => {
 
   test("routes Codex memory extraction requests to the default long-context Together model", async () => {
     const requests: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                rollout_summary: "Captured TogetherLink memory support investigation.",
-                rollout_slug: "togetherlink_codex_memory_support",
-                raw_memory: "TogetherLink should route Codex memory extraction separately from the main coding model.",
-              }),
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  rollout_summary: "Captured TogetherLink memory support investigation.",
+                  rollout_slug: "togetherlink_codex_memory_support",
+                  raw_memory:
+                    "TogetherLink should route Codex memory extraction separately from the main coding model.",
+                }),
+              },
             },
-          },
-        ],
-        usage: { prompt_tokens: 100, completion_tokens: 25, total_tokens: 125 },
-      });
-    }));
+          ],
+          usage: { prompt_tokens: 100, completion_tokens: 25, total_tokens: 125 },
+        });
+      }),
+    );
 
     const response = await postResponses({
       model: "gpt-5.4-mini",
-      instructions: "## Memory Writing Agent: Phase 1 (Single Rollout)\n\nYou are a Memory Writing Agent.",
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Analyze this rollout." }] }],
+      instructions:
+        "## Memory Writing Agent: Phase 1 (Single Rollout)\n\nYou are a Memory Writing Agent.",
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Analyze this rollout." }],
+        },
+      ],
       text: {
         format: {
           type: "json_schema",
@@ -1053,13 +1260,16 @@ describe("Codex Responses proxy tool compatibility", () => {
   test("allows Codex memory extraction model override from env", async () => {
     const requests: unknown[] = [];
     vi.stubEnv("TOGETHERLINK_CODEX_MEMORY_MODEL", QWEN_3_5_9B.id);
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://127.0.0.1:")) {
-        return realFetch(url, init);
-      }
-      requests.push(JSON.parse(String(init?.body)));
-      return jsonResponse({ choices: [{ message: { content: "{}" } }] });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({ choices: [{ message: { content: "{}" } }] });
+      }),
+    );
 
     await postResponses({
       model: "gpt-5.4-mini",
@@ -1143,7 +1353,9 @@ async function postResponsesText(body: unknown): Promise<string> {
   }
 }
 
-async function postResponsesStreamingTimeline(body: unknown): Promise<Array<{ atMs: number; text: string }>> {
+async function postResponsesStreamingTimeline(
+  body: unknown,
+): Promise<Array<{ atMs: number; text: string }>> {
   const server = http.createServer((req, res) => {
     handleCodexProxyRequest(req, res, options).catch((error) => {
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -1172,7 +1384,10 @@ async function postResponsesStreamingTimeline(body: unknown): Promise<Array<{ at
       if (read.done) {
         break;
       }
-      timeline.push({ atMs: Date.now() - startedAt, text: decoder.decode(read.value, { stream: true }) });
+      timeline.push({
+        atMs: Date.now() - startedAt,
+        text: decoder.decode(read.value, { stream: true }),
+      });
     }
     const finalText = decoder.decode();
     if (finalText) {
@@ -1194,7 +1409,9 @@ function jsonResponse(body: unknown): Response {
 function sseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } = {}): Response {
   const lineEnding = options.lineEnding ?? "\n";
   const separator = `${lineEnding}${lineEnding}`;
-  const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}${separator}`).join("") + `data: [DONE]${separator}`;
+  const body =
+    chunks.map((chunk) => `data: ${JSON.stringify(chunk)}${separator}`).join("") +
+    `data: [DONE]${separator}`;
   return new Response(body, {
     status: 200,
     headers: { "content-type": "text/event-stream" },
@@ -1204,80 +1421,97 @@ function sseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } 
 function delayedSseResponse(chunks: Array<{ delayMs: number; chunk: unknown }>): Response {
   const encoder = new TextEncoder();
   const separator = "\n\n";
-  return new Response(new ReadableStream({
-    async start(controller) {
-      for (const { delayMs, chunk } of chunks) {
-        if (delayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        for (const { delayMs, chunk } of chunks) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
         }
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
-      }
-      controller.enqueue(encoder.encode(`data: [DONE]${separator}`));
-      controller.close();
+        controller.enqueue(encoder.encode(`data: [DONE]${separator}`));
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
     },
-  }), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
+  );
 }
 
-function hangingSseResponse(chunks: unknown[], options: { lineEnding?: "\n" | "\r\n" } = {}): Response {
+function hangingSseResponse(
+  chunks: unknown[],
+  options: { lineEnding?: "\n" | "\r\n" } = {},
+): Response {
   const encoder = new TextEncoder();
   const lineEnding = options.lineEnding ?? "\n";
   const separator = `${lineEnding}${lineEnding}`;
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
-      }
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}${separator}`));
+        }
+      },
+      cancel() {
+        // The proxy should cancel this stream once the idle timeout fires.
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
     },
-    cancel() {
-      // The proxy should cancel this stream once the idle timeout fires.
-    },
-  }), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
+  );
 }
 
 function noProgressSseResponse(): Response {
   const encoder = new TextEncoder();
   let interval: NodeJS.Timeout | undefined;
-  return new Response(new ReadableStream({
-    start(controller) {
-      interval = setInterval(() => {
-        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{}}]}\n\n"));
-      }, 20);
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        interval = setInterval(() => {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{}}]}\n\n'));
+        }, 20);
+      },
+      cancel() {
+        if (interval) {
+          clearInterval(interval);
+        }
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
     },
-    cancel() {
-      if (interval) {
-        clearInterval(interval);
-      }
-    },
-  }), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
+  );
 }
 
 function reasoningOnlySseResponse(): Response {
   const encoder = new TextEncoder();
   let interval: NodeJS.Timeout | undefined;
-  return new Response(new ReadableStream({
-    start(controller) {
-      interval = setInterval(() => {
-        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking \"}}]}\n\n"));
-      }, 20);
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        interval = setInterval(() => {
+          controller.enqueue(
+            encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"thinking "}}]}\n\n'),
+          );
+        }, 20);
+      },
+      cancel() {
+        if (interval) {
+          clearInterval(interval);
+        }
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
     },
-    cancel() {
-      if (interval) {
-        clearInterval(interval);
-      }
-    },
-  }), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
+  );
 }
 
 function firstToolName(requests: unknown[]): string | undefined {

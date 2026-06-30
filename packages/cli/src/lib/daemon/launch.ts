@@ -5,7 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
-import { probeHealthz, probeDaemonHealth, resolveDaemonPort, daemonUrl, daemonPidPath, type DaemonHealth } from "./server.js";
+import {
+  probeHealthz,
+  probeDaemonHealth,
+  resolveDaemonPort,
+  daemonUrl,
+  daemonPidPath,
+  type DaemonHealth,
+} from "./server.js";
 import type { RegisterSessionRequest } from "./state.js";
 
 const HEALTH_POLL_INTERVAL_MS = 200;
@@ -36,7 +43,8 @@ export async function ensureDaemon(): Promise<{ url: string }> {
     return { url };
   }
   if (health) {
-    const activeSessionCount = health.activeSessionCount >= 0 ? health.activeSessionCount : await activeSessionCountFor(url);
+    const activeSessionCount =
+      health.activeSessionCount >= 0 ? health.activeSessionCount : await activeSessionCountFor(url);
     const daemonPid = health.pid > 0 ? health.pid : await readDaemonPid();
     if (activeSessionCount === 0 && daemonPid !== undefined) {
       await stopDaemonPid(daemonPid);
@@ -108,7 +116,12 @@ function daemonMatchesCurrentScript(health: DaemonHealth, current: ScriptIdentit
   if (health.scriptPath !== current.scriptPath) {
     return false;
   }
-  if (health.scriptSize === null || current.scriptSize === null || health.scriptMtimeMs === null || current.scriptMtimeMs === null) {
+  if (
+    health.scriptSize === null ||
+    current.scriptSize === null ||
+    health.scriptMtimeMs === null ||
+    current.scriptMtimeMs === null
+  ) {
     return health.version !== "";
   }
   return health.scriptSize === current.scriptSize && health.scriptMtimeMs === current.scriptMtimeMs;
@@ -237,7 +250,10 @@ export async function daemonFetch(url: string, init?: RequestInit): Promise<Resp
   }
 }
 
-export async function registerDaemonSession(proxyUrl: string, registration: RegisterSessionRequest): Promise<void> {
+export async function registerDaemonSession(
+  proxyUrl: string,
+  registration: RegisterSessionRequest,
+): Promise<void> {
   const response = await daemonFetch(`${proxyUrl}/internal/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -245,11 +261,17 @@ export async function registerDaemonSession(proxyUrl: string, registration: Regi
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`daemon registration failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+    throw new Error(
+      `daemon registration failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+    );
   }
 }
 
-export async function updateDaemonSessionPid(proxyUrl: string, token: string, pid: number): Promise<void> {
+export async function updateDaemonSessionPid(
+  proxyUrl: string,
+  token: string,
+  pid: number,
+): Promise<void> {
   await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(token)}/pid`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -292,9 +314,14 @@ export function startDaemonSessionKeepalive(
     }
     lastRecoveredAt = now;
     const { url } = await ensureDaemon();
-    await registerDaemonSession(url, { ...registration, ...(options.pid !== undefined ? { pid: options.pid } : {}) });
+    await registerDaemonSession(url, {
+      ...registration,
+      ...(options.pid !== undefined ? { pid: options.pid } : {}),
+    });
     if (options.debug) {
-      process.stderr.write(`[togetherlink daemon] restored ${options.label ?? registration.agent ?? "session"} after ${reason}.\n`);
+      process.stderr.write(
+        `[togetherlink daemon] restored ${options.label ?? registration.agent ?? "session"} after ${reason}.\n`,
+      );
     }
   };
 
@@ -321,7 +348,9 @@ export function startDaemonSessionKeepalive(
       const port = resolveDaemonPort();
       const url = daemonUrl(port);
       try {
-        const response = await daemonFetch(`${url}/internal/sessions/${encodeURIComponent(registration.token)}/cost`);
+        const response = await daemonFetch(
+          `${url}/internal/sessions/${encodeURIComponent(registration.token)}/cost`,
+        );
         if (response.status === 404 || response.status === 401) {
           await safeRecover(`missing session (${response.status})`);
         }

@@ -5,10 +5,15 @@ import { readJsonIfExists, writeJsonAtomic } from "./together-core.js";
 import { togetherlinkHome } from "./global-config.js";
 import { VERSION } from "./version.js";
 
-const TELEMETRY_ENDPOINT = process.env.TOGETHERLINK_TELEMETRY_URL ?? "https://togetherlink.vercel.app/api/telemetry";
+const TELEMETRY_ENDPOINT =
+  process.env.TOGETHERLINK_TELEMETRY_URL ?? "https://togetherlink.vercel.app/api/telemetry";
 const TELEMETRY_TIMEOUT_MS = 2000;
 
-export type TelemetryEventType = "install_completed" | "cli_started" | "session_started" | "session_ended";
+export type TelemetryEventType =
+  | "install_completed"
+  | "cli_started"
+  | "session_started"
+  | "session_ended";
 
 export type TelemetryUsage = {
   promptTokens?: number;
@@ -82,7 +87,10 @@ function normalizedOs(): "macos" | "linux" | "windows" | "unknown" {
  * the caller past the timeout — a failed or unreachable endpoint must not
  * break or noticeably slow down any CLI command.
  */
-export async function sendTelemetryEvent(event: TelemetryEvent, home = os.homedir()): Promise<void> {
+export async function sendTelemetryEvent(
+  event: TelemetryEvent,
+  home = os.homedir(),
+): Promise<void> {
   if (telemetryDisabledByEnvironment()) {
     return;
   }

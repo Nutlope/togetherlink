@@ -1,5 +1,5 @@
-import { defineSchema, defineTable } from 'convex/server'
-import { v } from 'convex/values'
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
 
 export default defineSchema({
   telemetryEvents: defineTable({
@@ -39,12 +39,12 @@ export default defineSchema({
     receivedAt: v.number(),
     createdAt: v.number(),
   })
-    .index('by_receivedAt', ['receivedAt'])
-    .index('by_installId', ['installId'])
-    .index('by_sessionId', ['sessionId'])
-    .index('by_agent', ['agent'])
-    .index('by_countryCode', ['countryCode'])
-    .index('by_eventType', ['eventType'])
-    .index('by_eventType_receivedAt', ['eventType', 'receivedAt'])
-    .index('by_agent_receivedAt', ['agent', 'receivedAt']),
-})
+    .index("by_receivedAt", ["receivedAt"])
+    .index("by_installId", ["installId"])
+    .index("by_sessionId", ["sessionId"])
+    .index("by_agent", ["agent"])
+    .index("by_countryCode", ["countryCode"])
+    .index("by_eventType", ["eventType"])
+    .index("by_eventType_receivedAt", ["eventType", "receivedAt"])
+    .index("by_agent_receivedAt", ["agent", "receivedAt"]),
+});

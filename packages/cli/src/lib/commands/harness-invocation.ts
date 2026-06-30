@@ -6,7 +6,10 @@ export type HarnessInvocation = {
   flags: ParsedArgs["flags"];
 };
 
-export function resolveHarnessInvocation(positional: string[], flags: ParsedArgs["flags"]): HarnessInvocation {
+export function resolveHarnessInvocation(
+  positional: string[],
+  flags: ParsedArgs["flags"],
+): HarnessInvocation {
   const [rawCommand, ...passthrough] = positional;
   const command = rawCommand === "picode" ? "pi" : rawCommand;
 

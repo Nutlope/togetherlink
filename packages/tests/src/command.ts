@@ -64,12 +64,19 @@ export async function runCommand(
   return artifact;
 }
 
-export async function writeArtifact(context: TestContext, fileName: string, value: unknown): Promise<void> {
+export async function writeArtifact(
+  context: TestContext,
+  fileName: string,
+  value: unknown,
+): Promise<void> {
   await writeFile(path.join(context.artifactsDir, fileName), `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function safeName(value: string): string {
-  return value.replaceAll(/[^a-z0-9]+/gi, "-").replaceAll(/^-|-$/g, "").toLowerCase();
+  return value
+    .replaceAll(/[^a-z0-9]+/gi, "-")
+    .replaceAll(/^-|-$/g, "")
+    .toLowerCase();
 }
 
 function signalChildTree(child: ChildProcess, signal: NodeJS.Signals): void {

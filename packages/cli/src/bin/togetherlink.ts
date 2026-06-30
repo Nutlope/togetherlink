@@ -5,7 +5,11 @@ import { parseArgs } from "../lib/parse-args.js";
 import { printHelp, runConfigure } from "../lib/commands/global.js";
 import { dispatchHarnessCommand } from "../lib/commands/harness.js";
 import { isHarnessCommand, resolveHarnessInvocation } from "../lib/commands/harness-invocation.js";
-import { readGlobalConfig, resolveStoredExaApiKey, resolveStoredApiKey } from "../lib/global-config.js";
+import {
+  readGlobalConfig,
+  resolveStoredExaApiKey,
+  resolveStoredApiKey,
+} from "../lib/global-config.js";
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
@@ -164,7 +168,9 @@ async function main() {
 
   if (command === "codex-app") {
     if (!parsed.flags.restore && !(await ensureConfiguredForInteractiveLaunch())) {
-      throw new Error("No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.");
+      throw new Error(
+        "No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.",
+      );
     }
     const { runCodexAppCommand } = await import("../lib/codex-app.js");
     const result = await runCodexAppCommand({ home: os.homedir(), ...parsed.flags });
@@ -188,7 +194,9 @@ async function main() {
     invocation.command !== undefined
   ) {
     if (!(await ensureConfiguredForInteractiveLaunch())) {
-      throw new Error("No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.");
+      throw new Error(
+        "No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.",
+      );
     }
   }
 

@@ -21,11 +21,14 @@ on:
       - main
     paths:
       - ".github/workflows/live-agent-gauntlet.yml"
+      - ".oxfmtrc.json"
+      - "package.json"
       - "packages/cli/**"
       - "packages/models/**"
       - "packages/tests/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "site/**"
 
 concurrency:
   group: live-agent-gauntlet-${{ github.ref }}
@@ -68,6 +71,15 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile --config.confirmModulesPurge=false
+
+      - name: Verify TypeScript native compiler
+        run: node_modules/.bin/tsc --version
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Typecheck workspace
+        run: pnpm typecheck
 
       - name: Install coding-agent CLIs
         run: |

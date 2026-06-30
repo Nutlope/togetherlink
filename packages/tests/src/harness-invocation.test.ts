@@ -8,7 +8,10 @@ describe("harness invocation parsing", () => {
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
     expect(invocation.command).toBe("claude");
-    expect(invocation.flags.passthrough).toEqual(["--resume", "8616d14d-f3a7-4ee3-bfc3-34bce6602b8d"]);
+    expect(invocation.flags.passthrough).toEqual([
+      "--resume",
+      "8616d14d-f3a7-4ee3-bfc3-34bce6602b8d",
+    ]);
   });
 
   test("strips the passthrough separator before launching the native harness", () => {
@@ -25,7 +28,11 @@ describe("harness invocation parsing", () => {
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
     expect(invocation.command).toBe("claude");
-    expect(invocation.flags.passthrough).toEqual(["run", "--resume", "8616d14d-f3a7-4ee3-bfc3-34bce6602b8d"]);
+    expect(invocation.flags.passthrough).toEqual([
+      "run",
+      "--resume",
+      "8616d14d-f3a7-4ee3-bfc3-34bce6602b8d",
+    ]);
   });
 
   test("passes native status through when the separator is present", () => {
@@ -47,7 +54,13 @@ describe("harness invocation parsing", () => {
   });
 
   test("keeps togetherlink flags before the harness", () => {
-    const parsed = parseArgs(["--main", "together-kimi-k2-7-code", "claude", "--resume", "session-id"]);
+    const parsed = parseArgs([
+      "--main",
+      "together-kimi-k2-7-code",
+      "claude",
+      "--resume",
+      "session-id",
+    ]);
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
     expect(invocation.command).toBe("claude");

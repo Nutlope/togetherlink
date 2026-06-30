@@ -70,19 +70,32 @@ export async function startTestDaemon(context: TestContext): Promise<TestDaemon>
   throw new Error(`daemon did not become healthy: ${stderr}`);
 }
 
-export async function registerClaudeSession(context: TestContext, daemon: TestDaemon): Promise<string> {
+export async function registerClaudeSession(
+  context: TestContext,
+  daemon: TestDaemon,
+): Promise<string> {
   return await registerSession(context, daemon, "claude");
 }
 
-export async function registerCodexSession(context: TestContext, daemon: TestDaemon): Promise<string> {
+export async function registerCodexSession(
+  context: TestContext,
+  daemon: TestDaemon,
+): Promise<string> {
   return await registerSession(context, daemon, "codex");
 }
 
-export async function registerCodexAppSession(context: TestContext, daemon: TestDaemon): Promise<string> {
+export async function registerCodexAppSession(
+  context: TestContext,
+  daemon: TestDaemon,
+): Promise<string> {
   return await registerSession(context, daemon, "codex-app");
 }
 
-async function registerSession(context: TestContext, daemon: TestDaemon, agent: "claude" | "codex" | "codex-app"): Promise<string> {
+async function registerSession(
+  context: TestContext,
+  daemon: TestDaemon,
+  agent: "claude" | "codex" | "codex-app",
+): Promise<string> {
   const apiKey = await resolveTogetherApiKey(context.repoRoot);
   const token = `${agent}-context-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const response = await fetch(`${daemon.url}/internal/sessions`, {
@@ -105,7 +118,9 @@ async function registerSession(context: TestContext, daemon: TestDaemon, agent: 
 }
 
 export async function deleteSession(daemon: TestDaemon, token: string): Promise<void> {
-  await fetch(`${daemon.url}/internal/sessions/${encodeURIComponent(token)}`, { method: "DELETE" }).catch(() => {});
+  await fetch(`${daemon.url}/internal/sessions/${encodeURIComponent(token)}`, {
+    method: "DELETE",
+  }).catch(() => {});
 }
 
 async function resolveTogetherApiKey(repoRoot: string): Promise<string> {

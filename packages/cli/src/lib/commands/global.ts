@@ -3,7 +3,13 @@ import * as clack from "@clack/prompts";
 import { ALL_HARNESSES, HARNESS_LABEL, type HarnessId } from "../harness.js";
 import { isHarnessImplemented } from "../harness-registry.js";
 import { detectInstalledHarnesses } from "../detect.js";
-import { readGlobalConfig, setGlobalApiKey, resolveStoredApiKey, resolveStoredExaApiKey, setGlobalExaApiKey } from "../global-config.js";
+import {
+  readGlobalConfig,
+  setGlobalApiKey,
+  resolveStoredApiKey,
+  resolveStoredExaApiKey,
+  setGlobalExaApiKey,
+} from "../global-config.js";
 import { EXA_API_KEY_ENV_REF } from "../together-core.js";
 import { VERSION } from "../version.js";
 
@@ -60,7 +66,8 @@ export async function runConfigure(): Promise<boolean> {
   let exaApiKey = existingExa || process.env.EXA_API_KEY || "";
   if (!exaApiKey) {
     const enteredExa = await clack.password({
-      message: "Exa API key for web search (from https://exa.ai — press Enter to skip; web search will be disabled):",
+      message:
+        "Exa API key for web search (from https://exa.ai — press Enter to skip; web search will be disabled):",
       validate: (value) => (value.trim() || value === "" ? undefined : undefined),
     });
     if (clack.isCancel(enteredExa)) {

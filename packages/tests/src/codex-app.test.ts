@@ -10,7 +10,7 @@ describe("Codex App alpha config", () => {
         'openai_base_url = "https://api.openai.com/v1"',
         'model_reasoning_effort = "high"',
         "",
-        "[projects.\"/repo\"]",
+        '[projects."/repo"]',
         'trust_level = "trusted"',
         "",
       ].join("\n"),
@@ -40,8 +40,8 @@ describe("Codex App alpha config", () => {
     // Codex Desktop currently gates the model picker on provider auth state.
     // This keeps the picker visible for custom providers; actual model
     // requests still go to Togetherlink's local base_url.
-    expect(config).toContain('requires_openai_auth = true');
- });
+    expect(config).toContain("requires_openai_auth = true");
+  });
 
   test("replaces an existing managed block instead of appending duplicates", () => {
     const first = buildCodexAppConfig("", {
@@ -82,7 +82,7 @@ describe("Codex App alpha config", () => {
         "[model_providers.togetherlink_codex_app]",
         'base_url = "http://old.invalid/v1"',
         "",
-        "[projects.\"/repo\"]",
+        '[projects."/repo"]',
         'trust_level = "trusted"',
         "",
       ].join("\n"),
@@ -104,7 +104,9 @@ describe("Codex App alpha config", () => {
   });
 
   test("emits the full ModelInfo schema Codex Desktop expects", () => {
-    const catalog = JSON.parse(codexAppModelCatalogJson()) as { models: Array<Record<string, unknown>> };
+    const catalog = JSON.parse(codexAppModelCatalogJson()) as {
+      models: Array<Record<string, unknown>>;
+    };
     const first = catalog.models[0];
 
     expect(first).toBeDefined();

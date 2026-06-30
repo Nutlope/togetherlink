@@ -25,7 +25,9 @@ describe("telemetry", () => {
     await sendTelemetryEvent({ event: "cli_started", agent: "codex" }, tmpDir);
 
     expect(fetchMock).not.toHaveBeenCalled();
-    await expect(readFile(path.join(tmpDir, ".togetherlink", "install-id"), "utf8")).rejects.toMatchObject({
+    await expect(
+      readFile(path.join(tmpDir, ".togetherlink", "install-id"), "utf8"),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });

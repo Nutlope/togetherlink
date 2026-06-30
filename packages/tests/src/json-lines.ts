@@ -13,7 +13,10 @@ export function jsonLines(stdout: string): unknown[] {
 }
 
 export function parseLastJsonObject(text: string): Record<string, unknown> | null {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     try {
       return JSON.parse(lines[i] as string) as Record<string, unknown>;

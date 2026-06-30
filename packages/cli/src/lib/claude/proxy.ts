@@ -5,7 +5,14 @@ import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
-import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
+import {
+  describeImage,
+  imageBlockKey,
+  isImageBlock,
+  isUrlImageBlock,
+  type ImageBlock,
+  type UrlBlock,
+} from "./vision.js";
 import { stableHash, stableStringify } from "../stable-hash.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
@@ -20,7 +27,12 @@ type AnthropicContentBlock =
   | { type: "server_tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean }
   | { type: "web_search_tool_result"; tool_use_id?: string; content?: unknown; error_code?: string }
-  | { type: "web_search_tool_result_error"; tool_use_id?: string; content?: unknown; error_code?: string }
+  | {
+      type: "web_search_tool_result_error";
+      tool_use_id?: string;
+      content?: unknown;
+      error_code?: string;
+    }
   | { type: "image"; source: { type: string; media_type?: string; data?: string; url?: string } }
   | { type: "url"; url: string };
 
@@ -63,7 +75,10 @@ type NativeServerTool = {
   definition: AnthropicTool;
 };
 
-type OpenAITool = { type: "function"; function: { name: string; description: string; parameters: unknown } };
+type OpenAITool = {
+  type: "function";
+  function: { name: string; description: string; parameters: unknown };
+};
 
 type OpenAIMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -71,7 +86,11 @@ type OpenAIMessage = {
   reasoning?: string;
   reasoning_content?: string;
   tool_call_id?: string;
-  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
 };
 
 type OpenAIChatResponse = {
@@ -126,7 +145,9 @@ type TogetherFetchResult =
   | { ok: true; json: OpenAIChatResponse; error?: undefined }
   | { ok: false; error: TogetherApiError; json?: undefined };
 
-type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
+type StreamProxyResult =
+  | { ok: true; status?: number }
+  | { ok: false; status: number; error: string };
 
 // Transient upstream faults worth retrying with backoff. 429 = rate limited;
 // 503/overloaded = server-side temporary capacity. Everything else (401, 400,
@@ -141,9 +162,13 @@ const CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 const CONTEXT_RETRY_TRIM_EXTRA_TOKENS = 512;
 const APPROX_CHARS_PER_TOKEN = 4;
 const TRIM_PRESERVED_PREFIX_CHARS = 4096;
-const TOGETHERLINK_IDENTITY_PROMPT = "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
+const TOGETHERLINK_IDENTITY_PROMPT =
+  "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 
-function clampRequestedMaxTokens(maxTokens: number | undefined, model: ModelDefinition): number | undefined {
+function clampRequestedMaxTokens(
+  maxTokens: number | undefined,
+  model: ModelDefinition,
+): number | undefined {
   if (typeof maxTokens !== "number" || !Number.isFinite(maxTokens)) {
     return maxTokens;
   }
@@ -247,7 +272,12 @@ function trimPayloadInputByApproxTokens(
       break;
     }
     const record = asOpenAIMessageRecord(message);
-    if (!record || record.role === "system" || typeof record.content !== "string" || record.content.length === 0) {
+    if (
+      !record ||
+      record.role === "system" ||
+      typeof record.content !== "string" ||
+      record.content.length === 0
+    ) {
       continue;
     }
     const result = trimOldContextText(record.content, charsToTrim);
@@ -261,7 +291,10 @@ function trimPayloadInputByApproxTokens(
   return trimmedChars > 0 ? { trimmedChars } : undefined;
 }
 
-function canTrimInputForContextLengthRetry(error: TogetherApiError, model: ModelDefinition): boolean {
+function canTrimInputForContextLengthRetry(
+  error: TogetherApiError,
+  model: ModelDefinition,
+): boolean {
   if (error.status !== 400) {
     return false;
   }
@@ -276,7 +309,9 @@ function parseTogetherContextLengthMaxTokens(message: string): number | undefine
 }
 
 function parseTogetherContextLengthInputTokens(message: string): number | undefined {
-  const parentheticalMatch = message.match(/maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is);
+  const parentheticalMatch = message.match(
+    /maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is,
+  );
   if (parentheticalMatch) {
     return parseTokenCount(parentheticalMatch[1]);
   }
@@ -399,7 +434,12 @@ export async function handleProxyRequest(
   }
 
   if (req.method !== "POST" || path !== "/v1/messages") {
-    writeAnthropicError(res, 404, "not_found_error", `Unsupported route ${req.method ?? ""} ${req.url ?? ""}`.trim());
+    writeAnthropicError(
+      res,
+      404,
+      "not_found_error",
+      `Unsupported route ${req.method ?? ""} ${req.url ?? ""}`.trim(),
+    );
     return;
   }
 
@@ -490,7 +530,12 @@ function trimPayloadInputForContextLengthRetry(
       break;
     }
     const record = asOpenAIMessageRecord(message);
-    if (!record || record.role === "system" || typeof record.content !== "string" || record.content.length === 0) {
+    if (
+      !record ||
+      record.role === "system" ||
+      typeof record.content !== "string" ||
+      record.content.length === 0
+    ) {
       continue;
     }
     const result = trimOldContextText(record.content, charsToTrim);
@@ -505,12 +550,18 @@ function trimPayloadInputForContextLengthRetry(
   return trimmedChars > 0 ? { trimmedChars } : undefined;
 }
 
-function trimOldContextText(text: string, requestedChars: number): { text: string; trimmedChars: number } | undefined {
+function trimOldContextText(
+  text: string,
+  requestedChars: number,
+): { text: string; trimmedChars: number } | undefined {
   const marker = "\n[togetherlink trimmed older context to fit the model window]\n";
   if (requestedChars <= 0 || text.length <= marker.length + 32) {
     return undefined;
   }
-  const preservedPrefixChars = Math.min(TRIM_PRESERVED_PREFIX_CHARS, Math.max(0, text.length - marker.length - 32));
+  const preservedPrefixChars = Math.min(
+    TRIM_PRESERVED_PREFIX_CHARS,
+    Math.max(0, text.length - marker.length - 32),
+  );
   const maxRemovableChars = Math.max(1, text.length - preservedPrefixChars - marker.length - 32);
   const removableChars = Math.min(requestedChars, maxRemovableChars);
   const nextText = `${text.slice(0, preservedPrefixChars)}${marker}${text.slice(preservedPrefixChars + removableChars)}`;
@@ -581,7 +632,9 @@ async function callTogetherChatCompletions(
     const payload = {
       model: targetModel.definition.id,
       messages:
-        turn === 0 && nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages,
+        turn === 0 && nativeTools.length > 0
+          ? withNativeToolSystemPrompt(messages, nativeTools)
+          : messages,
       max_tokens: maxTokens,
       stop: body.stop_sequences,
       temperature: body.temperature,
@@ -605,7 +658,11 @@ async function callTogetherChatCompletions(
     let response = await fetchTogether(payload, options, signal);
     if (!response.ok) {
       const initialError = response.error;
-      const retryMaxTokens = maxTokensForContextLengthRetry(initialError, targetModel.definition, maxTokens);
+      const retryMaxTokens = maxTokensForContextLengthRetry(
+        initialError,
+        targetModel.definition,
+        maxTokens,
+      );
       if (retryMaxTokens !== undefined) {
         maxTokens = retryMaxTokens;
         payload.max_tokens = maxTokens;
@@ -617,7 +674,11 @@ async function callTogetherChatCompletions(
         });
         response = await fetchTogether(payload, options, signal);
       } else if (canTrimInputForContextLengthRetry(initialError, targetModel.definition)) {
-        const trimmed = trimPayloadInputForContextLengthRetry(payload, initialError, targetModel.definition);
+        const trimmed = trimPayloadInputForContextLengthRetry(
+          payload,
+          initialError,
+          targetModel.definition,
+        );
         if (trimmed) {
           debugLog(options, "retrying together request with trimmed input context", {
             model: payload.model,
@@ -642,7 +703,12 @@ async function callTogetherChatCompletions(
     const completionTokens = usage?.completion_tokens ?? 0;
     const cachedTokens = usage?.prompt_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? 0;
     const incrementalCost =
-      options.costTracker?.addUsage(promptTokens, cachedTokens, completionTokens, targetModel.definition) ?? 0;
+      options.costTracker?.addUsage(
+        promptTokens,
+        cachedTokens,
+        completionTokens,
+        targetModel.definition,
+      ) ?? 0;
     debugLog(options, "together response", {
       id: json.id,
       choices: json.choices?.length ?? 0,
@@ -656,12 +722,15 @@ async function callTogetherChatCompletions(
     });
 
     const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
-    const nativeToolCalls = toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function?.name ?? ""));
+    const nativeToolCalls = toolCalls.filter((toolCall) =>
+      nativeToolNames.has(toolCall.function?.name ?? ""),
+    );
     if (nativeToolCalls.length === 0) {
       return json;
     }
 
-    const reasoning = json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
+    const reasoning =
+      json.choices?.[0]?.message?.reasoning ?? json.choices?.[0]?.message?.reasoning_content;
     messages.push({
       role: "assistant",
       content: json.choices?.[0]?.message?.content ?? null,
@@ -710,14 +779,20 @@ async function callTogetherChatCompletions(
   };
 }
 
-function resolveTargetModel(requestedModel: string | undefined, options: ClaudeProxyOptions): ResolvedClaudeModel {
+function resolveTargetModel(
+  requestedModel: string | undefined,
+  options: ClaudeProxyOptions,
+): ResolvedClaudeModel {
   const supported = CLAUDE_SUPPORTED_MODELS.find(
     (model) => model.alias === requestedModel || model.definition.id === requestedModel,
   );
   return supported ?? { alias: options.modelId, definition: options.modelDefinition };
 }
 
-function findClaudeModel(modelId: string, options: ClaudeProxyOptions): ResolvedClaudeModel | undefined {
+function findClaudeModel(
+  modelId: string,
+  options: ClaudeProxyOptions,
+): ResolvedClaudeModel | undefined {
   const supported = CLAUDE_SUPPORTED_MODELS.find(
     (model) => model.alias === modelId || model.definition.id === modelId,
   );
@@ -761,7 +836,10 @@ export function countTokensResponse(
     tools: body.tools,
     tool_choice: body.tool_choice,
   });
-  const estimatedTokens = Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / APPROX_CHARS_PER_TOKEN));
+  const estimatedTokens = Math.max(
+    1,
+    Math.ceil(Buffer.byteLength(text, "utf8") / APPROX_CHARS_PER_TOKEN),
+  );
   return {
     input_tokens: estimatedTokens,
   };
@@ -996,7 +1074,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function toOpenAITools(tools: AnthropicTool[] | undefined, options?: Pick<ClaudeProxyOptions, "debug">): OpenAITool[] | undefined {
+function toOpenAITools(
+  tools: AnthropicTool[] | undefined,
+  options?: Pick<ClaudeProxyOptions, "debug">,
+): OpenAITool[] | undefined {
   if (!tools || tools.length === 0) {
     return undefined;
   }
@@ -1009,19 +1090,21 @@ function toOpenAITools(tools: AnthropicTool[] | undefined, options?: Pick<Claude
       });
       return [];
     }
-    return [{
-      type: "function",
-      function: {
-        name: openAIToolName(tool),
-        description: tool.description ?? "",
-        parameters: toOpenAIToolParameters(tool),
+    return [
+      {
+        type: "function",
+        function: {
+          name: openAIToolName(tool),
+          description: tool.description ?? "",
+          parameters: toOpenAIToolParameters(tool),
+        },
       },
-    }];
+    ];
   });
 }
 
 function openAIToolName(tool: AnthropicTool): string {
-  return isNativeWebSearchTool(tool) ? "web_search" : tool.name ?? "tool";
+  return isNativeWebSearchTool(tool) ? "web_search" : (tool.name ?? "tool");
 }
 
 function toOpenAIToolParameters(tool: AnthropicTool): unknown {
@@ -1080,16 +1163,26 @@ function nativeToolMaxUses(tool: AnthropicTool): number {
     : 5;
 }
 
-function withNativeToolSystemPrompt(messages: OpenAIMessage[], nativeTools: NativeServerTool[]): OpenAIMessage[] {
+function withNativeToolSystemPrompt(
+  messages: OpenAIMessage[],
+  nativeTools: NativeServerTool[],
+): OpenAIMessage[] {
   const prompt = [
     "Native server tools are available through function calls.",
-    ...nativeTools.map((tool) => `- ${tool.name}: call this for live web search. Always provide a concise non-empty query.`),
+    ...nativeTools.map(
+      (tool) =>
+        `- ${tool.name}: call this for live web search. Always provide a concise non-empty query.`,
+    ),
     "After tool results are returned, answer from the provided sources and include source URLs when relevant.",
   ].join("\n");
   return mergeLeadingSystemMessages([{ role: "system", content: prompt }, ...messages]);
 }
 
-async function runExaSearch(input: unknown, tool: AnthropicTool, options: ClaudeProxyOptions): Promise<string> {
+async function runExaSearch(
+  input: unknown,
+  tool: AnthropicTool,
+  options: ClaudeProxyOptions,
+): Promise<string> {
   const query = webSearchQuery(input);
   if (!query) {
     return "Web search error: missing query.";
@@ -1167,19 +1260,26 @@ function webSearchQuery(input: unknown): string {
   if (typeof input !== "object" || input === null) {
     return "";
   }
-  const value = (input as { query?: unknown; q?: unknown }).query ?? (input as { query?: unknown; q?: unknown }).q;
+  const value =
+    (input as { query?: unknown; q?: unknown }).query ??
+    (input as { query?: unknown; q?: unknown }).q;
   return typeof value === "string" ? value.trim() : "";
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : [];
 }
 
 function trimSearchText(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 600);
 }
 
-function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDefinition): OpenAIMessage[] {
+function toOpenAIMessages(
+  body: AnthropicMessagesRequest,
+  targetModel?: ModelDefinition,
+): OpenAIMessage[] {
   const systemParts = [
     targetModel
       ? `${TOGETHERLINK_IDENTITY_PROMPT} Backend: ${targetModel.name} (${targetModel.id}).`
@@ -1213,7 +1313,10 @@ function toOpenAIMessages(body: AnthropicMessagesRequest, targetModel?: ModelDef
           tool_call_id: block.tool_use_id,
           content: formatToolResultContent(block.content, block.is_error),
         });
-      } else if (block.type === "web_search_tool_result" || block.type === "web_search_tool_result_error") {
+      } else if (
+        block.type === "web_search_tool_result" ||
+        block.type === "web_search_tool_result_error"
+      ) {
         messages.push({
           role: "tool",
           tool_call_id: block.tool_use_id ?? "web_search",
@@ -1264,11 +1367,11 @@ function toAnthropicMessage(response: OpenAIChatResponse, model: string): Record
   const content: Array<Record<string, unknown>> = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
-      content.push({
-        type: "thinking",
-        thinking: reasoning,
-        signature: thinkingSignature(reasoning),
-      });
+    content.push({
+      type: "thinking",
+      thinking: reasoning,
+      signature: thinkingSignature(reasoning),
+    });
   }
   if (message.content) {
     content.push({ type: "text", text: message.content });
@@ -1325,7 +1428,8 @@ async function streamAnthropicFromTogether(
   const targetModel = resolveTargetModel(body.model, options);
   const messages = toOpenAIMessages(body, targetModel.definition);
   const nativeTools = nativeServerTools(body.tools);
-  const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+  const upstreamMessages =
+    nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
   const tools = toOpenAITools(body.tools, options);
   const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
   let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
@@ -1529,7 +1633,10 @@ async function streamAnthropicFromTogether(
         if (event.usage) {
           inputTokens = event.usage.prompt_tokens ?? inputTokens;
           outputTokens = event.usage.completion_tokens ?? outputTokens;
-          cachedTokens = event.usage.prompt_tokens_details?.cached_tokens ?? event.usage.cached_tokens ?? cachedTokens;
+          cachedTokens =
+            event.usage.prompt_tokens_details?.cached_tokens ??
+            event.usage.cached_tokens ??
+            cachedTokens;
         }
         if (event.finish_reason) {
           stopReason = mapStopReason(event.finish_reason);
@@ -1619,7 +1726,9 @@ async function streamAnthropicNativeToolLoop({
     cachedTokens += collected.cachedTokens;
     stopReason = collected.stopReason;
 
-    const nativeToolCalls = collected.toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function.name ?? ""));
+    const nativeToolCalls = collected.toolCalls.filter((toolCall) =>
+      nativeToolNames.has(toolCall.function.name ?? ""),
+    );
     if (nativeToolCalls.length === 0) {
       emitCollectedStreamTurn(blockManager, collected);
       break;
@@ -1708,7 +1817,8 @@ async function streamAnthropicNativeToolLoop({
       const error = !nextResponse.ok ? await mapTogetherError(nextResponse) : undefined;
       emitCollectedStreamTurn(blockManager, {
         reasoning: "",
-        text: error?.message ?? "Together returned no stream body after native server tool execution.",
+        text:
+          error?.message ?? "Together returned no stream body after native server tool execution.",
         toolCalls: [],
         stopReason: "end_turn",
         inputTokens: 0,
@@ -1805,7 +1915,10 @@ async function collectTogetherStreamTurn(
         if (event.usage) {
           turn.inputTokens = event.usage.prompt_tokens ?? turn.inputTokens;
           turn.outputTokens = event.usage.completion_tokens ?? turn.outputTokens;
-          turn.cachedTokens = event.usage.prompt_tokens_details?.cached_tokens ?? event.usage.cached_tokens ?? turn.cachedTokens;
+          turn.cachedTokens =
+            event.usage.prompt_tokens_details?.cached_tokens ??
+            event.usage.cached_tokens ??
+            turn.cachedTokens;
         }
         if (event.finish_reason) {
           turn.stopReason = mapStopReason(event.finish_reason);
@@ -1821,7 +1934,10 @@ async function collectTogetherStreamTurn(
   return turn;
 }
 
-function emitCollectedStreamTurn(blockManager: StreamBlockManager, turn: CollectedStreamTurn): void {
+function emitCollectedStreamTurn(
+  blockManager: StreamBlockManager,
+  turn: CollectedStreamTurn,
+): void {
   if (turn.reasoning) {
     blockManager.emitThinking(turn.reasoning);
   }
@@ -1856,9 +1972,7 @@ function emitCollectedStreamTurn(blockManager: StreamBlockManager, turn: Collect
  * Tolerates both `usage` on a final choices-bearing chunk and on a dedicated
  * empty-choices usage chunk (the `stream_options.include_usage` shape).
  */
-function parseStreamData(
-  data: string,
-): {
+function parseStreamData(data: string): {
   delta?: {
     reasoning?: string | null;
     reasoning_content?: string | null;
@@ -1892,7 +2006,8 @@ function parseStreamData(
   }
   const obj = parsed as Record<string, unknown>;
   const choices = obj.choices;
-  const choice = Array.isArray(choices) && choices.length > 0 ? (choices[0] as Record<string, unknown>) : null;
+  const choice =
+    Array.isArray(choices) && choices.length > 0 ? (choices[0] as Record<string, unknown>) : null;
   return {
     delta: (choice?.delta as Record<string, unknown> | undefined) ?? null,
     usage: (obj.usage as Record<string, unknown> | undefined) ?? null,
@@ -2018,13 +2133,14 @@ class StreamBlockManager {
     this.closeOpenBlock();
     const id = toolCall.id ?? `toolu_${randomUUID().replaceAll("-", "")}`;
     const toolName = name ?? "tool";
-    const block: { type: "tool_use"; index: number; id: string; name: string; arguments: string } = {
-      type: "tool_use",
-      index: this.nextIndex,
-      id,
-      name: toolName,
-      arguments: "",
-    };
+    const block: { type: "tool_use"; index: number; id: string; name: string; arguments: string } =
+      {
+        type: "tool_use",
+        index: this.nextIndex,
+        id,
+        name: toolName,
+        arguments: "",
+      };
     this.openBlock = block;
     this.currentToolCallIndex = tcIndex;
     writeSse(this.res, "content_block_start", {
@@ -2175,7 +2291,10 @@ function formatContentBlockForToolResult(block: unknown): string {
     return record.text;
   }
   if (record.type === "image") {
-    const source = typeof record.source === "object" && record.source !== null ? record.source as Record<string, unknown> : {};
+    const source =
+      typeof record.source === "object" && record.source !== null
+        ? (record.source as Record<string, unknown>)
+        : {};
     const mediaType = typeof source.media_type === "string" ? ` ${source.media_type}` : "";
     return `[image${mediaType} in tool result]`;
   }
@@ -2185,7 +2304,12 @@ function formatContentBlockForToolResult(block: unknown): string {
   return stringifyUnknown(block);
 }
 
-function formatWebSearchToolResult(block: Extract<AnthropicContentBlock, { type: "web_search_tool_result" | "web_search_tool_result_error" }>): string {
+function formatWebSearchToolResult(
+  block: Extract<
+    AnthropicContentBlock,
+    { type: "web_search_tool_result" | "web_search_tool_result_error" }
+  >,
+): string {
   const errorCode = typeof block.error_code === "string" ? block.error_code : undefined;
   if (block.type === "web_search_tool_result_error") {
     return `Web search error${errorCode ? ` (${errorCode})` : ""}: ${formatToolResultContent(block.content)}`;
@@ -2212,11 +2336,17 @@ function formatWebSearchResultItem(item: unknown, index: number): string[] {
   const record = item as Record<string, unknown>;
   if (record.type === "web_search_tool_result_error") {
     const code = typeof record.error_code === "string" ? record.error_code : undefined;
-    return [`Web search error${code ? ` (${code})` : ""}: ${formatToolResultContent(record.content)}`];
+    return [
+      `Web search error${code ? ` (${code})` : ""}: ${formatToolResultContent(record.content)}`,
+    ];
   }
-  const title = stringField(record, "title") ?? stringField(record, "page_title") ?? "Untitled result";
+  const title =
+    stringField(record, "title") ?? stringField(record, "page_title") ?? "Untitled result";
   const url = stringField(record, "url") ?? stringField(record, "source");
-  const snippet = stringField(record, "text") ?? stringField(record, "snippet") ?? stringField(record, "description");
+  const snippet =
+    stringField(record, "text") ??
+    stringField(record, "snippet") ??
+    stringField(record, "description");
   return [
     [
       `${index + 1}. ${title}`,
@@ -2315,14 +2445,20 @@ class LruCache<K, V> {
 // a guardrail, not an exact budget.
 const IMAGE_CACHE_MAX_ENTRIES = 64;
 const IMAGE_CACHE_MAX_BYTES = 4 * 1024 * 1024;
-const imageDescriptionCache = new LruCache<string, string>(IMAGE_CACHE_MAX_ENTRIES, IMAGE_CACHE_MAX_BYTES);
+const imageDescriptionCache = new LruCache<string, string>(
+  IMAGE_CACHE_MAX_ENTRIES,
+  IMAGE_CACHE_MAX_BYTES,
+);
 
 /**
  * Find every image/url block in the request, describe it with the vision model,
  * and replace it in place with a `text` block holding the description. GLM-5.2
  * is text-only, so this is what lets Claude Code's images reach the model.
  */
-async function resolveImageBlocks(body: AnthropicMessagesRequest, options: ClaudeProxyOptions): Promise<void> {
+async function resolveImageBlocks(
+  body: AnthropicMessagesRequest,
+  options: ClaudeProxyOptions,
+): Promise<void> {
   const descriptions = new Map<string, string>();
 
   const resolve = async (block: AnthropicContentBlock): Promise<AnthropicContentBlock> => {
@@ -2344,7 +2480,11 @@ async function resolveImageBlocks(body: AnthropicMessagesRequest, options: Claud
         preview: result.description.slice(0, 200),
       });
       if (result.usage) {
-        options.costTracker?.addVisionUsage(result.model, result.usage.promptTokens, result.usage.completionTokens);
+        options.costTracker?.addVisionUsage(
+          result.model,
+          result.usage.promptTokens,
+          result.usage.completionTokens,
+        );
       }
       cached = `${result.description}\n[described by ${result.model}]`;
       imageDescriptionCache.set(key, cached);
@@ -2361,17 +2501,21 @@ async function resolveImageBlocks(body: AnthropicMessagesRequest, options: Claud
   // Replace image blocks inside each message's content array.
   for (const message of body.messages ?? []) {
     if (Array.isArray(message.content)) {
-      message.content = await Promise.all(message.content.map(async (block) => {
-        const resolved = await resolve(block);
-        if (resolved.type === "tool_result" && Array.isArray(resolved.content)) {
-          resolved.content = await Promise.all(resolved.content.map(async (innerBlock) => {
-            return typeof innerBlock === "object" && innerBlock !== null
-              ? await resolve(innerBlock as AnthropicContentBlock)
-              : innerBlock;
-          }));
-        }
-        return resolved;
-      }));
+      message.content = await Promise.all(
+        message.content.map(async (block) => {
+          const resolved = await resolve(block);
+          if (resolved.type === "tool_result" && Array.isArray(resolved.content)) {
+            resolved.content = await Promise.all(
+              resolved.content.map(async (innerBlock) => {
+                return typeof innerBlock === "object" && innerBlock !== null
+                  ? await resolve(innerBlock as AnthropicContentBlock)
+                  : innerBlock;
+              }),
+            );
+          }
+          return resolved;
+        }),
+      );
     }
   }
 }
@@ -2402,7 +2546,10 @@ function extractImageBlocks(body: AnthropicMessagesRequest): Array<Record<string
     const record = block as Record<string, unknown>;
     const type = record.type;
     const isImageLike =
-      type === "image" || type === "url" || type === "document" || (typeof type === "string" && !knownTypes.has(type));
+      type === "image" ||
+      type === "url" ||
+      type === "document" ||
+      (typeof type === "string" && !knownTypes.has(type));
     if (!isImageLike) {
       return;
     }
@@ -2412,7 +2559,8 @@ function extractImageBlocks(body: AnthropicMessagesRequest): Array<Record<string
       summary.sourceType = source.type;
       summary.mediaType = source.media_type;
       const data = source.data;
-      summary.dataPreview = typeof data === "string" ? `${data.slice(0, 32)}… (${data.length} chars)` : typeof data;
+      summary.dataPreview =
+        typeof data === "string" ? `${data.slice(0, 32)}… (${data.length} chars)` : typeof data;
     }
     const url = record.url;
     if (typeof url === "string") {
@@ -2445,7 +2593,9 @@ function extractImageBlocks(body: AnthropicMessagesRequest): Array<Record<string
   return found;
 }
 
-function summarizeAnthropicTools(tools: AnthropicTool[] | undefined): Array<Record<string, unknown>> | undefined {
+function summarizeAnthropicTools(
+  tools: AnthropicTool[] | undefined,
+): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) {
     return undefined;
   }

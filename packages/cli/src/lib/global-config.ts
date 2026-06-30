@@ -1,6 +1,11 @@
 import os from "node:os";
 import path from "node:path";
-import { readJsonIfExists, writeJsonAtomic, TOGETHER_API_KEY_ENV_REF, EXA_API_KEY_ENV_REF } from "./together-core.js";
+import {
+  readJsonIfExists,
+  writeJsonAtomic,
+  TOGETHER_API_KEY_ENV_REF,
+  EXA_API_KEY_ENV_REF,
+} from "./together-core.js";
 
 export type GlobalConfig = {
   apiKey: string;

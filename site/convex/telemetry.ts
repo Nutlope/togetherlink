@@ -1,5 +1,5 @@
-import { mutation } from './_generated/server'
-import { v } from 'convex/values'
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
 
 export const recordEvent = mutation({
   args: {
@@ -39,9 +39,9 @@ export const recordEvent = mutation({
     receivedAt: v.number(),
   },
   handler: async (ctx, args) => {
-    await ctx.db.insert('telemetryEvents', {
+    await ctx.db.insert("telemetryEvents", {
       ...args,
       createdAt: Date.now(),
-    })
+    });
   },
-})
+});

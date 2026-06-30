@@ -23,7 +23,9 @@ describe("resolveModelByKeys", () => {
   ];
 
   it("returns the default model when no value is given", () => {
-    expect(resolveModelByKeys(SELECTABLE_MODELS, undefined, aliasAndId, GLM_5_2.id)?.id).toBe(GLM_5_2.id);
+    expect(resolveModelByKeys(SELECTABLE_MODELS, undefined, aliasAndId, GLM_5_2.id)?.id).toBe(
+      GLM_5_2.id,
+    );
   });
 
   it("returns the default model when the value is empty", () => {
@@ -31,19 +33,26 @@ describe("resolveModelByKeys", () => {
   });
 
   it("matches by id", () => {
-    expect(resolveModelByKeys(SELECTABLE_MODELS, KIMI_K2_7_CODE.id, aliasAndId, GLM_5_2.id)?.id).toBe(
-      KIMI_K2_7_CODE.id,
-    );
+    expect(
+      resolveModelByKeys(SELECTABLE_MODELS, KIMI_K2_7_CODE.id, aliasAndId, GLM_5_2.id)?.id,
+    ).toBe(KIMI_K2_7_CODE.id);
   });
 
   it("matches by alias", () => {
-    expect(resolveModelByKeys(SELECTABLE_MODELS, GLM_5_2.anthropicAlias ?? undefined, aliasAndId, GLM_5_2.id)?.id).toBe(
-      GLM_5_2.id,
-    );
+    expect(
+      resolveModelByKeys(
+        SELECTABLE_MODELS,
+        GLM_5_2.anthropicAlias ?? undefined,
+        aliasAndId,
+        GLM_5_2.id,
+      )?.id,
+    ).toBe(GLM_5_2.id);
   });
 
   it("returns undefined when the value matches no model", () => {
-    expect(resolveModelByKeys(SELECTABLE_MODELS, "no/such-model", aliasAndId, GLM_5_2.id)).toBeUndefined();
+    expect(
+      resolveModelByKeys(SELECTABLE_MODELS, "no/such-model", aliasAndId, GLM_5_2.id),
+    ).toBeUndefined();
   });
 
   it("falls back to the first list entry when defaultId is not in the list", () => {

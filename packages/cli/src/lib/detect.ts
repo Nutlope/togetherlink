@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { ALL_HARNESSES, HARNESS_BIN, HARNESS_INSTALL, HARNESS_LABEL, type HarnessId } from "./harness.js";
+import {
+  ALL_HARNESSES,
+  HARNESS_BIN,
+  HARNESS_INSTALL,
+  HARNESS_LABEL,
+  type HarnessId,
+} from "./harness.js";
 
 export type HarnessDetection = {
   installed: boolean;
@@ -21,7 +27,9 @@ function resolveBinPath(bin: string): string | null {
   return path || null;
 }
 
-export function detectInstalledHarnesses(harnesses: readonly HarnessId[] = ALL_HARNESSES): Record<HarnessId, HarnessDetection> {
+export function detectInstalledHarnesses(
+  harnesses: readonly HarnessId[] = ALL_HARNESSES,
+): Record<HarnessId, HarnessDetection> {
   const result = {} as Record<HarnessId, HarnessDetection>;
   for (const harness of harnesses) {
     const path = resolveBinPath(HARNESS_BIN[harness]);
