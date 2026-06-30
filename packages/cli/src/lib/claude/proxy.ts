@@ -212,6 +212,18 @@ function applyEstimatedContextBudget(
   if (typeof currentMaxTokens !== "number" || !Number.isFinite(currentMaxTokens)) {
     return;
   }
+  const roughInputTokens = roughPayloadInputTokens(payload);
+  if (roughInputTokens !== undefined) {
+    const roughInputTokensWithHeadroom = roughInputTokens + Math.ceil(roughInputTokens / 5);
+    if (
+      currentMaxTokens <= model.limit.output &&
+      roughInputTokensWithHeadroom + currentMaxTokens + CONTEXT_OUTPUT_SAFETY_TOKENS <
+        model.limit.context
+    ) {
+      return;
+    }
+  }
+
   let estimatedInputTokens = estimatePayloadInputTokens(payload);
   const reserveOverflowTokens =
     estimatedInputTokens + currentMaxTokens + CONTEXT_OUTPUT_SAFETY_TOKENS - model.limit.context;
@@ -256,6 +268,28 @@ function estimatePayloadInputTokens(payload: Record<string, unknown>): number {
       }) / APPROX_CHARS_PER_TOKEN,
     ),
   );
+}
+
+function roughPayloadInputTokens(payload: Record<string, unknown>): number | undefined {
+  if (payload.tools !== undefined || payload.tool_choice !== undefined) {
+    return undefined;
+  }
+  const messages = payload.messages;
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  let chars = 0;
+  for (const message of messages) {
+    if (typeof message !== "object" || message === null) {
+      return undefined;
+    }
+    const record = message as Record<string, unknown>;
+    if (typeof record.role !== "string" || typeof record.content !== "string") {
+      return undefined;
+    }
+    chars += record.role.length + record.content.length + 32;
+  }
+  return Math.max(1, Math.ceil(chars / APPROX_CHARS_PER_TOKEN));
 }
 
 function jsonByteLength(value: unknown): number {
