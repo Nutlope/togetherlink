@@ -1,5 +1,7 @@
 # togetherlink
 
+[![Live Agent Gauntlet](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml/badge.svg?branch=main)](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml)
+
 Use Together AI models from local coding-agent CLIs.
 
 ## Install
