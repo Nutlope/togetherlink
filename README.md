@@ -79,75 +79,7 @@ pnpm -F @togetherlink/cli exec togetherlink help
 
 Testing commands and live smoke notes live in [TESTING.md](TESTING.md).
 
-## Images and vision in OpenCode
+## Author
 
-Vision support depends on which model is active. The `build` agent's system
-prompt is **one unified instruction** that lets the model self-select by its own
-runtime capabilities, so it stays correct even if you switch models mid-session:
-
-- **Vision-capable primary** (Kimi K2.6, Kimi K2.7-Code, MiniMax M3, Qwen 3.7
-  Max): OpenCode sends the image directly to the model — it sees it and just
-  uses it. **This is the working path for images.**
-- **Text-only primary** (GLM-5.2, DeepSeek V4 Pro): OpenCode strips the image
-  bytes before they reach the model. The model tells you plainly it can't see
-  images and that you should switch to a vision-capable model via `/models`
-  (Kimi K2.6, MiniMax M3, or Qwen 3.7 Max) and re-send the image.
-
-### The `@vision` subagent and why it doesn't work for clipboard images
-
-A `@vision` subagent is still registered (pinned to Kimi-K2.7-Code), but it
-**does not work for clipboard-pasted images today**: OpenCode has an open bug
-([#25553][oc-25553]) where an image attached with `@vision` is not forwarded to
-the subagent — the subagent only errors with *"this model does not support image
-input"*. The build prompt is therefore configured to tell text-only primaries
-**not** to auto-invoke `@vision` (it would just produce that error). The
-reliable path is to switch the primary model to a vision one via `/models`.
-
-A fix for the subagent image-forwarding path is in progress upstream
-([PR #32302][oc-32302]); once it merges, `@vision` for clipboard images should
-work and the prompt can re-enable auto-delegation.
-
-## /models is curated
-
-OpenCode normally shows two extra sources of clutter alongside our declared
-Together models, both suppressed by the emitted config:
-
-- **Together's full serverless catalog** — OpenCode merges a provider's declared
-  `models` block on top of its full [models.dev](https://models.dev) catalog.
-  The config sets a `whitelist` (added in opencode
-  [PR #3416][oc-3416]) restricting the Together provider to **only** the
-  current flagships togetherlink ships.
-- **Other providers** (Anthropic, OpenAI, Gemini, Bedrock, Zen) — the config sets
-  `enabled_providers: ["togetherai"]` so OpenCode ignores every other provider
-  entirely, and `disabled_providers: ["opencode"]` to additionally block the Zen
-  gateway (provider id `opencode`, not `zen` — see opencode
-  [issue #6979][oc-6979]). `disabled_providers` takes priority over
-  `enabled_providers`.
-
-> Note: the built-in **"Connect provider"** option (`ctrl+a` in the picker) has
-> no config field to hide it, so it stays visible. But with only `togetherai`
-> enabled there's nothing else active to connect to — connecting another
-> provider would also be a no-op against this config's intent.
-
-So `/models` shows only the 6 curated flagships. Each model's display name
-carries a short tip (since OpenCode model entries have no separate description
-field), and the provider label stays the full `Together AI`; the model names are
-kept short so the per-line provider suffix OpenCode appends doesn't push them
-past the picker's truncation width:
-
-| Model id | Vision | Use case |
-|---|---|---|
-| `zai-org/GLM-5.2` | ❌ | default, agentic coding (text-only) |
-| `moonshotai/Kimi-K2.6` | ✅ | reasoning + vision |
-| `moonshotai/Kimi-K2.7-Code` | ✅ | code; also the `@vision` subagent model |
-| `MiniMaxAI/MiniMax-M3` | ✅ | cheapest vision, 512K context |
-| `Qwen/Qwen3.7-Max` | ✅ | strongest Qwen, 1M context |
-| `deepseek-ai/DeepSeek-V4-Pro` | ❌ | long-context reasoning (512K) |
-
-That's all you'll see in `/models`. The curated set lives in
-[`@togetherlink/models`](packages/models/src/index.ts) (`SELECTABLE_MODELS`).
-
-[oc-25553]: https://github.com/sst/opencode/issues/25553
-[oc-32302]: https://github.com/sst/opencode/pull/32302
-[oc-3416]: https://github.com/sst/opencode/pull/3416
-[oc-6979]: https://github.com/sst/opencode/issues/6979
+- [Riccardo Giorato](https://github.com/riccardogiorato)
+- [Hassan](https://github.com/Nutlope)
