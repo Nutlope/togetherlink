@@ -557,6 +557,54 @@ test("streaming TTFT and concurrent captured proxy load", async () => {
   }
 }, 30_000);
 
+test("high-volume streaming parser throughput", async () => {
+  const highVolumeSseBody = highVolumeSseResponseBody(1_000);
+  let upstreamRequests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      upstreamRequests += 1;
+      return new Response(highVolumeSseBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }),
+  );
+
+  const claudeProxyOptions = claudeOptions();
+  const claudeBody = JSON.stringify({ ...claudeNoToolsBenchmarkPayload(), stream: true });
+  const rows = [
+    await benchmarkWithJsonInstrumentation("claude-high-volume-stream-parser", 30, 5, async () => {
+      const response = await invokeProxyHandler(claudeBody, "/v1/messages", (req, res) =>
+        handleProxyRequest(req, res, claudeProxyOptions),
+      );
+      if (response.statusCode !== 200) {
+        throw new Error(
+          `Claude high-volume stream failed: ${response.statusCode} ${response.body}`,
+        );
+      }
+      if (!response.body.includes("message_stop")) {
+        throw new Error("missing Claude high-volume stream completion");
+      }
+    }),
+  ];
+
+  const result = {
+    rows,
+    upstreamRequests,
+    upstreamEventsPerRun: 1_000,
+    upstreamBytes: Buffer.byteLength(highVolumeSseBody, "utf8"),
+    notes: [
+      "Mocks one Together streaming response with many SSE data events and calls the real Claude proxy handler in-process.",
+      "This isolates local SSE decode/parse/Anthropic re-emit overhead; upstream network latency is not included.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(upstreamRequests).toBeGreaterThan(0);
+  expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
+}, 30_000);
+
 async function benchmark(
   name: string,
   iterations: number,
@@ -990,6 +1038,20 @@ function claudeBenchmarkPayload(): Record<string, unknown> {
   };
 }
 
+function claudeNoToolsBenchmarkPayload(): Record<string, unknown> {
+  return {
+    model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    max_tokens: 512,
+    system: "You are benchmarking local streaming parser overhead.",
+    messages: [
+      {
+        role: "user",
+        content: "Stream a long answer for parser benchmarking.",
+      },
+    ],
+  };
+}
+
 function claudeLargeBenchmarkPayload(): Record<string, unknown> {
   return {
     ...claudeBenchmarkPayload(),
@@ -1137,6 +1199,21 @@ function delayedSseResponse(chunks: unknown[], delayMs = 1): Response {
       headers: { "content-type": "text/event-stream" },
     },
   );
+}
+
+function highVolumeSseResponseBody(events: number): string {
+  const chunks: string[] = [];
+  for (let index = 0; index < events; index += 1) {
+    chunks.push(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: `token-${index} ` } }] })}\n\n`,
+    );
+  }
+  chunks.push(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
+  chunks.push(
+    `data: ${JSON.stringify({ usage: { prompt_tokens: 128, completion_tokens: events, total_tokens: events + 128 } })}\n\n`,
+  );
+  chunks.push("data: [DONE]\n\n");
+  return chunks.join("");
 }
 
 async function fetchTextWithTtft(
