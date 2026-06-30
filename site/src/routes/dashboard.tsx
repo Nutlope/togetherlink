@@ -196,7 +196,7 @@ function DashboardRoute() {
                 items={focusedDaily.map((r) => ({
                   label: r.day,
                   value: r.costUsd,
-                  detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached) · ${formatTokens(r.completionTokens)} out`,
+                  detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached, ${formatCacheHitRatio(r.cachedTokens, r.promptTokens)}) · ${formatTokens(r.completionTokens)} out`,
                   valueLabel: `$${r.costUsd.toFixed(4)}`,
                 }))}
               />
@@ -485,6 +485,12 @@ function BarCard({
 
 function formatTokens(n: number): string {
   return n.toLocaleString('en-US')
+}
+
+function formatCacheHitRatio(cachedTokens: number, promptTokens: number): string {
+  if (promptTokens <= 0) return '0.0% hit'
+  const ratio = Math.max(0, Math.min(1, cachedTokens / promptTokens))
+  return `${(ratio * 100).toFixed(1)}% hit`
 }
 
 function formatDateTime(timestampMs: number): string {
