@@ -19,6 +19,10 @@
   - Captured real Claude headless: ~1.22 ms
   - JSON parse/stringify accounts for most of the in-process time on large payloads.
 
+### Experiment Results
+
+- **Keep-alive dispatcher attempt**: reverted. A local timing validation that routed Node `fetch` through an external Undici `Agent` failed before timings could be trusted (`TypeError: fetch failed`, caused by `UND_ERR_INVALID_ARG: invalid onError method`). This means the implementation was incompatible with the runtime fetch stack, so no speed claim is valid for that experiment.
+
 **Philosophy**: Measure first (especially real sessions), optimize the common case (no images + no native tools), add cheap streaming hygiene, and only pursue bigger architectural changes (workers, alternate runtimes, HTTP/2) after telemetry shows local CPU is visible against upstream latency.
 
 ---
@@ -32,7 +36,7 @@
 | Add Claude `flushHeaders()` + `setNoDelay(true)` (match Codex)           | Lower and more consistent TTFT on streaming                             | Very low                                                    | Streaming TTFT microbench + real Claude Code sessions            | Implemented                               |
 | Guard / remove sync debug logging (`appendFileSync`)                     | Eliminate potential FS stalls when debug is on                          | Very low                                                    | Microbench with/without debug + `TOGETHERLINK_DEBUG_LOG`         | Implemented                               |
 | Fast-path common case (no images, no native tools, no special reasoning) | Reduce object churn and work on the 80-90% path                         | Low (if guarded)                                            | Existing benches + captured sessions + A/B on large context      | Implemented (first pass)                  |
-| Keep-alive / connection reuse tuning for Together fetches                | Reduce per-request handshake latency                                    | Low code risk, **validation risk** (mocked benches hide it) | Live A/B with real Together API (not mocked benchmark)           | Implemented, needs live validation        |
+| Keep-alive / connection reuse tuning for Together fetches                | Reduce per-request handshake latency                                    | Low code risk, **validation risk** (mocked benches hide it) | Live A/B with real Together API (not mocked benchmark)           | Failed local validation; reverted         |
 | Cheaper context estimation + trim (rough length first)                   | Less stringify on every request                                         | Low                                                         | Benches + error-path coverage                                    | Worth doing                               |
 | Improve streaming SSE parsers (less string work per chunk)               | Lower CPU during high-token-rate streams                                | Low                                                         | High-volume streaming bench + TTFT                               | Medium                                    |
 | Parallel native tool (Exa) execution when model emits several            | Faster tool-turn latency when multiple searches                         | Low                                                         | Tool-heavy captured sessions                                     | Medium                                    |

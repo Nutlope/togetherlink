@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { TOGETHER_BASE_URL, VISION_MODELS, VISION_PROMPT } from "@togetherlink/models";
-import { upstreamFetch } from "../upstream-fetch.js";
 
 /**
  * Image interception for the Claude proxy. GLM-5.2 is text-only, so when Claude
@@ -83,7 +82,7 @@ async function callVisionModel(
   };
 
   try {
-    const response = await upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.apiKey}`,

@@ -1,5 +1,4 @@
 import { TOGETHER_BASE_URL } from "./together-core.js";
-import { upstreamFetch } from "./upstream-fetch.js";
 
 export type TogetherModel = {
   id: string;
@@ -24,7 +23,7 @@ type TogetherModelsApiItem = {
  * browse this full list themselves.
  */
 export async function fetchTogetherModels(apiKey: string): Promise<TogetherModel[]> {
-  const response = await upstreamFetch(`${TOGETHER_BASE_URL}/models`, {
+  const response = await fetch(`${TOGETHER_BASE_URL}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!response.ok) {

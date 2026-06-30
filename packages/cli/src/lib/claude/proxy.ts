@@ -15,7 +15,6 @@ import {
 import { stableHash } from "../stable-hash.js";
 import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
 import { writeDebugLogLine } from "../debug-log.js";
-import { upstreamFetch } from "../upstream-fetch.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -954,7 +953,7 @@ async function fetchTogether(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let response: Response;
     try {
-      response = await upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${options.apiKey}`,
@@ -1267,7 +1266,7 @@ async function runExaSearch(
   headers["x-api-key"] = exaApiKey;
 
   debugLog(options, "exa search request", { query, hasApiKey: Boolean(exaApiKey), body });
-  const response = await upstreamFetch("https://api.exa.ai/search", {
+  const response = await fetch("https://api.exa.ai/search", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -1550,7 +1549,7 @@ async function streamAnthropicFromTogether(
   let response: Response;
   try {
     response = await (perf?.span("upstream_fetch", () =>
-      upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${options.apiKey}`,
@@ -1560,7 +1559,7 @@ async function streamAnthropicFromTogether(
         ...(signal ? { signal } : {}),
       }),
     ) ??
-      upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${options.apiKey}`,
@@ -1590,7 +1589,7 @@ async function streamAnthropicFromTogether(
         response = await (perf?.span(
           "upstream_fetch_retry",
           () =>
-            upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+            fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
               method: "POST",
               headers: {
                 Authorization: `Bearer ${options.apiKey}`,
@@ -1601,7 +1600,7 @@ async function streamAnthropicFromTogether(
             }),
           { reason: "max_tokens" },
         ) ??
-          upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+          fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${options.apiKey}`,
@@ -1630,7 +1629,7 @@ async function streamAnthropicFromTogether(
           response = await (perf?.span(
             "upstream_fetch_retry",
             () =>
-              upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+              fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
                 method: "POST",
                 headers: {
                   Authorization: `Bearer ${options.apiKey}`,
@@ -1641,7 +1640,7 @@ async function streamAnthropicFromTogether(
               }),
             { reason: "trim_context" },
           ) ??
-            upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+            fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
               method: "POST",
               headers: {
                 Authorization: `Bearer ${options.apiKey}`,
@@ -1922,7 +1921,7 @@ async function streamAnthropicNativeToolLoop({
     });
     let nextResponse: Response;
     try {
-      nextResponse = await upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+      nextResponse = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${options.apiKey}`,

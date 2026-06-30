@@ -20,8 +20,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.8.2",
-    "@togetherlink/models": "workspace:*",
-    "undici": "^5.29.0"
+    "@togetherlink/models": "workspace:*"
   },
   "engines": {
     "node": ">=18"
