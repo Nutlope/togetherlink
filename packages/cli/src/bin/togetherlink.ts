@@ -155,7 +155,7 @@ async function main() {
   // dispatch (which would reject "daemon" as an unknown harness).
   if (command === "daemon") {
     if (rawVerb === undefined) {
-      throw new Error('Unknown "daemon" command. Expected: profile, stop.');
+      throw new Error('Unknown "daemon" command. Expected: stop.');
     }
     const { runDaemonCommand } = await import("../lib/daemon/cli.js");
     await runDaemonCommand(rawVerb);

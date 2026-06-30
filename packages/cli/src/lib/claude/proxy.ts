@@ -6,7 +6,6 @@ import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import { CostTracker } from "./cost.js";
 import { describeImage, imageBlockKey, isImageBlock, isUrlImageBlock, type ImageBlock, type UrlBlock } from "./vision.js";
-import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
 import { stableHash, stableStringify } from "../stable-hash.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
@@ -127,12 +126,6 @@ type TogetherFetchResult =
   | { ok: true; json: OpenAIChatResponse; error?: undefined }
   | { ok: false; error: TogetherApiError; json?: undefined };
 
-type UpstreamTimings = Pick<ProxyTraceEvent, "upstreamStartedAt" | "upstreamHeadersAt" | "firstByteAt">;
-type UpstreamTimingHooks = {
-  onStart?: () => void;
-  onHeaders?: () => void;
-  onFirstByte?: () => void;
-};
 type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
 
 // Transient upstream faults worth retrying with backoff. 429 = rate limited;
@@ -328,7 +321,6 @@ export type ClaudeProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
-  recordTrace?: ((trace: ProxyTraceEvent) => void) | undefined;
 };
 
 /**
@@ -412,57 +404,9 @@ export async function handleProxyRequest(
   }
 
   const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
-  const nativeTools = nativeServerTools(body.tools);
-  const targetTraceModel = resolveTargetModel(body.model, options);
-  const tracePayload = tracePayloadForClaudeUpstream(body, options);
-  const upstreamMode: ProxyTraceEvent["upstreamMode"] = body.stream ? "stream" : "buffered";
-  const traceBase = {
-    id: randomUUID(),
-    route: path,
-    method: req.method ?? "POST",
-    model: body.model ?? options.modelId,
-    requestedModel: body.model ?? options.modelId,
-    targetModel: targetTraceModel.definition.id,
-    stream: Boolean(body.stream),
-    upstreamMode,
-    requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
-    requestPreview: summarizeAnthropicRequestContent(body),
-    cacheKey: tracePayload.cacheKey,
-    promptProfile: tracePayload.promptProfile,
-    messageCount: body.messages?.length ?? 0,
-    toolCount: body.tools?.length ?? 0,
-    nativeToolCount: nativeTools.length,
-    startedAt: Date.now(),
-  };
-  recordProxyTrace(options, traceBase);
-  const upstreamTimings: Partial<UpstreamTimings> = {};
-  const emitPendingTrace = () => options.recordTrace?.({ ...traceBase, ...upstreamTimings });
-  const timingHooks: UpstreamTimingHooks = {
-    onStart: () => {
-      upstreamTimings.upstreamStartedAt ??= Date.now();
-      emitPendingTrace();
-    },
-    onHeaders: () => {
-      upstreamTimings.upstreamHeadersAt ??= Date.now();
-      emitPendingTrace();
-    },
-    onFirstByte: () => {
-      upstreamTimings.firstByteAt ??= Date.now();
-      emitPendingTrace();
-    },
-  };
   const upstreamAbort = new AbortController();
-  let traceFinalized = false;
-  const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
-    if (traceFinalized) {
-      return;
-    }
-    traceFinalized = true;
-    recordProxyTrace(options, { ...traceBase, ...upstreamTimings }, ok, status, error);
-  };
   const markClientDisconnected = () => {
     upstreamAbort.abort();
-    finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
   };
   req.once("aborted", markClientDisconnected);
   res.once("close", () => {
@@ -482,32 +426,11 @@ export async function handleProxyRequest(
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
-  try {
-    // GLM-5.2 can't see images: describe each image/url block with a vision model
-    // and replace it with a text block, so GLM reasons over the description.
-    await resolveImageBlocks(body, options);
-    if (body.stream) {
-      const result = await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, timingHooks);
-      finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
-      if (options.debug) {
-        const delta = options.costTracker?.requestDelta;
-        const totals = options.costTracker?.totals;
-        if (delta && totals) {
-          debugLog(options, "request cost", {
-            requestCostUsd: Number(delta.costUsd.toFixed(6)),
-            requestInputTokens: delta.promptTokens,
-            requestCachedTokens: delta.cachedTokens,
-            requestOutputTokens: delta.completionTokens,
-            sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
-          });
-        }
-      }
-      return;
-    }
-
-    const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal, timingHooks);
-    const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
-
+  // GLM-5.2 can't see images: describe each image/url block with a vision model
+  // and replace it with a text block, so GLM reasons over the description.
+  await resolveImageBlocks(body, options);
+  if (body.stream) {
+    await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal);
     const delta = options.costTracker?.requestDelta;
     const totals = options.costTracker?.totals;
     if (options.debug && delta && totals) {
@@ -519,106 +442,25 @@ export async function handleProxyRequest(
         sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
       });
     }
-
-    writeJson(res, 200, anthropicMessage);
-    finalizeTrace(true, res.statusCode);
-  } catch (err) {
-    const status = isTogetherApiError(err) ? err.anthropicStatus : res.statusCode >= 400 ? res.statusCode : 500;
-    finalizeTrace(false, status, err instanceof Error ? err.message : String(err));
-    throw err;
+    return;
   }
-}
 
-function recordProxyTrace(
-  options: ClaudeProxyOptions,
-  base: Omit<ProxyTraceEvent, "durationMs" | "completedAt" | "ok" | "status" | "error" | "usage">,
-  ok?: boolean,
-  status?: number,
-  error?: string,
-): void {
-  const completedAt = ok === undefined ? undefined : Date.now();
-  options.recordTrace?.({
-    ...base,
-    ...(completedAt !== undefined && ok !== undefined ? { completedAt, durationMs: completedAt - base.startedAt, ok } : {}),
-    ...(status !== undefined ? { status } : {}),
-    ...(error ? { error: redactTraceError(error) } : {}),
-    ...(ok !== undefined && options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
-  });
-}
+  const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal);
+  const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
 
-function summarizeAnthropicRequestContent(body: AnthropicMessagesRequest): string {
-  const parts: string[] = [];
-  if (typeof body.system === "string" && body.system.trim()) {
-    parts.push(`system: ${body.system}`);
-  } else if (Array.isArray(body.system)) {
-    const systemText = body.system
-      .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
-      .filter(Boolean)
-      .join(" ");
-    if (systemText.trim()) {
-      parts.push(`system: ${systemText}`);
-    }
+  const delta = options.costTracker?.requestDelta;
+  const totals = options.costTracker?.totals;
+  if (options.debug && delta && totals) {
+    debugLog(options, "request cost", {
+      requestCostUsd: Number(delta.costUsd.toFixed(6)),
+      requestInputTokens: delta.promptTokens,
+      requestCachedTokens: delta.cachedTokens,
+      requestOutputTokens: delta.completionTokens,
+      sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
+    });
   }
-  for (const message of body.messages ?? []) {
-    const content = summarizeAnthropicContent(message.content);
-    if (content) {
-      parts.push(`${message.role}: ${content}`);
-    }
-  }
-  const toolNames = body.tools?.map((tool) => tool.name).filter(Boolean);
-  if (toolNames?.length) {
-    parts.push(`tools: ${toolNames.join(", ")}`);
-  }
-  return redactTraceError(parts.join("\n")).slice(0, 2000);
-}
 
-function tracePayloadForClaudeUpstream(
-  body: AnthropicMessagesRequest,
-  options: ClaudeProxyOptions,
-): {
-  cacheKey: NonNullable<ProxyTraceEvent["cacheKey"]>;
-  promptProfile: NonNullable<ProxyTraceEvent["promptProfile"]>;
-} {
-  const targetModel = resolveTargetModel(body.model, options);
-  const nativeTools = nativeServerTools(body.tools);
-  const messages = toOpenAIMessages(body, targetModel.definition);
-  const upstreamMessages = nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
-  const systemMessages = upstreamMessages.filter((message) => message.role === "system");
-  const nonSystemMessages = upstreamMessages.filter((message) => message.role !== "system");
-  const tools = toOpenAITools(body.tools, options);
-  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-  const upstreamPayload = {
-    model: targetModel.definition.id,
-    messages: upstreamMessages,
-    max_tokens: clampRequestedMaxTokens(body.max_tokens, targetModel.definition),
-    stop: body.stop_sequences,
-    temperature: body.temperature,
-    tools,
-    tool_choice: toOpenAIToolChoice(body.tool_choice),
-    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    chat_template_kwargs: { clear_thinking: false },
-    stream: Boolean(body.stream),
-  };
-  const systemBytes = byteLength(systemMessages);
-  const toolsBytes = byteLength(tools ?? []);
-  const messagesBytes = byteLength(upstreamMessages);
-  const dynamicBytes = byteLength(nonSystemMessages);
-  return {
-    cacheKey: {
-      systemHash: stableHash(systemMessages),
-      toolsHash: stableHash(tools ?? []),
-      messagesHash: stableHash(upstreamMessages),
-      fullHash: stableHash(upstreamPayload),
-    },
-    promptProfile: {
-      stablePrefixBytes: systemBytes + toolsBytes,
-      dynamicBytes,
-      totalBytes: byteLength(upstreamPayload),
-      systemBytes,
-      toolsBytes,
-      messagesBytes,
-    },
-  };
+  writeJson(res, 200, anthropicMessage);
 }
 
 function byteLength(value: unknown): number {
@@ -686,42 +528,6 @@ function asOpenAIMessageRecord(value: unknown): OpenAIMessage | undefined {
   return typeof value === "object" && value !== null ? (value as OpenAIMessage) : undefined;
 }
 
-function summarizeAnthropicContent(content: string | AnthropicContentBlock[] | undefined): string {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return "";
-  }
-  return content
-    .map((block) => {
-      if (block.type === "text") {
-        return block.text;
-      }
-      if (block.type === "tool_use") {
-        return `[tool_use ${block.name}]`;
-      }
-      if (block.type === "tool_result") {
-        return `[tool_result ${block.tool_use_id}]`;
-      }
-      if (block.type === "server_tool_use") {
-        return `[server_tool_use ${block.name}]`;
-      }
-      if (block.type === "web_search_tool_result" || block.type === "web_search_tool_result_error") {
-        return `[${block.type} ${block.tool_use_id ?? ""}]`;
-      }
-      if (block.type === "image") {
-        return "[image]";
-      }
-      if (block.type === "url") {
-        return `[url ${block.url}]`;
-      }
-      return `[${block.type}]`;
-    })
-    .filter(Boolean)
-    .join(" ");
-}
-
 /**
  * Pull the presented auth token from a request — the `Bearer` value of the
  * Authorization header, or the `x-api-key` header. The shared daemon uses this
@@ -761,7 +567,6 @@ async function callTogetherChatCompletions(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<OpenAIChatResponse> {
   const targetModel = resolveTargetModel(body.model, options);
   const nativeTools = nativeServerTools(body.tools);
@@ -797,7 +602,7 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    let response = await fetchTogether(payload, options, signal, hooks);
+    let response = await fetchTogether(payload, options, signal);
     if (!response.ok) {
       const initialError = response.error;
       const retryMaxTokens = maxTokensForContextLengthRetry(initialError, targetModel.definition, maxTokens);
@@ -810,7 +615,7 @@ async function callTogetherChatCompletions(
           originalError: initialError.message,
           turn,
         });
-        response = await fetchTogether(payload, options, signal, hooks);
+        response = await fetchTogether(payload, options, signal);
       } else if (canTrimInputForContextLengthRetry(initialError, targetModel.definition)) {
         const trimmed = trimPayloadInputForContextLengthRetry(payload, initialError, targetModel.definition);
         if (trimmed) {
@@ -820,7 +625,7 @@ async function callTogetherChatCompletions(
             originalError: initialError.message,
             turn,
           });
-          response = await fetchTogether(payload, options, signal, hooks);
+          response = await fetchTogether(payload, options, signal);
         }
       }
     }
@@ -1014,12 +819,10 @@ async function fetchTogether(
   payload: Record<string, unknown>,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<TogetherFetchResult> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let response: Response;
     try {
-      hooks?.onStart?.();
       response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -1029,7 +832,6 @@ async function fetchTogether(
         body: JSON.stringify(payload),
         ...(signal ? { signal } : {}),
       });
-      hooks?.onHeaders?.();
     } catch (err) {
       // Network-level failure (DNS, connection reset, timeout). Treat as
       // retryable transient — the request never reached Together, so it's
@@ -1519,7 +1321,6 @@ async function streamAnthropicFromTogether(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<StreamProxyResult> {
   const targetModel = resolveTargetModel(body.model, options);
   const messages = toOpenAIMessages(body, targetModel.definition);
@@ -1557,7 +1358,6 @@ async function streamAnthropicFromTogether(
 
   let response: Response;
   try {
-    hooks?.onStart?.();
     response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -1567,7 +1367,6 @@ async function streamAnthropicFromTogether(
       body: JSON.stringify(payload),
       ...(signal ? { signal } : {}),
     });
-    hooks?.onHeaders?.();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1586,7 +1385,6 @@ async function streamAnthropicFromTogether(
         originalError: error.message,
       });
       try {
-        hooks?.onStart?.();
         response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
@@ -1596,7 +1394,6 @@ async function streamAnthropicFromTogether(
           body: JSON.stringify(payload),
           ...(signal ? { signal } : {}),
         });
-        hooks?.onHeaders?.();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1614,7 +1411,6 @@ async function streamAnthropicFromTogether(
           originalError: error.message,
         });
         try {
-          hooks?.onStart?.();
           response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
             method: "POST",
             headers: {
@@ -1624,7 +1420,6 @@ async function streamAnthropicFromTogether(
             body: JSON.stringify(payload),
             ...(signal ? { signal } : {}),
           });
-          hooks?.onHeaders?.();
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1688,7 +1483,6 @@ async function streamAnthropicFromTogether(
       model,
       options,
       ...(signal ? { signal } : {}),
-      ...(hooks ? { hooks } : {}),
     });
   }
 
@@ -1708,7 +1502,6 @@ async function streamAnthropicFromTogether(
       if (done) {
         break;
       }
-      hooks?.onFirstByte?.();
       buffer += decoder.decode(value, { stream: true });
       buffer = consumeSseLines(buffer, (data) => {
         if (!data) {
@@ -1798,7 +1591,6 @@ async function streamAnthropicNativeToolLoop({
   model,
   options,
   signal,
-  hooks,
 }: {
   res: ServerResponse;
   initialResponse: Response;
@@ -1809,7 +1601,6 @@ async function streamAnthropicNativeToolLoop({
   model: string;
   options: ClaudeProxyOptions;
   signal?: AbortSignal;
-  hooks?: UpstreamTimingHooks;
 }): Promise<StreamProxyResult> {
   const blockManager = new StreamBlockManager(res);
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
@@ -1822,7 +1613,7 @@ async function streamAnthropicNativeToolLoop({
   let cachedTokens = 0;
 
   for (let turn = 0; turn < 5; turn += 1) {
-    const collected = await collectTogetherStreamTurn(response, options, hooks);
+    const collected = await collectTogetherStreamTurn(response, options);
     inputTokens += collected.inputTokens;
     outputTokens += collected.outputTokens;
     cachedTokens += collected.cachedTokens;
@@ -1891,7 +1682,6 @@ async function streamAnthropicNativeToolLoop({
     });
     let nextResponse: Response;
     try {
-      hooks?.onStart?.();
       nextResponse = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -1901,7 +1691,6 @@ async function streamAnthropicNativeToolLoop({
         body: JSON.stringify(nextPayload),
         ...(signal ? { signal } : {}),
       });
-      hooks?.onHeaders?.();
     } catch (err) {
       emitCollectedStreamTurn(blockManager, {
         reasoning: "",
@@ -1955,7 +1744,6 @@ async function streamAnthropicNativeToolLoop({
 async function collectTogetherStreamTurn(
   response: Response,
   options: ClaudeProxyOptions,
-  hooks?: UpstreamTimingHooks,
 ): Promise<CollectedStreamTurn> {
   const toolCalls = new Map<number, CollectedStreamToolCall>();
   const turn: CollectedStreamTurn = {
@@ -1979,7 +1767,6 @@ async function collectTogetherStreamTurn(
       if (done) {
         break;
       }
-      hooks?.onFirstByte?.();
       buffer += decoder.decode(value, { stream: true });
       buffer = consumeSseLines(buffer, (data) => {
         if (!data) {

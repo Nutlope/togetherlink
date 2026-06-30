@@ -15,5 +15,5 @@ export function stableStringify(value: unknown): string {
   return `{${Object.keys(record)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(",")}}`;
+      .join(",")}}`;
 }

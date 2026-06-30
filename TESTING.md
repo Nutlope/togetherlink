@@ -109,12 +109,6 @@ pnpm -F @togetherlink/cli exec togetherlink codex exec "Say hi"
 tcodex exec "Say hi"
 ```
 
-Inspect recent Codex proxy speed traces:
-
-```bash
-pnpm -F @togetherlink/cli exec togetherlink daemon profile
-```
-
 ### Codex App
 
 Codex App support is an alpha feature. Unlike `togetherlink codex`, it persistently patches Codex's user config so the desktop app can use togetherlink's local Responses-compatible proxy. The config stays active until you run `--restore`, similar to `ollama launch codex-app`. If Codex App is already open, togetherlink asks before restarting it so the new profile can load.

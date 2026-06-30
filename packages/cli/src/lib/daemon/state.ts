@@ -1,34 +1,27 @@
 import { CostTracker } from "../claude/cost.js";
 import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
-import type { ProxyTraceEvent } from "../proxy-trace.js";
 import { sendTelemetryEvent } from "../telemetry.js";
 import {
-  createDashboardStore,
-  readLegacyActiveSessions,
-  type DashboardSnapshot,
-  type DashboardStore,
+  createSessionStore,
   type SessionPersistInput,
+  type SessionStore,
   type StoredSession,
 } from "./storage.js";
 
-const MAX_RECENT_SESSIONS = 50;
-const MAX_TRACES_PER_SESSION = 200;
-
 /**
- * Which coding agent a session belongs to. The dashboard groups by this, and
- * it selects how cost is tracked:
+ * Which coding agent a session belongs to. This selects how cost is tracked:
  * - `claude`: the daemon PROXIES the agent's traffic (it
  *   speaks Anthropic shape; the daemon translates to Together's OpenAI shape),
  *   so the daemon owns the `CostTracker` and accounts tokens as they flow.
  * - `opencode`: the agent runs DIRECT to Together (no proxy — the `@ai-sdk/
  *   togetherai` adapter knows Together's URL, and OpenCode handles images
  *   natively). The daemon only holds a `CostTracker` the launcher self-reports
- *   into at exit (via `opencode stats`), so the dashboard can show it.
+ *   into at exit (via `opencode stats`).
  * - `codex`: the daemon PROXIES OpenAI Responses-shaped Codex CLI traffic and
  *   translates it to Together chat completions.
  * - `codex-app`: same proxy path as `codex`, but registered by the persistent
- *   Codex Desktop app integration so dashboard/telemetry can distinguish it.
+ *   Codex Desktop app integration so telemetry can distinguish it.
  */
 export type AgentId = "claude" | "opencode" | "codex" | "codex-app";
 
@@ -41,13 +34,10 @@ export type AgentId = "claude" | "opencode" | "codex" | "codex-app";
  *
  * Agent-neutral core fields (`apiKey`, `modelDefinition`, `costTracker`,
  * `modelLabel`) live on the state directly so both proxied and self-reporting
- * agents share one cost/dashboard path. `options` is the fully-formed
+ * agents share one cost path. `options` is the fully-formed
  * proxy options the handler needs — only meaningful for proxied agents; for
  * self-reporting agents it's undefined (the proxy handler is never called for
  * them, since their traffic never reaches the daemon).
- *
- * This registry is the seam the local dashboard reads — keep it a clean, typed
- * singleton.
  */
 export type SessionState = {
   token: string;
@@ -56,7 +46,7 @@ export type SessionState = {
   pid?: number;
   startedAt: number;
   endedAt?: number;
-  /** Display label for the dashboard, e.g. "GLM 5.2". */
+  /** Display label for local session status, e.g. "GLM 5.2". */
   modelLabel: string;
   /** Real Together API key the daemon uses upstream (proxied) or that the
    *  self-reporting agent used direct. Never returned by any read endpoint. */
@@ -70,7 +60,6 @@ export type SessionState = {
    * Undefined for self-reporting agents.
    */
   options?: ClaudeProxyOptions | CodexProxyOptions;
-  traces: ProxyTraceEvent[];
 };
 
 export type SessionPublicView = {
@@ -81,8 +70,6 @@ export type SessionPublicView = {
   endedAt?: number;
   status: "running" | "ended";
   costSummary: string;
-  traceCount: number;
-  traces: ProxyTraceEvent[];
 };
 
 /**
@@ -120,14 +107,13 @@ export type UsageReportRequest = {
   promptTokens?: number;
   completionTokens?: number;
   cachedTokens?: number;
-  /** Optional verbatim summary the dashboard can show (e.g. opencode stats line). */
+  /** Optional verbatim summary for end-of-session cost output (e.g. opencode stats line). */
   summary?: string;
 };
 
 class SessionRegistry {
   private readonly map = new Map<string, SessionState>();
-  private readonly recent: SessionState[] = [];
-  private store: DashboardStore | undefined;
+  private store: SessionStore | undefined;
 
   register(state: SessionState): void {
     this.map.set(state.token, state);
@@ -145,8 +131,6 @@ class SessionRegistry {
     }
     this.map.delete(token);
     state.endedAt = Date.now();
-    this.recent.unshift(state);
-    this.recent.length = Math.min(this.recent.length, MAX_RECENT_SESSIONS);
     this.store?.markSessionEnded(state.token, state.endedAt, state.costTracker.summarize(), state.costTracker.totals);
     emitDaemonSessionEndedTelemetry(state);
     return true;
@@ -160,53 +144,6 @@ class SessionRegistry {
     return [...this.map.values()];
   }
 
-  listRecent(): SessionState[] {
-    return [...this.recent];
-  }
-
-  dashboardSnapshot(): DashboardSnapshot {
-    const active = this.list().map(toPublicSessionView);
-    const activeTokens = new Set(this.map.keys());
-    const inMemoryRecent = this.listRecent().map(toPublicSessionView);
-    const storedRecent = this.store?.recentSessions(activeTokens, MAX_RECENT_SESSIONS) ?? [];
-    const seen = new Set<string>();
-    const recent = [...inMemoryRecent, ...storedRecent].filter((session) => {
-      const key = `${session.agent}:${session.modelLabel}:${session.startedAt}:${session.pid ?? ""}`;
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    }).slice(0, MAX_RECENT_SESSIONS);
-    const all = [...active, ...recent];
-    return {
-      generatedAt: Date.now(),
-      totals: {
-        active: active.length,
-        recent: recent.length,
-        all: all.length,
-        traces: all.reduce((sum, session) => sum + session.traceCount, 0),
-      },
-      sessions: all,
-    };
-  }
-
-  recordTrace(token: string, trace: ProxyTraceEvent): void {
-    const state = this.map.get(token);
-    if (!state) {
-      return;
-    }
-    const existing = state.traces.findIndex((candidate) => candidate.id === trace.id);
-    if (existing >= 0) {
-      state.traces[existing] = trace;
-    } else {
-      state.traces.unshift(trace);
-    }
-    state.traces.length = Math.min(state.traces.length, MAX_TRACES_PER_SESSION);
-    this.store?.upsertTrace(token, trace);
-    this.store?.updateSessionUsage(token, state.costTracker.summarize(), state.costTracker.totals, state.externalSummary);
-  }
-
   updatePid(token: string, pid: number): boolean {
     const state = this.map.get(token);
     if (!state) {
@@ -218,11 +155,7 @@ class SessionRegistry {
   }
 
   async restorePersisted(): Promise<number> {
-    this.store = await createDashboardStore();
-    const legacy = await readLegacyActiveSessions();
-    for (const session of legacy) {
-      this.store.upsertSession(storedSessionToPersistInput(session));
-    }
+    this.store = await createSessionStore();
     const persisted = this.store.restoreActiveSessions();
     let restored = 0;
     for (const session of persisted) {
@@ -237,9 +170,6 @@ class SessionRegistry {
       }
       const state = buildSession(session);
       state.startedAt = session.startedAt;
-      if (session.traces?.length) {
-        state.traces = session.traces;
-      }
       if (session.externalSummary !== undefined) {
         state.externalSummary = session.externalSummary;
       }
@@ -339,7 +269,6 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
     apiKey: req.apiKey,
     modelDefinition: req.modelDefinition,
     costTracker,
-    traces: [],
     ...(typeof req.pid === "number" ? { pid: req.pid } : {}),
     ...(req.debug !== undefined ? { debug: req.debug } : {}),
   };
@@ -353,7 +282,6 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       authToken: req.authToken ?? req.token,
       ...(req.debug !== undefined ? { debug: req.debug } : {}),
       costTracker,
-      recordTrace: (trace) => sessions.recordTrace(req.token, trace),
     };
   }
   return state;
@@ -368,8 +296,6 @@ export function toPublicSessionView(state: SessionState): SessionPublicView {
     ...(state.endedAt !== undefined ? { endedAt: state.endedAt } : {}),
     status: state.endedAt === undefined ? "running" : "ended",
     costSummary: state.costTracker.summarize(),
-    traceCount: state.traces.length,
-    traces: state.traces,
   };
 }
 
@@ -416,13 +342,12 @@ function emitDaemonSessionEndedTelemetry(state: SessionState): void {
   }
   const usageByModel = state.costTracker.totalsByModel;
   const fallbackModel = state.options?.targetModelId ?? state.modelDefinition.id;
-  const finalModel = latestTargetModel(state.traces) ?? fallbackModel;
   void sendTelemetryEvent({
     event: "session_ended",
     sessionId: state.token,
     agent: state.agent,
     initialModel: fallbackModel,
-    finalModel,
+    finalModel: fallbackModel,
     startedAt: state.startedAt,
     endedAt: state.endedAt,
     durationMs: state.endedAt - state.startedAt,
@@ -431,13 +356,6 @@ function emitDaemonSessionEndedTelemetry(state: SessionState): void {
     metadata: {
       integration: "codex-app",
       emittedBy: "daemon",
-      traceCount: state.traces.length,
     },
   });
-}
-
-function latestTargetModel(traces: ProxyTraceEvent[]): string | undefined {
-  return traces
-    .filter((trace) => trace.targetModel)
-    .sort((a, b) => b.startedAt - a.startedAt)[0]?.targetModel;
 }

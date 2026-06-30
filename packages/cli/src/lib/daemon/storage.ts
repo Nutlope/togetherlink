@@ -1,14 +1,10 @@
 import type { TokenUsage } from "../claude/cost.js";
-import type { ProxyTraceEvent } from "../proxy-trace.js";
-import type { AgentId, RegisterSessionRequest, SessionPublicView } from "./state.js";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import type { AgentId, RegisterSessionRequest } from "./state.js";
+import { chmod, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const DATABASE_FILE = "daemon.sqlite";
-const LEGACY_SESSION_STORE_FILE = "daemon-sessions.json";
-const MAX_RECENT_SESSIONS = 50;
-const MAX_TRACES_PER_SESSION = 200;
 
 type SqliteDatabase = {
   exec(sql: string): void;
@@ -28,7 +24,6 @@ export type StoredSession = RegisterSessionRequest & {
   completionTokens?: number;
   costUsd?: number;
   externalSummary?: string;
-  traces?: ProxyTraceEvent[];
 };
 
 export type SessionPersistInput = RegisterSessionRequest & {
@@ -39,45 +34,32 @@ export type SessionPersistInput = RegisterSessionRequest & {
   externalSummary?: string;
 };
 
-export type DashboardSnapshot = {
-  generatedAt: number;
-  totals: {
-    active: number;
-    recent: number;
-    all: number;
-    traces: number;
-  };
-  sessions: SessionPublicView[];
-};
-
-export type DashboardStore = {
-  kind: "sqlite" | "json";
+export type SessionStore = {
+  kind: "sqlite" | "memory";
   restoreActiveSessions(): StoredSession[];
   upsertSession(session: SessionPersistInput): void;
   markSessionEnded(token: string, endedAt: number, costSummary: string, costTotals: TokenUsage): void;
   updateSessionPid(token: string, pid: number): void;
   updateSessionUsage(token: string, costSummary: string, costTotals: TokenUsage, externalSummary?: string): void;
-  upsertTrace(token: string, trace: ProxyTraceEvent): void;
-  recentSessions(excludingTokens: Set<string>, limit?: number): SessionPublicView[];
   close(): void;
 };
 
-export async function createDashboardStore(home = resolveTogetherlinkHome()): Promise<DashboardStore> {
+export async function createSessionStore(home = resolveTogetherlinkHome()): Promise<SessionStore> {
   await mkdir(home, { recursive: true });
   const sqlite = await openSqlite(path.join(home, DATABASE_FILE));
   if (sqlite) {
     await chmod(path.join(home, DATABASE_FILE), 0o600).catch(() => {});
     try {
-      return new ResilientDashboardStore(new SqliteDashboardStore(sqlite));
+      return new ResilientSessionStore(new SqliteSessionStore(sqlite));
     } catch (err) {
       sqlite.close?.();
-      warnStoreError("initialize sqlite dashboard store", err);
+      warnStoreError("initialize sqlite session store", err);
     }
   }
-  return new ResilientDashboardStore(new JsonDashboardStore(path.join(home, LEGACY_SESSION_STORE_FILE)));
+  return new ResilientSessionStore(new MemorySessionStore());
 }
 
-export function resolveDashboardDatabasePath(home = resolveTogetherlinkHome()): string {
+export function resolveSessionDatabasePath(home = resolveTogetherlinkHome()): string {
   return path.join(home, DATABASE_FILE);
 }
 
@@ -100,7 +82,7 @@ async function openSqlite(file: string): Promise<SqliteDatabase | undefined> {
       }
     } catch {
       // Try the next runtime. Older Node and some bundled runtimes do not expose
-      // a SQLite module, but the daemon can still run with the JSON fallback.
+      // a SQLite module, but the daemon can still run with in-memory sessions.
     }
   }
   return undefined;
@@ -148,10 +130,10 @@ class NodeSqliteDatabase implements SqliteDatabase {
   }
 }
 
-class ResilientDashboardStore implements DashboardStore {
-  readonly kind: DashboardStore["kind"];
+class ResilientSessionStore implements SessionStore {
+  readonly kind: SessionStore["kind"];
 
-  constructor(private readonly inner: DashboardStore) {
+  constructor(private readonly inner: SessionStore) {
     this.kind = inner.kind;
   }
 
@@ -159,47 +141,32 @@ class ResilientDashboardStore implements DashboardStore {
     try {
       return this.inner.restoreActiveSessions();
     } catch (err) {
-      warnStoreError("restore dashboard sessions", err);
+      warnStoreError("restore sessions", err);
       return [];
     }
   }
 
   upsertSession(session: SessionPersistInput): void {
-    this.write("persist dashboard session", () => this.inner.upsertSession(session));
+    this.write("persist session", () => this.inner.upsertSession(session));
   }
 
   markSessionEnded(token: string, endedAt: number, costSummary: string, costTotals: TokenUsage): void {
-    this.write("mark dashboard session ended", () => this.inner.markSessionEnded(token, endedAt, costSummary, costTotals));
+    this.write("mark session ended", () => this.inner.markSessionEnded(token, endedAt, costSummary, costTotals));
   }
 
   updateSessionPid(token: string, pid: number): void {
-    this.write("update dashboard session pid", () => this.inner.updateSessionPid(token, pid));
+    this.write("update session pid", () => this.inner.updateSessionPid(token, pid));
   }
 
   updateSessionUsage(token: string, costSummary: string, costTotals: TokenUsage, externalSummary?: string): void {
-    this.write("update dashboard session usage", () => (
-      this.inner.updateSessionUsage(token, costSummary, costTotals, externalSummary)
-    ));
-  }
-
-  upsertTrace(token: string, trace: ProxyTraceEvent): void {
-    this.write("persist dashboard trace", () => this.inner.upsertTrace(token, trace));
-  }
-
-  recentSessions(excludingTokens: Set<string>, limit?: number): SessionPublicView[] {
-    try {
-      return this.inner.recentSessions(excludingTokens, limit);
-    } catch (err) {
-      warnStoreError("read recent dashboard sessions", err);
-      return [];
-    }
+    this.write("update session usage", () => this.inner.updateSessionUsage(token, costSummary, costTotals, externalSummary));
   }
 
   close(): void {
     try {
       this.inner.close();
     } catch (err) {
-      warnStoreError("close dashboard store", err);
+      warnStoreError("close session store", err);
     }
   }
 
@@ -217,7 +184,7 @@ function warnStoreError(action: string, err: unknown): void {
   process.stderr.write(`[togetherlink daemon] Could not ${action}: ${message}\n`);
 }
 
-class SqliteDashboardStore implements DashboardStore {
+class SqliteSessionStore implements SessionStore {
   readonly kind = "sqlite";
 
   constructor(private readonly db: SqliteDatabase) {
@@ -308,64 +275,6 @@ class SqliteDashboardStore implements DashboardStore {
       );
   }
 
-  upsertTrace(token: string, trace: ProxyTraceEvent): void {
-    this.db
-      .prepare(`
-        INSERT INTO traces (
-          id, session_token, route, method, model, requested_model, target_model,
-          stream, request_bytes, request_preview, cache_key_json, prompt_profile_json,
-          message_count, tool_count, native_tool_count, started_at, upstream_started_at,
-          upstream_headers_at, first_byte_at, duration_ms, completed_at, ok, status,
-          error, usage_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          session_token = excluded.session_token,
-          route = excluded.route,
-          method = excluded.method,
-          model = excluded.model,
-          requested_model = excluded.requested_model,
-          target_model = excluded.target_model,
-          stream = excluded.stream,
-          request_bytes = excluded.request_bytes,
-          request_preview = excluded.request_preview,
-          cache_key_json = excluded.cache_key_json,
-          prompt_profile_json = excluded.prompt_profile_json,
-          message_count = excluded.message_count,
-          tool_count = excluded.tool_count,
-          native_tool_count = excluded.native_tool_count,
-          started_at = excluded.started_at,
-          upstream_started_at = excluded.upstream_started_at,
-          upstream_headers_at = excluded.upstream_headers_at,
-          first_byte_at = excluded.first_byte_at,
-          duration_ms = excluded.duration_ms,
-          completed_at = excluded.completed_at,
-          ok = excluded.ok,
-          status = excluded.status,
-          error = excluded.error,
-          usage_json = excluded.usage_json,
-          updated_at = excluded.updated_at
-      `)
-      .run(...traceParams(token, trace, Date.now()));
-    this.trimSessionTraces(token);
-  }
-
-  recentSessions(excludingTokens: Set<string>, limit = MAX_RECENT_SESSIONS): SessionPublicView[] {
-    const rows = this.db
-      .prepare(
-        `
-          SELECT * FROM sessions
-          WHERE ended_at IS NOT NULL
-          ORDER BY ended_at DESC
-          LIMIT ?
-        `,
-      )
-      .all(limit * 2) as SessionRow[];
-    return rows
-      .filter((row) => !excludingTokens.has(row.token))
-      .slice(0, limit)
-      .map((row) => this.toPublicSession(row));
-  }
-
   close(): void {
     this.db.close?.();
   }
@@ -374,7 +283,6 @@ class SqliteDashboardStore implements DashboardStore {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
-      PRAGMA foreign_keys = ON;
 
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -399,49 +307,8 @@ class SqliteDashboardStore implements DashboardStore {
         updated_at INTEGER NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS traces (
-        id TEXT PRIMARY KEY,
-        session_token TEXT NOT NULL REFERENCES sessions(token) ON DELETE CASCADE,
-        route TEXT NOT NULL,
-        method TEXT NOT NULL,
-        model TEXT,
-        requested_model TEXT,
-        target_model TEXT,
-        stream INTEGER,
-        request_bytes INTEGER,
-        request_preview TEXT,
-        cache_key_json TEXT,
-        prompt_profile_json TEXT,
-        message_count INTEGER,
-        tool_count INTEGER,
-        native_tool_count INTEGER,
-        started_at INTEGER NOT NULL,
-        upstream_started_at INTEGER,
-        upstream_headers_at INTEGER,
-        first_byte_at INTEGER,
-        duration_ms INTEGER,
-        completed_at INTEGER,
-        ok INTEGER,
-        status INTEGER,
-        error TEXT,
-        usage_json TEXT,
-        updated_at INTEGER NOT NULL
-      );
-
       CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions(ended_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_traces_session_started ON traces(session_token, started_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_traces_started_at ON traces(started_at DESC);
     `);
-    this.addColumnIfMissing("traces", "requested_model", "TEXT");
-    this.addColumnIfMissing("traces", "target_model", "TEXT");
-  }
-
-  private addColumnIfMissing(table: string, column: string, type: string): void {
-    try {
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    } catch {
-      // Existing databases already have the column.
-    }
   }
 
   private toStoredSession(row: SessionRow): StoredSession {
@@ -453,68 +320,18 @@ class SqliteDashboardStore implements DashboardStore {
       completionTokens: row.completion_tokens,
       costUsd: row.cost_usd,
       ...(row.external_summary ? { externalSummary: row.external_summary } : {}),
-      traces: this.tracesFor(row.token),
     };
-  }
-
-  private toPublicSession(row: SessionRow): SessionPublicView {
-    return {
-      agent: row.agent as AgentId,
-      modelLabel: row.model_label,
-      ...(typeof row.pid === "number" ? { pid: row.pid } : {}),
-      startedAt: row.started_at,
-      ...(typeof row.ended_at === "number" ? { endedAt: row.ended_at } : {}),
-      status: row.ended_at === null || row.ended_at === undefined ? "running" : "ended",
-      costSummary: row.cost_summary || formatCostSummary(row),
-      traceCount: this.traceCount(row.token),
-      traces: this.tracesFor(row.token),
-    };
-  }
-
-  private tracesFor(token: string): ProxyTraceEvent[] {
-    const rows = this.db
-      .prepare("SELECT * FROM traces WHERE session_token = ? ORDER BY started_at DESC LIMIT ?")
-      .all(token, MAX_TRACES_PER_SESSION) as TraceRow[];
-    return rows.map(rowToTrace);
-  }
-
-  private traceCount(token: string): number {
-    const row = this.db.prepare("SELECT COUNT(*) AS count FROM traces WHERE session_token = ?").get(token) as
-      | { count?: number }
-      | undefined;
-    return row?.count ?? 0;
-  }
-
-  private trimSessionTraces(token: string): void {
-    this.db
-      .prepare(
-        `
-          DELETE FROM traces
-          WHERE session_token = ?
-            AND id NOT IN (
-              SELECT id FROM traces
-              WHERE session_token = ?
-              ORDER BY started_at DESC
-              LIMIT ?
-            )
-        `,
-      )
-      .run(token, token, MAX_TRACES_PER_SESSION);
   }
 }
 
-class JsonDashboardStore implements DashboardStore {
-  readonly kind = "json";
-
-  constructor(private readonly file: string) {}
+class MemorySessionStore implements SessionStore {
+  readonly kind = "memory";
 
   restoreActiveSessions(): StoredSession[] {
     return [];
   }
 
-  upsertSession(session: SessionPersistInput): void {
-    void this.writeActive([session]);
-  }
+  upsertSession(): void {}
 
   markSessionEnded(): void {}
 
@@ -522,32 +339,7 @@ class JsonDashboardStore implements DashboardStore {
 
   updateSessionUsage(): void {}
 
-  upsertTrace(): void {}
-
-  recentSessions(): SessionPublicView[] {
-    return [];
-  }
-
   close(): void {}
-
-  private async writeActive(active: SessionPersistInput[]): Promise<void> {
-    await mkdir(path.dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(active, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(tmp, this.file);
-  }
-}
-
-export async function readLegacyActiveSessions(home = resolveTogetherlinkHome()): Promise<StoredSession[]> {
-  try {
-    const value = JSON.parse(await readFile(path.join(home, LEGACY_SESSION_STORE_FILE), "utf8")) as unknown;
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value.filter(isStoredSession);
-  } catch {
-    return [];
-  }
 }
 
 function sessionParams(session: SessionPersistInput, updatedAt: number): unknown[] {
@@ -575,37 +367,6 @@ function sessionParams(session: SessionPersistInput, updatedAt: number): unknown
   ];
 }
 
-function traceParams(token: string, trace: ProxyTraceEvent, updatedAt: number): unknown[] {
-  return [
-    trace.id,
-    token,
-    trace.route,
-    trace.method,
-    trace.model ?? null,
-    trace.requestedModel ?? null,
-    trace.targetModel ?? null,
-    trace.stream === undefined ? null : trace.stream ? 1 : 0,
-    trace.requestBytes ?? null,
-    trace.requestPreview ?? null,
-    trace.cacheKey ? JSON.stringify(trace.cacheKey) : null,
-    trace.promptProfile ? JSON.stringify(trace.promptProfile) : null,
-    trace.messageCount ?? null,
-    trace.toolCount ?? null,
-    trace.nativeToolCount ?? null,
-    trace.startedAt,
-    trace.upstreamStartedAt ?? null,
-    trace.upstreamHeadersAt ?? null,
-    trace.firstByteAt ?? null,
-    trace.durationMs ?? null,
-    trace.completedAt ?? null,
-    trace.ok === undefined ? null : trace.ok ? 1 : 0,
-    trace.status ?? null,
-    trace.error ?? null,
-    trace.usage ? JSON.stringify(trace.usage) : null,
-    updatedAt,
-  ];
-}
-
 type SessionRow = {
   token: string;
   agent: string;
@@ -628,33 +389,6 @@ type SessionRow = {
   external_summary: string | null;
 };
 
-type TraceRow = {
-  id: string;
-  route: string;
-  method: string;
-  model: string | null;
-  requested_model: string | null;
-  target_model: string | null;
-  stream: number | null;
-  request_bytes: number | null;
-  request_preview: string | null;
-  cache_key_json: string | null;
-  prompt_profile_json: string | null;
-  message_count: number | null;
-  tool_count: number | null;
-  native_tool_count: number | null;
-  started_at: number;
-  upstream_started_at: number | null;
-  upstream_headers_at: number | null;
-  first_byte_at: number | null;
-  duration_ms: number | null;
-  completed_at: number | null;
-  ok: number | null;
-  status: number | null;
-  error: string | null;
-  usage_json: string | null;
-};
-
 function rowToSessionBase(row: SessionRow): StoredSession {
   return {
     token: row.token,
@@ -673,78 +407,10 @@ function rowToSessionBase(row: SessionRow): StoredSession {
   };
 }
 
-function rowToTrace(row: TraceRow): ProxyTraceEvent {
-  const trace: ProxyTraceEvent = {
-    id: row.id,
-    route: row.route,
-    method: row.method,
-    ...(row.model ? { model: row.model } : {}),
-    ...(row.requested_model ? { requestedModel: row.requested_model } : {}),
-    ...(row.target_model ? { targetModel: row.target_model } : {}),
-    ...(row.stream !== null ? { stream: row.stream === 1 } : {}),
-    ...(typeof row.request_bytes === "number" ? { requestBytes: row.request_bytes } : {}),
-    ...(row.request_preview ? { requestPreview: row.request_preview } : {}),
-    ...(typeof row.message_count === "number" ? { messageCount: row.message_count } : {}),
-    ...(typeof row.tool_count === "number" ? { toolCount: row.tool_count } : {}),
-    ...(typeof row.native_tool_count === "number" ? { nativeToolCount: row.native_tool_count } : {}),
-    startedAt: row.started_at,
-    ...(typeof row.upstream_started_at === "number" ? { upstreamStartedAt: row.upstream_started_at } : {}),
-    ...(typeof row.upstream_headers_at === "number" ? { upstreamHeadersAt: row.upstream_headers_at } : {}),
-    ...(typeof row.first_byte_at === "number" ? { firstByteAt: row.first_byte_at } : {}),
-    ...(typeof row.duration_ms === "number" ? { durationMs: row.duration_ms } : {}),
-    ...(typeof row.completed_at === "number" ? { completedAt: row.completed_at } : {}),
-    ...(row.ok !== null ? { ok: row.ok === 1 } : {}),
-    ...(typeof row.status === "number" ? { status: row.status } : {}),
-    ...(row.error ? { error: row.error } : {}),
-  };
-  if (row.cache_key_json) {
-    const cacheKey = parseJson(row.cache_key_json, undefined) as ProxyTraceEvent["cacheKey"];
-    if (cacheKey) {
-      trace.cacheKey = cacheKey;
-    }
-  }
-  if (row.prompt_profile_json) {
-    const promptProfile = parseJson(row.prompt_profile_json, undefined) as ProxyTraceEvent["promptProfile"];
-    if (promptProfile) {
-      trace.promptProfile = promptProfile;
-    }
-  }
-  if (row.usage_json) {
-    const usage = parseJson(row.usage_json, undefined) as ProxyTraceEvent["usage"];
-    if (usage) {
-      trace.usage = usage;
-    }
-  }
-  return trace;
-}
-
-function formatCostSummary(row: SessionRow): string {
-  return (
-    `[togetherlink cost] session total: $${row.cost_usd.toFixed(4)} ` +
-    `(${row.prompt_tokens.toLocaleString("en-US")} in` +
-    (row.cached_tokens > 0 ? ` incl ${row.cached_tokens.toLocaleString("en-US")} cached` : "") +
-    `, ${row.completion_tokens.toLocaleString("en-US")} out)`
-  );
-}
-
 function parseJson(value: string, fallback: unknown): unknown {
   try {
     return JSON.parse(value);
   } catch {
     return fallback;
   }
-}
-
-function isStoredSession(value: unknown): value is StoredSession {
-  const session = value as StoredSession;
-  return (
-    typeof session?.token === "string" &&
-    session.token.length > 0 &&
-    typeof session.apiKey === "string" &&
-    session.apiKey.length > 0 &&
-    typeof session.modelLabel === "string" &&
-    typeof session.startedAt === "number" &&
-    typeof session.modelDefinition === "object" &&
-    session.modelDefinition !== null
-  );
 }

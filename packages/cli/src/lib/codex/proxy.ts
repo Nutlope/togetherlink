@@ -6,8 +6,6 @@ import { findModelById, MINIMAX_M3, type ModelDefinition } from "@togetherlink/m
 import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
-import { redactTraceError, type ProxyTraceEvent } from "../proxy-trace.js";
-import { stableHash, stableStringify } from "../stable-hash.js";
 
 type ResponsesContentPart = {
   type?: string;
@@ -151,12 +149,6 @@ type TogetherChatResult =
   | { ok: true; response: Response; error?: undefined }
   | { ok: false; status: number; text: string; error?: undefined };
 
-type UpstreamTimings = Pick<ProxyTraceEvent, "upstreamStartedAt" | "upstreamHeadersAt" | "firstByteAt">;
-type UpstreamTimingHooks = {
-  onStart?: () => void;
-  onHeaders?: () => void;
-  onFirstByte?: () => void;
-};
 type StreamProxyResult = { ok: true; status?: number } | { ok: false; status: number; error: string };
 
 const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
@@ -210,7 +202,6 @@ export type CodexProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
-  recordTrace?: ((trace: ProxyTraceEvent) => void) | undefined;
 };
 
 const CODEX_IDENTITY_PROMPT =
@@ -250,53 +241,9 @@ export async function handleCodexProxyRequest(
   const toolTranslation = translateCodexTools(body.tools);
   const requestModel = resolveCodexRequestModel(body, options);
   const translatedPayload = toChatPayload(body, options, Boolean(body.stream), toolTranslation, requestModel);
-  const tracePayload = tracePayloadForCodexPayload(translatedPayload);
-  const traceBase = {
-    id: randomUUID(),
-    route: path,
-    method: req.method ?? "POST",
-    model: body.model ?? options.modelId,
-    requestedModel: requestModel.requestedModelId,
-    targetModel: requestModel.targetModelId,
-    stream: Boolean(body.stream),
-    requestBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
-    requestPreview: summarizeResponsesRequestContent(body),
-    cacheKey: tracePayload.cacheKey,
-    promptProfile: tracePayload.promptProfile,
-    messageCount: Array.isArray(body.input) ? body.input.length : typeof body.input === "string" ? 1 : 0,
-    toolCount: body.tools?.length ?? 0,
-    nativeToolCount,
-    startedAt: Date.now(),
-  };
-  recordProxyTrace(options, traceBase);
-  const upstreamTimings: Partial<UpstreamTimings> = {};
-  const emitPendingTrace = () => options.recordTrace?.({ ...traceBase, ...upstreamTimings });
-  const timingHooks: UpstreamTimingHooks = {
-    onStart: () => {
-      upstreamTimings.upstreamStartedAt ??= Date.now();
-      emitPendingTrace();
-    },
-    onHeaders: () => {
-      upstreamTimings.upstreamHeadersAt ??= Date.now();
-      emitPendingTrace();
-    },
-    onFirstByte: () => {
-      upstreamTimings.firstByteAt ??= Date.now();
-      emitPendingTrace();
-    },
-  };
   const upstreamAbort = new AbortController();
-  let traceFinalized = false;
-  const finalizeTrace = (ok: boolean, status?: number, error?: string) => {
-    if (traceFinalized) {
-      return;
-    }
-    traceFinalized = true;
-    recordProxyTrace(options, { ...traceBase, ...upstreamTimings }, ok, status, error);
-  };
   const markClientDisconnected = () => {
     upstreamAbort.abort();
-    finalizeTrace(false, 499, "Client disconnected before the proxy completed the request.");
   };
   req.once("aborted", markClientDisconnected);
   res.once("close", () => {
@@ -316,97 +263,28 @@ export async function handleCodexProxyRequest(
     tools: summarizeResponsesTools(body.tools),
   });
 
-  try {
-    if (body.stream) {
-      const result = await streamResponseFromTogether(
-        res,
-        body,
-        options,
-        translatedPayload,
-        toolTranslation,
-        requestModel.definition,
-        upstreamAbort.signal,
-        timingHooks,
-      );
-      finalizeTrace(result.ok, result.status ?? res.statusCode, result.ok ? undefined : result.error);
-      return;
-    }
-
-    const chatResponse = await callTogetherWithNativeTools(
+  if (body.stream) {
+    await streamResponseFromTogether(
+      res,
+      body,
+      options,
       translatedPayload,
       toolTranslation,
-      options,
       requestModel.definition,
       upstreamAbort.signal,
-      timingHooks,
     );
-    recordUsage(chatResponse.usage, options, requestModel.definition);
-    writeJson(res, 200, toResponsesResponse(chatResponse, body, options, toolTranslation));
-    finalizeTrace(true, res.statusCode);
-  } catch (err) {
-    finalizeTrace(false, res.statusCode >= 400 ? res.statusCode : 500, err instanceof Error ? err.message : String(err));
-    throw err;
+    return;
   }
-}
 
-function recordProxyTrace(
-  options: CodexProxyOptions,
-  base: Omit<ProxyTraceEvent, "durationMs" | "completedAt" | "ok" | "status" | "error" | "usage">,
-  ok?: boolean,
-  status?: number,
-  error?: string,
-): void {
-  const completedAt = ok === undefined ? undefined : Date.now();
-  options.recordTrace?.({
-    ...base,
-    ...(completedAt !== undefined && ok !== undefined ? { completedAt, durationMs: completedAt - base.startedAt, ok } : {}),
-    ...(status !== undefined ? { status } : {}),
-    ...(error ? { error: redactTraceError(error) } : {}),
-    ...(ok !== undefined && options.costTracker ? { usage: options.costTracker.requestDelta } : {}),
-  });
-}
-
-function summarizeResponsesRequestContent(body: ResponsesRequest): string {
-  const parts: string[] = [];
-  if (body.instructions?.trim()) {
-    parts.push(`instructions: ${body.instructions}`);
-  }
-  if (typeof body.input === "string") {
-    parts.push(`input: ${body.input}`);
-  } else if (Array.isArray(body.input)) {
-    for (const item of body.input) {
-      const label = item.role ?? item.type ?? "item";
-      const content = summarizeResponsesContent(item.content);
-      if (content) {
-        parts.push(`${label}: ${content}`);
-      } else if (item.name) {
-        parts.push(`${label}: [tool ${item.name}]`);
-      }
-    }
-  }
-  const toolNames = body.tools?.map((tool) => tool.name ?? tool.type).filter(Boolean);
-  if (toolNames?.length) {
-    parts.push(`tools: ${toolNames.join(", ")}`);
-  }
-  return redactTraceError(parts.join("\n")).slice(0, 2000);
-}
-
-function summarizeResponsesContent(content: string | ResponsesContentPart[] | undefined): string {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return "";
-  }
-  return content
-    .map((part) => {
-      if (typeof part.text === "string") {
-        return part.text;
-      }
-      return part.type ? `[${part.type}]` : "";
-    })
-    .filter(Boolean)
-    .join(" ");
+  const chatResponse = await callTogetherWithNativeTools(
+    translatedPayload,
+    toolTranslation,
+    options,
+    requestModel.definition,
+    upstreamAbort.signal,
+  );
+  recordUsage(chatResponse.usage, options, requestModel.definition);
+  writeJson(res, 200, toResponsesResponse(chatResponse, body, options, toolTranslation));
 }
 
 async function callTogether(
@@ -414,9 +292,8 @@ async function callTogether(
   options: CodexProxyOptions,
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<ChatResponse> {
-  const result = await fetchTogetherChat(payload, options, modelDefinition, signal, hooks);
+  const result = await fetchTogetherChat(payload, options, modelDefinition, signal);
   if (!result.ok) {
     throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
   }
@@ -429,10 +306,9 @@ async function callTogetherWithNativeTools(
   options: CodexProxyOptions,
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<ChatResponse> {
   if (toolTranslation.nativeTools.length === 0) {
-    return callTogether(payload, options, modelDefinition, signal, hooks);
+    return callTogether(payload, options, modelDefinition, signal);
   }
 
   const messages = Array.isArray(payload.messages) ? ([...(payload.messages as ChatMessage[])] as ChatMessage[]) : [];
@@ -440,7 +316,7 @@ async function callTogetherWithNativeTools(
   const nativeToolUses = new Map<string, number>();
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
-    const json = await callTogether({ ...payload, messages }, options, modelDefinition, signal, hooks);
+    const json = await callTogether({ ...payload, messages }, options, modelDefinition, signal);
     const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
     const nativeToolCalls = toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.function?.name ?? ""));
     if (nativeToolCalls.length === 0) {
@@ -527,9 +403,8 @@ async function fetchTogetherChat(
   options: CodexProxyOptions,
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<TogetherChatResult> {
-  const first = await postTogetherChat(payload, options, signal, hooks);
+  const first = await postTogetherChat(payload, options, signal);
   if (first.ok) {
     return { ok: true, response: first };
   }
@@ -544,7 +419,7 @@ async function fetchTogetherChat(
     maxTokens: retryMaxTokens,
     originalError: text.slice(0, 1000),
   });
-  const retry = await postTogetherChat(retryPayload, options, signal, hooks);
+  const retry = await postTogetherChat(retryPayload, options, signal);
   if (retry.ok) {
     return { ok: true, response: retry };
   }
@@ -555,10 +430,8 @@ async function postTogetherChat(
   payload: Record<string, unknown>,
   options: CodexProxyOptions,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= MAX_TOGETHER_RETRIES; attempt += 1) {
-    hooks?.onStart?.();
     const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -568,7 +441,6 @@ async function postTogetherChat(
       body: JSON.stringify(payload),
       ...(signal ? { signal } : {}),
     });
-    hooks?.onHeaders?.();
     if (response.ok || !RETRYABLE_CHAT_STATUSES.has(response.status) || attempt >= MAX_TOGETHER_RETRIES) {
       return response;
     }
@@ -666,40 +538,6 @@ function isCodexMemoryRequest(body: ResponsesRequest, requestedModelId: string):
     return true;
   }
   return body.instructions?.includes("## Memory Writing Agent:") === true;
-}
-
-function tracePayloadForCodexPayload(payload: Record<string, unknown>): {
-  cacheKey: NonNullable<ProxyTraceEvent["cacheKey"]>;
-  promptProfile: NonNullable<ProxyTraceEvent["promptProfile"]>;
-} {
-  const messages = Array.isArray(payload.messages) ? (payload.messages as ChatMessage[]) : [];
-  const systemMessages = messages.filter((message) => message.role === "system");
-  const nonSystemMessages = messages.filter((message) => message.role !== "system");
-  const tools = payload.tools ?? [];
-  const systemBytes = byteLength(systemMessages);
-  const toolsBytes = byteLength(tools);
-  const messagesBytes = byteLength(messages);
-  const dynamicBytes = byteLength(nonSystemMessages);
-  return {
-    cacheKey: {
-      systemHash: stableHash(systemMessages),
-      toolsHash: stableHash(tools),
-      messagesHash: stableHash(messages),
-      fullHash: stableHash(payload),
-    },
-    promptProfile: {
-      stablePrefixBytes: systemBytes + toolsBytes,
-      dynamicBytes,
-      totalBytes: byteLength(payload),
-      systemBytes,
-      toolsBytes,
-      messagesBytes,
-    },
-  };
-}
-
-function byteLength(value: unknown): number {
-  return Buffer.byteLength(stableStringify(value), "utf8");
 }
 
 function toChatMessages(
@@ -1195,7 +1033,6 @@ async function streamResponseFromTogether(
   toolTranslation: CodexToolTranslation,
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<StreamProxyResult> {
   const responseId = `resp_${randomUUID().replaceAll("-", "")}`;
   res.writeHead(200, {
@@ -1245,7 +1082,6 @@ async function streamResponseFromTogether(
       outputState,
       responseId,
       signal,
-      hooks,
     );
   }
 
@@ -1260,7 +1096,6 @@ async function streamResponseFromTogether(
       modelDefinition,
       outputState,
       signal,
-      hooks,
     );
   } catch (err) {
     if (err instanceof SseIdleTimeoutError) {
@@ -1283,9 +1118,8 @@ async function streamTogetherTurn(
   modelDefinition: ModelDefinition,
   outputState: StreamOutputState,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<StreamTurnResult> {
-  const upstreamResult = await fetchTogetherChat(payload, options, modelDefinition, signal, hooks);
+  const upstreamResult = await fetchTogetherChat(payload, options, modelDefinition, signal);
   if (!upstreamResult.ok) {
     const message = `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}`;
     return { ok: false, status: upstreamResult.status, error: message };
@@ -1306,7 +1140,6 @@ async function streamTogetherTurn(
   const turnTimeoutMs = codexStreamTurnTimeoutMs();
 
   for await (const chunk of parseSseChunks(upstream.body)) {
-    hooks?.onFirstByte?.();
     assertStreamTurnDuration(turnStartedAt, turnTimeoutMs);
     if (chunk === "[DONE]") {
       break;
@@ -1407,7 +1240,6 @@ async function streamResponseWithNativeTools(
   outputState: StreamOutputState,
   responseId: string,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<StreamProxyResult> {
   const messages = Array.isArray(payload.messages) ? ([...(payload.messages as ChatMessage[])] as ChatMessage[]) : [];
   const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
@@ -1426,7 +1258,6 @@ async function streamResponseWithNativeTools(
         modelDefinition,
         outputState,
         signal,
-        hooks,
       );
     } catch (err) {
       if (err instanceof SseIdleTimeoutError) {
@@ -1506,12 +1337,11 @@ async function streamTogetherTurnWithIdleRetries(
   modelDefinition: ModelDefinition,
   outputState: StreamOutputState,
   signal?: AbortSignal,
-  hooks?: UpstreamTimingHooks,
 ): Promise<StreamTurnResult> {
   const maxRetries = codexStreamIdleRetries();
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      return await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal, hooks);
+      return await streamTogetherTurn(res, body, options, payload, toolTranslation, modelDefinition, outputState, signal);
     } catch (err) {
       if (!(err instanceof SseIdleTimeoutError) || streamOutputStarted(outputState) || attempt >= maxRetries) {
         throw err;
