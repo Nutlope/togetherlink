@@ -236,6 +236,8 @@ test("large proxy in-process translation breakdown", async () => {
   delete claudeLargeNoToolsPayload.tools;
   delete claudeLargeNoToolsPayload.tool_choice;
   const claudeLargeNoToolsBody = JSON.stringify(claudeLargeNoToolsPayload);
+  const claudeContextFitNoToolsPayload = claudeContextFitNoToolsBenchmarkPayload();
+  const claudeContextFitNoToolsBody = JSON.stringify(claudeContextFitNoToolsPayload);
   let upstreamRequests = 0;
   let upstreamStream = false;
   const upstreamJsonBody = JSON.stringify({
@@ -309,6 +311,12 @@ test("large proxy in-process translation breakdown", async () => {
     await benchmarkWithJsonInstrumentation("claude-large-no-tools-direct-buffered", 40, 8, () =>
       callClaudeDirect(claudeLargeNoToolsBody),
     ),
+    await benchmarkWithJsonInstrumentation(
+      "claude-context-fit-no-tools-direct-buffered",
+      40,
+      8,
+      () => callClaudeDirect(claudeContextFitNoToolsBody),
+    ),
   ];
   const result = {
     rows,
@@ -317,6 +325,7 @@ test("large proxy in-process translation breakdown", async () => {
       codexLargeStream: Buffer.byteLength(codexLargeStreamBody, "utf8"),
       claudeLarge: Buffer.byteLength(claudeLargeBody, "utf8"),
       claudeLargeNoTools: Buffer.byteLength(claudeLargeNoToolsBody, "utf8"),
+      claudeContextFitNoTools: Buffer.byteLength(claudeContextFitNoToolsBody, "utf8"),
     },
     upstreamRequests,
     notes: [
@@ -991,8 +1000,24 @@ function claudeLargeBenchmarkPayload(): Record<string, unknown> {
   };
 }
 
+function claudeContextFitNoToolsBenchmarkPayload(): Record<string, unknown> {
+  return {
+    model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    max_tokens: 512,
+    system: "You are benchmarking local translation overhead.",
+    messages: Array.from({ length: 40 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `${index % 2 === 0 ? "Question" : "Answer"} ${index}:\n${contextFitText(index)}`,
+    })),
+  };
+}
+
 function largeText(seed: number): string {
   return `chunk-${seed} ${"long-session-payload ".repeat(720)}`;
+}
+
+function contextFitText(seed: number): string {
+  return `chunk-${seed} ${"long-session-payload ".repeat(1000)}`;
 }
 
 async function invokeProxyHandler(
