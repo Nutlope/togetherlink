@@ -466,22 +466,26 @@ export async function handleProxyRequest(
     }
   });
   options.costTracker?.beginRequest();
-  debugLog(options, "anthropic request", {
+  debugLog(options, "anthropic request", () => ({
     model: body.model,
     stream: body.stream,
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
     tools: summarizeAnthropicTools(body.tools),
-  });
+  }));
   const imageBlocks = extractImageBlocks(body);
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
   // GLM-5.2 can't see images: describe each image/url block with a vision model
   // and replace it with a text block, so GLM reasons over the description.
-  await perf.span("vision_image_resolution", () => resolveImageBlocks(body, options), {
-    imageBlockCount: imageBlocks.length,
-  });
+  if (imageBlocks.length > 0) {
+    await perf.span("vision_image_resolution", () => resolveImageBlocks(body, options), {
+      imageBlockCount: imageBlocks.length,
+    });
+  } else {
+    perf.mark("vision_image_resolution_skipped", { imageBlockCount: 0 });
+  }
   if (body.stream) {
     await perf.span(
       "stream_response",
@@ -2355,11 +2359,16 @@ export function isTogetherApiError(value: unknown): value is TogetherApiError {
   );
 }
 
-function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): void {
+function debugLog(
+  options: ClaudeProxyOptions,
+  label: string,
+  value: unknown | (() => unknown),
+): void {
   if (!options.debug) {
     return;
   }
-  const line = `[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`;
+  const payload = typeof value === "function" ? value() : value;
+  const line = `[togetherlink proxy] ${label}: ${JSON.stringify(payload)}\n`;
   writeDebugLogLine(line);
 }
 

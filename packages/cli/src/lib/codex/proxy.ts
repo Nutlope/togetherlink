@@ -145,6 +145,12 @@ type CodexToolTranslation = {
   nativeTools: CodexToolMapping[];
 };
 
+const EMPTY_CODEX_TOOL_TRANSLATION: CodexToolTranslation = {
+  tools: [],
+  mappings: new Map(),
+  nativeTools: [],
+};
+
 type ExaSearchResult = {
   title?: string;
   url?: string;
@@ -261,8 +267,11 @@ export async function handleCodexProxyRequest(
 
   const body = (await perf.span("body_read_parse", () => readJsonBody(req))) as ResponsesRequest;
   const translated = perf.spanSync("translate_request", () => {
-    const nativeToolCount = (body.tools ?? []).filter((tool) => tool.type !== "function").length;
-    const toolTranslation = translateCodexTools(body.tools);
+    const toolTranslation =
+      body.tools && body.tools.length > 0
+        ? translateCodexTools(body.tools)
+        : EMPTY_CODEX_TOOL_TRANSLATION;
+    const nativeToolCount = toolTranslation.nativeTools.length;
     const requestModel = resolveCodexRequestModel(body, options);
     const translatedPayload = toChatPayload(
       body,
@@ -285,7 +294,7 @@ export async function handleCodexProxyRequest(
     }
   });
   options.costTracker?.beginRequest();
-  debugLog(options, "responses request", {
+  debugLog(options, "responses request", () => ({
     model: body.model,
     targetModel: requestModel.targetModelId,
     memory: requestModel.memory,
@@ -294,7 +303,7 @@ export async function handleCodexProxyRequest(
     toolCount: body.tools?.length ?? 0,
     nativeToolCount,
     tools: summarizeResponsesTools(body.tools),
-  });
+  }));
 
   if (body.stream) {
     await perf.span(
@@ -2101,10 +2110,15 @@ function parseJsonOrEmpty(value: string | undefined): unknown {
   }
 }
 
-function debugLog(options: CodexProxyOptions, label: string, payload: unknown): void {
+function debugLog(
+  options: CodexProxyOptions,
+  label: string,
+  payload: unknown | (() => unknown),
+): void {
   if (!options.debug) {
     return;
   }
-  const line = `[togetherlink codex proxy] ${label}: ${JSON.stringify(payload)}\n`;
+  const value = typeof payload === "function" ? payload() : payload;
+  const line = `[togetherlink codex proxy] ${label}: ${JSON.stringify(value)}\n`;
   writeDebugLogLine(line);
 }
