@@ -605,6 +605,100 @@ test("high-volume streaming parser throughput", async () => {
   expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
 }, 30_000);
 
+test("streamed native web search tool latency", async () => {
+  vi.stubEnv("EXA_API_KEY", "test-exa-key");
+  const exaDelayMs = 4;
+  let exaRequests = 0;
+  let togetherRequests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href.includes("api.exa.ai/search")) {
+        exaRequests += 1;
+        await sleep(exaDelayMs);
+        return jsonResponse({
+          results: [
+            {
+              title: `Native result ${exaRequests}`,
+              url: `https://example.com/native-${exaRequests}`,
+              text: "Mock Exa result for native web search latency.",
+            },
+          ],
+        });
+      }
+
+      togetherRequests += 1;
+      if (togetherRequests % 2 === 1) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: nativeSearchToolCalls(4),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+          },
+          { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+        ]);
+      }
+
+      return sseResponse([
+        {
+          choices: [{ delta: { content: "NATIVE_SEARCH_DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 80, completion_tokens: 4, total_tokens: 84 },
+        },
+      ]);
+    }),
+  );
+
+  const claudeProxyOptions = claudeOptions();
+  const claudeBody = JSON.stringify({
+    model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    max_tokens: 128,
+    stream: true,
+    messages: [{ role: "user", content: "Search four things." }],
+    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
+  });
+  const rows = [
+    await benchmarkWithJsonInstrumentation(
+      "claude-stream-native-web-search-four-calls",
+      20,
+      3,
+      async () => {
+        const response = await invokeProxyHandler(claudeBody, "/v1/messages", (req, res) =>
+          handleProxyRequest(req, res, claudeProxyOptions),
+        );
+        if (response.statusCode !== 200) {
+          throw new Error(`Claude native search stream failed: ${response.statusCode}`);
+        }
+        if (!response.body.includes("NATIVE_SEARCH_DONE")) {
+          throw new Error("missing Claude native search final answer");
+        }
+      },
+    ),
+  ];
+
+  const result = {
+    rows,
+    exaDelayMs,
+    nativeToolCallsPerRun: 4,
+    exaRequests,
+    togetherRequests,
+    notes: [
+      "Mocks one streamed Together tool-call turn with four native web_search calls, each backed by delayed Exa.",
+      "This isolates proxy-side native tool scheduling latency without live Exa or Together traffic.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(exaRequests).toBe((20 + 3) * 4);
+  expect(togetherRequests).toBe((20 + 3) * 2);
+  expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
+}, 30_000);
+
 async function benchmark(
   name: string,
   iterations: number,
@@ -1214,6 +1308,18 @@ function highVolumeSseResponseBody(events: number): string {
   );
   chunks.push("data: [DONE]\n\n");
   return chunks.join("");
+}
+
+function nativeSearchToolCalls(count: number): Array<Record<string, unknown>> {
+  return Array.from({ length: count }, (_, index) => ({
+    index,
+    id: `call_native_${index}`,
+    type: "function",
+    function: {
+      name: "web_search",
+      arguments: JSON.stringify({ query: `native search ${index}` }),
+    },
+  }));
 }
 
 async function fetchTextWithTtft(
