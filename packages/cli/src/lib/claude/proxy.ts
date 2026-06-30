@@ -13,7 +13,7 @@ import {
   type UrlBlock,
 } from "./vision.js";
 import { stableHash } from "../stable-hash.js";
-import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
+import { createProxyPerfTracer, type ProxyPerfSink, type ProxyPerfTracer } from "../proxy-perf.js";
 import { writeDebugLogLine } from "../debug-log.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
@@ -395,6 +395,7 @@ export type ClaudeProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  perfSink?: ProxyPerfSink | undefined;
 };
 
 /**
@@ -411,10 +412,14 @@ export async function handleProxyRequest(
   options: ClaudeProxyOptions,
 ): Promise<void> {
   const path = requestPath(req);
-  const perf = createProxyPerfTracer("claude.proxy", {
-    method: req.method,
-    path,
-  });
+  const perf = createProxyPerfTracer(
+    "claude.proxy",
+    {
+      method: req.method,
+      path,
+    },
+    options.perfSink,
+  );
   debugLog(options, "http request", { method: req.method, url: req.url, path });
 
   if (req.method === "HEAD" && path === "/") {

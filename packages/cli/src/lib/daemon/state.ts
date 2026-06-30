@@ -1,6 +1,7 @@
 import { CostTracker } from "../claude/cost.js";
 import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
+import type { ProxyPerfPayload } from "../proxy-perf.js";
 import { sendTelemetryEvent } from "../telemetry.js";
 import {
   createSessionStore,
@@ -73,11 +74,26 @@ export type SessionState = {
   costTracker: CostTracker;
   debug?: boolean;
   externalSummary?: string;
+  proxyPerf?: SessionProxyPerfSummary;
   /**
    * Only for proxied agents. The matching proxy handler is called with this.
    * Undefined for self-reporting agents.
    */
   options?: ClaudeProxyOptions | CodexProxyOptions;
+};
+
+export type SessionPerfMetric = {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+};
+
+export type SessionProxyPerfSummary = {
+  requestCount: number;
+  totalMs: number;
+  maxMs: number;
+  spans: Record<string, SessionPerfMetric>;
+  firstDelta?: SessionPerfMetric;
 };
 
 export type SessionPublicView = {
@@ -89,6 +105,7 @@ export type SessionPublicView = {
   endedAt?: number;
   status: "running" | "ended";
   costSummary: string;
+  proxyPerf?: SessionProxyPerfSummary;
 };
 
 /**
@@ -373,6 +390,9 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       authToken: req.authToken ?? req.token,
       ...(req.debug !== undefined ? { debug: req.debug } : {}),
       costTracker,
+      ...(process.env.TOGETHERLINK_PERF === "1"
+        ? { perfSink: (payload: ProxyPerfPayload) => recordSessionProxyPerf(state, payload) }
+        : {}),
     };
   }
   return state;
@@ -388,7 +408,43 @@ export function toPublicSessionView(state: SessionState): SessionPublicView {
     status: state.endedAt === undefined ? "running" : "ended",
     lastSeenAt: state.lastSeenAt,
     costSummary: state.costTracker.summarize(),
+    ...(state.proxyPerf !== undefined ? { proxyPerf: state.proxyPerf } : {}),
   };
+}
+
+function recordSessionProxyPerf(state: SessionState, payload: ProxyPerfPayload): void {
+  state.proxyPerf ??= { requestCount: 0, totalMs: 0, maxMs: 0, spans: {} };
+  state.proxyPerf.requestCount += 1;
+  state.proxyPerf.totalMs = roundPerfMs(state.proxyPerf.totalMs + payload.totalMs);
+  state.proxyPerf.maxMs = Math.max(state.proxyPerf.maxMs, payload.totalMs);
+  for (const span of payload.spans) {
+    addPerfMetric(state.proxyPerf.spans, span.name, span.durationMs);
+  }
+  for (const mark of payload.marks) {
+    if (mark.name === "first_delta") {
+      state.proxyPerf.firstDelta ??= { count: 0, totalMs: 0, maxMs: 0 };
+      addPerfMetricValue(state.proxyPerf.firstDelta, mark.atMs);
+    }
+  }
+}
+
+function addPerfMetric(
+  metrics: Record<string, SessionPerfMetric>,
+  name: string,
+  durationMs: number,
+): void {
+  metrics[name] ??= { count: 0, totalMs: 0, maxMs: 0 };
+  addPerfMetricValue(metrics[name], durationMs);
+}
+
+function addPerfMetricValue(metric: SessionPerfMetric, durationMs: number): void {
+  metric.count += 1;
+  metric.totalMs = roundPerfMs(metric.totalMs + durationMs);
+  metric.maxMs = Math.max(metric.maxMs, durationMs);
+}
+
+function roundPerfMs(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function toPersistedSession(state: SessionState): PersistedSession {

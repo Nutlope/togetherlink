@@ -265,6 +265,7 @@ async function handleDaemonRequest(
       summary: state.costTracker.summarize(),
       totals: state.costTracker.totals,
       totalsByModel: state.costTracker.totalsByModel,
+      ...(state.proxyPerf !== undefined ? { proxyPerf: state.proxyPerf } : {}),
     });
     return;
   }

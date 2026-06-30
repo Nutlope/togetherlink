@@ -2,18 +2,29 @@ import { performance } from "node:perf_hooks";
 
 type ProxyPerfFields = Record<string, unknown>;
 
-type ProxyPerfSpan = {
+export type ProxyPerfSpan = {
   name: string;
   durationMs: number;
   atMs: number;
   fields?: ProxyPerfFields;
 };
 
-type ProxyPerfMark = {
+export type ProxyPerfMark = {
   name: string;
   atMs: number;
   fields?: ProxyPerfFields;
 };
+
+export type ProxyPerfPayload = {
+  name: string;
+  totalMs: number;
+  fields: ProxyPerfFields;
+  result?: ProxyPerfFields;
+  spans: ProxyPerfSpan[];
+  marks: ProxyPerfMark[];
+};
+
+export type ProxyPerfSink = (payload: ProxyPerfPayload) => void;
 
 export type ProxyPerfTracer = {
   readonly enabled: boolean;
@@ -24,7 +35,11 @@ export type ProxyPerfTracer = {
   end(fields?: ProxyPerfFields): void;
 };
 
-export function createProxyPerfTracer(name: string, fields: ProxyPerfFields = {}): ProxyPerfTracer {
+export function createProxyPerfTracer(
+  name: string,
+  fields: ProxyPerfFields = {},
+  sink?: ProxyPerfSink,
+): ProxyPerfTracer {
   if (process.env.TOGETHERLINK_PERF !== "1") {
     return disabledProxyPerfTracer;
   }
@@ -85,7 +100,7 @@ export function createProxyPerfTracer(name: string, fields: ProxyPerfFields = {}
         return;
       }
       ended = true;
-      const payload = {
+      const payload: ProxyPerfPayload = {
         name,
         totalMs: roundMs(elapsed()),
         fields,
@@ -93,6 +108,11 @@ export function createProxyPerfTracer(name: string, fields: ProxyPerfFields = {}
         spans,
         marks,
       };
+      try {
+        sink?.(payload);
+      } catch {
+        // Perf capture is diagnostic only and must never affect proxy traffic.
+      }
       process.stderr.write(`[togetherlink perf] ${JSON.stringify(payload)}\n`);
     },
   };

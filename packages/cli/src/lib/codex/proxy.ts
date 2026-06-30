@@ -4,7 +4,7 @@ import { TOGETHER_BASE_URL } from "../together-core.js";
 import { findModelById, MINIMAX_M3, type ModelDefinition } from "@togetherlink/models";
 import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../claude/cost.js";
-import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
+import { createProxyPerfTracer, type ProxyPerfSink, type ProxyPerfTracer } from "../proxy-perf.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
 import { writeDebugLogLine } from "../debug-log.js";
 
@@ -222,6 +222,7 @@ export type CodexProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  perfSink?: ProxyPerfSink | undefined;
 };
 
 const CODEX_IDENTITY_PROMPT =
@@ -238,10 +239,14 @@ export async function handleCodexProxyRequest(
   options: CodexProxyOptions,
 ): Promise<void> {
   const path = requestPath(req);
-  const perf = createProxyPerfTracer("codex.proxy", {
-    method: req.method,
-    path,
-  });
+  const perf = createProxyPerfTracer(
+    "codex.proxy",
+    {
+      method: req.method,
+      path,
+    },
+    options.perfSink,
+  );
   debugLog(options, "http request", { method: req.method, url: req.url, path });
 
   if (req.method === "HEAD" && path === "/") {
