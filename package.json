@@ -16,6 +16,7 @@
     "hooks:install": "lefthook install",
     "test": "pnpm -F @togetherlink/tests test",
     "bench:proxy": "pnpm -F @togetherlink/tests bench:proxy",
+    "capture:proxy-fixtures": "pnpm -F @togetherlink/tests capture:proxy-fixtures",
     "watch": "pnpm dev",
     "typecheck": "pnpm -r typecheck"
   },

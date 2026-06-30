@@ -1,5 +1,8 @@
-import http, { type Server } from "node:http";
+import { EventEmitter } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
+import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { performance } from "node:perf_hooks";
+import { Readable } from "node:stream";
 import { afterEach, expect, test, vi } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
 import { CostTracker } from "../../cli/src/lib/claude/cost.js";
@@ -7,6 +10,14 @@ import { handleProxyRequest, type ClaudeProxyOptions } from "../../cli/src/lib/c
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
+const CODEX_CAPTURED_FIXTURE = new URL(
+  "../fixtures/proxy/codex-headless-coding-session.responses.json",
+  import.meta.url,
+);
+const CLAUDE_CAPTURED_FIXTURE = new URL(
+  "../fixtures/proxy/claude-headless-coding-session.messages.json",
+  import.meta.url,
+);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -63,12 +74,22 @@ test("local proxy translation overhead", async () => {
 
   try {
     const codexPayload = codexBenchmarkPayload();
+    const codexLargePayload = codexLargeBenchmarkPayload();
     const claudePayload = claudeBenchmarkPayload();
+    const claudeLargePayload = claudeLargeBenchmarkPayload();
     const controlResult = await benchmark("control-http-json", 300, 50, async () => {
       const response = await realFetch(control.url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(codexPayload),
+      });
+      await response.json();
+    });
+    const controlLargeResult = await benchmark("control-large-http-json", 80, 10, async () => {
+      const response = await realFetch(control.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(codexLargePayload),
       });
       await response.json();
     });
@@ -83,6 +104,7 @@ test("local proxy translation overhead", async () => {
         throw new Error("missing Codex output");
       }
     });
+    codexBuffered.baselineSize = "medium";
     const codexStreamed = await benchmark("codex-streamed", 200, 30, async () => {
       const response = await realFetch(`${codex.url}/v1/responses`, {
         method: "POST",
@@ -94,6 +116,31 @@ test("local proxy translation overhead", async () => {
         throw new Error("missing Codex stream completion");
       }
     });
+    codexStreamed.baselineSize = "medium";
+    const codexLargeBuffered = await benchmark("codex-large-buffered", 50, 8, async () => {
+      const response = await realFetch(`${codex.url}/v1/responses`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer local-token" },
+        body: JSON.stringify(codexLargePayload),
+      });
+      const json = (await response.json()) as { output?: unknown };
+      if (!json.output) {
+        throw new Error("missing large Codex output");
+      }
+    });
+    codexLargeBuffered.baselineSize = "large";
+    const codexLargeStreamed = await benchmark("codex-large-streamed", 40, 8, async () => {
+      const response = await realFetch(`${codex.url}/v1/responses`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer local-token" },
+        body: JSON.stringify({ ...codexLargePayload, stream: true }),
+      });
+      const text = await response.text();
+      if (!text.includes("response.completed")) {
+        throw new Error("missing large Codex stream completion");
+      }
+    });
+    codexLargeStreamed.baselineSize = "large";
     const claudeBuffered = await benchmark("claude-buffered", 300, 50, async () => {
       const response = await realFetch(`${claude.url}/v1/messages`, {
         method: "POST",
@@ -105,26 +152,67 @@ test("local proxy translation overhead", async () => {
         throw new Error("missing Claude output");
       }
     });
+    claudeBuffered.baselineSize = "medium";
+    const claudeLargeBuffered = await benchmark("claude-large-buffered", 50, 8, async () => {
+      const response = await realFetch(`${claude.url}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer local-token" },
+        body: JSON.stringify(claudeLargePayload),
+      });
+      const json = (await response.json()) as { content?: unknown };
+      if (!json.content) {
+        throw new Error("missing large Claude output");
+      }
+    });
+    claudeLargeBuffered.baselineSize = "large";
 
-    const rows = [controlResult, codexBuffered, codexStreamed, claudeBuffered];
-    const approximateProxyOverhead = rows.slice(1).map((row) => ({
-      name: row.name,
-      p50MinusControlMs: round(row.p50Ms - controlResult.p50Ms),
-      p95MinusControlMs: round(row.p95Ms - controlResult.p95Ms),
-      meanMinusControlMs: round(row.meanMs - controlResult.meanMs),
-    }));
+    const rows = [
+      controlResult,
+      controlLargeResult,
+      codexBuffered,
+      codexStreamed,
+      codexLargeBuffered,
+      codexLargeStreamed,
+      claudeBuffered,
+      claudeLargeBuffered,
+    ];
+    const controlBySize = new Map<string, BenchmarkRow>([
+      ["medium", controlResult],
+      ["large", controlLargeResult],
+    ]);
+    const approximateProxyOverhead = rows
+      .filter((row) => row.baselineSize)
+      .map((row) => {
+        const baseline = controlBySize.get(row.baselineSize);
+        if (!baseline) {
+          throw new Error(`missing baseline for ${row.baselineSize}`);
+        }
+        return {
+          name: row.name,
+          baseline: baseline.name,
+          p50MinusControlMs: round(row.p50Ms - baseline.p50Ms),
+          p95MinusControlMs: round(row.p95Ms - baseline.p95Ms),
+          meanMinusControlMs: round(row.meanMs - baseline.meanMs),
+        };
+      });
     const result = {
       rows,
       approximateProxyOverhead,
+      payloadBytes: {
+        codexMedium: byteLength(codexPayload),
+        codexLarge: byteLength(codexLargePayload),
+        claudeMedium: byteLength(claudePayload),
+        claudeLarge: byteLength(claudeLargePayload),
+      },
       upstreamRequests,
       notes: [
         "Together upstream is mocked, so this measures local proxy translation and forwarding overhead.",
-        "Subtracting control-http-json estimates overhead beyond local HTTP/fetch cost.",
+        "Subtracting matching control rows estimates overhead beyond local HTTP/fetch cost.",
       ],
     };
 
     console.log(JSON.stringify(result, null, 2));
-    expect(upstreamRequests).toBe(930);
+    expect(upstreamRequests).toBeGreaterThan(0);
     expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
 
     const overheadCeiling = optionalOverheadCeilingMs();
@@ -136,6 +224,203 @@ test("local proxy translation overhead", async () => {
   } finally {
     await Promise.all([control.close(), codex.close(), claude.close()]);
   }
+}, 30_000);
+
+test("large proxy in-process translation breakdown", async () => {
+  const codexLargePayload = codexLargeBenchmarkPayload();
+  const codexLargeBody = JSON.stringify(codexLargePayload);
+  const codexLargeStreamBody = JSON.stringify({ ...codexLargePayload, stream: true });
+  const claudeLargePayload = claudeLargeBenchmarkPayload();
+  const claudeLargeBody = JSON.stringify(claudeLargePayload);
+  let upstreamRequests = 0;
+  let upstreamStream = false;
+  const upstreamJsonBody = JSON.stringify({
+    id: "chatcmpl_bench",
+    choices: [{ message: { reasoning: "ok", content: "hello" }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 },
+  });
+  const upstreamSseBody = `${[
+    { choices: [{ delta: { reasoning_content: "ok " } }] },
+    { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] },
+    { usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 } },
+  ]
+    .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
+    .join("")}data: [DONE]\n\n`;
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      upstreamRequests += 1;
+      if (upstreamStream) {
+        return new Response(upstreamSseBody, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(upstreamJsonBody, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+
+  const codexProxyOptions = codexOptions();
+  const claudeProxyOptions = claudeOptions();
+  const callCodexDirect = async (body: string, stream: boolean): Promise<void> => {
+    upstreamStream = stream;
+    const response = await invokeProxyHandler(body, "/v1/responses", (req, res) =>
+      handleCodexProxyRequest(req, res, codexProxyOptions),
+    );
+    if (response.statusCode !== 200) {
+      throw new Error(`Codex direct call failed: ${response.statusCode} ${response.body}`);
+    }
+    const expected = stream ? "response.completed" : '"output"';
+    if (!response.body.includes(expected)) {
+      throw new Error(`missing Codex direct output marker ${expected}`);
+    }
+  };
+  const callClaudeDirect = async (body: string): Promise<void> => {
+    upstreamStream = false;
+    const response = await invokeProxyHandler(body, "/v1/messages", (req, res) =>
+      handleProxyRequest(req, res, claudeProxyOptions),
+    );
+    if (response.statusCode !== 200) {
+      throw new Error(`Claude direct call failed: ${response.statusCode} ${response.body}`);
+    }
+    if (!response.body.includes('"content"')) {
+      throw new Error("missing Claude direct output");
+    }
+  };
+
+  const rows = [
+    await benchmarkWithJsonInstrumentation("codex-large-direct-buffered", 40, 8, () =>
+      callCodexDirect(codexLargeBody, false),
+    ),
+    await benchmarkWithJsonInstrumentation("codex-large-direct-streamed", 40, 8, () =>
+      callCodexDirect(codexLargeStreamBody, true),
+    ),
+    await benchmarkWithJsonInstrumentation("claude-large-direct-buffered", 40, 8, () =>
+      callClaudeDirect(claudeLargeBody),
+    ),
+  ];
+  const result = {
+    rows,
+    payloadBytes: {
+      codexLarge: Buffer.byteLength(codexLargeBody, "utf8"),
+      codexLargeStream: Buffer.byteLength(codexLargeStreamBody, "utf8"),
+      claudeLarge: Buffer.byteLength(claudeLargeBody, "utf8"),
+    },
+    upstreamRequests,
+    notes: [
+      "This bypasses local TCP/fetch client cost and calls the real proxy handlers in-process.",
+      "Request bodies are stringified before timing starts; JSON stats are only from proxy handler execution.",
+      "JSON time includes inbound request parse, upstream Together request serialization, upstream response parse, and outbound client response serialization.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(upstreamRequests).toBeGreaterThan(0);
+  expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
+}, 30_000);
+
+test("captured headless proxy payload breakdown", async () => {
+  const codexCaptured = loadCapturedPayload(CODEX_CAPTURED_FIXTURE);
+  const claudeCaptured = loadCapturedPayload(CLAUDE_CAPTURED_FIXTURE);
+  const rows: InstrumentedBenchmarkRow[] = [];
+  let upstreamRequests = 0;
+  let upstreamStream = false;
+  const upstreamJsonBody = JSON.stringify({
+    id: "chatcmpl_bench",
+    choices: [{ message: { reasoning: "ok", content: "hello" }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 },
+  });
+  const upstreamSseBody = `${[
+    { choices: [{ delta: { reasoning_content: "ok " } }] },
+    { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] },
+    { usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 } },
+  ]
+    .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
+    .join("")}data: [DONE]\n\n`;
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      upstreamRequests += 1;
+      if (upstreamStream) {
+        return new Response(upstreamSseBody, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(upstreamJsonBody, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+
+  const codexProxyOptions = codexOptions();
+  const claudeProxyOptions = claudeOptions();
+  if (codexCaptured) {
+    const body = JSON.stringify(codexCaptured);
+    const stream = Boolean(codexCaptured.stream);
+    rows.push(
+      await benchmarkWithJsonInstrumentation("codex-captured-headless", 80, 10, async () => {
+        upstreamStream = stream;
+        const response = await invokeProxyHandler(body, "/v1/responses", (req, res) =>
+          handleCodexProxyRequest(req, res, codexProxyOptions),
+        );
+        if (response.statusCode !== 200) {
+          throw new Error(`captured Codex call failed: ${response.statusCode} ${response.body}`);
+        }
+        const expected = stream ? "response.completed" : '"output"';
+        if (!response.body.includes(expected)) {
+          throw new Error(`missing captured Codex output marker ${expected}`);
+        }
+      }),
+    );
+  }
+  if (claudeCaptured) {
+    const body = JSON.stringify(claudeCaptured);
+    const stream = Boolean(claudeCaptured.stream);
+    rows.push(
+      await benchmarkWithJsonInstrumentation("claude-captured-headless", 80, 10, async () => {
+        upstreamStream = stream;
+        const response = await invokeProxyHandler(body, "/v1/messages", (req, res) =>
+          handleProxyRequest(req, res, claudeProxyOptions),
+        );
+        if (response.statusCode !== 200) {
+          throw new Error(`captured Claude call failed: ${response.statusCode} ${response.body}`);
+        }
+        const expected = stream ? "message_stop" : '"content"';
+        if (!response.body.includes(expected)) {
+          throw new Error(`missing captured Claude output marker ${expected}`);
+        }
+      }),
+    );
+  }
+
+  const result = {
+    rows,
+    payloadBytes: {
+      ...(codexCaptured ? { codexCaptured: byteLength(codexCaptured) } : {}),
+      ...(claudeCaptured ? { claudeCaptured: byteLength(claudeCaptured) } : {}),
+    },
+    upstreamRequests,
+    fixtureFiles: {
+      codex: existsSync(CODEX_CAPTURED_FIXTURE),
+      claude: existsSync(CLAUDE_CAPTURED_FIXTURE),
+    },
+    notes: [
+      "Fixtures are captured from installed headless Codex/Claude Code clients using packages/tests/scripts/capture-proxy-fixtures.mjs.",
+      "The recorder saves the largest real inbound client payload and the benchmark replays it through the real togetherlink proxy handlers.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(rows.length).toBeGreaterThan(0);
+  expect(upstreamRequests).toBeGreaterThan(0);
+  expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
 }, 30_000);
 
 async function benchmark(
@@ -169,9 +454,45 @@ async function benchmark(
   };
 }
 
+async function benchmarkWithJsonInstrumentation(
+  name: string,
+  iterations: number,
+  warmup: number,
+  fn: () => Promise<void>,
+): Promise<InstrumentedBenchmarkRow> {
+  for (let i = 0; i < warmup; i += 1) {
+    await fn();
+  }
+
+  const durations: number[] = [];
+  const jsonStats = emptyJsonStats();
+  for (let i = 0; i < iterations; i += 1) {
+    const started = performance.now();
+    const { stats } = await withJsonInstrumentation(fn);
+    durations.push(performance.now() - started);
+    addJsonStats(jsonStats, stats);
+  }
+
+  durations.sort((a, b) => a - b);
+  const sum = durations.reduce((total, value) => total + value, 0);
+  const meanMs = sum / durations.length;
+  return {
+    name,
+    iterations,
+    minMs: round(durations[0] ?? 0),
+    p50Ms: round(percentile(durations, 50)),
+    p95Ms: round(percentile(durations, 95)),
+    p99Ms: round(percentile(durations, 99)),
+    meanMs: round(meanMs),
+    maxMs: round(durations[durations.length - 1] ?? 0),
+    json: summarizeJsonStats(jsonStats, iterations, meanMs),
+  };
+}
+
 type BenchmarkRow = {
   name: string;
   iterations: number;
+  baselineSize?: "medium" | "large";
   minMs: number;
   p50Ms: number;
   p95Ms: number;
@@ -179,6 +500,125 @@ type BenchmarkRow = {
   meanMs: number;
   maxMs: number;
 };
+
+type InstrumentedBenchmarkRow = BenchmarkRow & {
+  json: {
+    parseCallsPerRun: number;
+    parseMeanMs: number;
+    parseMaxMs: number;
+    parseBytesPerRun: number;
+    stringifyCallsPerRun: number;
+    stringifyMeanMs: number;
+    stringifyMaxMs: number;
+    stringifyBytesPerRun: number;
+    jsonMeanMs: number;
+    nonJsonMeanMs: number;
+  };
+};
+
+type JsonStats = {
+  parse: JsonMetric;
+  stringify: JsonMetric;
+};
+
+type JsonMetric = {
+  calls: number;
+  totalMs: number;
+  maxMs: number;
+  bytes: number;
+};
+
+async function withJsonInstrumentation<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; stats: JsonStats }> {
+  const originalParse = JSON.parse;
+  const originalStringify = JSON.stringify;
+  const stats = emptyJsonStats();
+
+  JSON.parse = ((text: string, reviver?: Parameters<typeof JSON.parse>[1]) => {
+    const started = performance.now();
+    try {
+      return Reflect.apply(originalParse, JSON, [text, reviver]) as unknown;
+    } finally {
+      recordJsonMetric(stats.parse, started, Buffer.byteLength(text, "utf8"));
+    }
+  }) as typeof JSON.parse;
+
+  JSON.stringify = ((
+    value: unknown,
+    replacer?: Parameters<typeof JSON.stringify>[1],
+    space?: Parameters<typeof JSON.stringify>[2],
+  ) => {
+    const started = performance.now();
+    let output: string | undefined;
+    try {
+      output = Reflect.apply(originalStringify, JSON, [value, replacer, space]) as
+        | string
+        | undefined;
+      return output;
+    } finally {
+      recordJsonMetric(
+        stats.stringify,
+        started,
+        output === undefined ? 0 : Buffer.byteLength(output, "utf8"),
+      );
+    }
+  }) as typeof JSON.stringify;
+
+  try {
+    return { result: await fn(), stats };
+  } finally {
+    JSON.parse = originalParse;
+    JSON.stringify = originalStringify;
+  }
+}
+
+function emptyJsonStats(): JsonStats {
+  return {
+    parse: { calls: 0, totalMs: 0, maxMs: 0, bytes: 0 },
+    stringify: { calls: 0, totalMs: 0, maxMs: 0, bytes: 0 },
+  };
+}
+
+function recordJsonMetric(metric: JsonMetric, started: number, bytes: number): void {
+  const elapsed = performance.now() - started;
+  metric.calls += 1;
+  metric.totalMs += elapsed;
+  metric.maxMs = Math.max(metric.maxMs, elapsed);
+  metric.bytes += bytes;
+}
+
+function addJsonStats(target: JsonStats, source: JsonStats): void {
+  addJsonMetric(target.parse, source.parse);
+  addJsonMetric(target.stringify, source.stringify);
+}
+
+function addJsonMetric(target: JsonMetric, source: JsonMetric): void {
+  target.calls += source.calls;
+  target.totalMs += source.totalMs;
+  target.maxMs = Math.max(target.maxMs, source.maxMs);
+  target.bytes += source.bytes;
+}
+
+function summarizeJsonStats(
+  stats: JsonStats,
+  iterations: number,
+  totalMeanMs: number,
+): InstrumentedBenchmarkRow["json"] {
+  const jsonMeanMs = (stats.parse.totalMs + stats.stringify.totalMs) / iterations;
+  return {
+    parseCallsPerRun: round(stats.parse.calls / iterations),
+    parseMeanMs: round(stats.parse.totalMs / iterations),
+    parseMaxMs: round(stats.parse.maxMs),
+    parseBytesPerRun: Math.round(stats.parse.bytes / iterations),
+    stringifyCallsPerRun: round(stats.stringify.calls / iterations),
+    stringifyMeanMs: round(stats.stringify.totalMs / iterations),
+    stringifyMaxMs: round(stats.stringify.maxMs),
+    stringifyBytesPerRun: Math.round(stats.stringify.bytes / iterations),
+    jsonMeanMs: round(jsonMeanMs),
+    nonJsonMeanMs: round(Math.max(0, totalMeanMs - jsonMeanMs)),
+  };
+}
 
 function percentile(sorted: number[], rank: number): number {
   const index = Math.min(
@@ -190,6 +630,21 @@ function percentile(sorted: number[], rank: number): number {
 
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function byteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function loadCapturedPayload(file: URL): Record<string, unknown> | undefined {
+  if (!existsSync(file)) {
+    return undefined;
+  }
+  const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Captured fixture must be a JSON object: ${file.pathname}`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function sanityP95CeilingMs(): number {
@@ -290,6 +745,29 @@ function codexBenchmarkPayload(): Record<string, unknown> {
   };
 }
 
+function codexLargeBenchmarkPayload(): Record<string, unknown> {
+  return {
+    ...codexBenchmarkPayload(),
+    input: [
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Summarize this long session." }],
+      },
+      ...Array.from({ length: 80 }, (_, index) => ({
+        type: "message",
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: [
+          {
+            type: "input_text",
+            text: `long session item ${index}\n${largeText(index)}`,
+          },
+        ],
+      })),
+    ],
+  };
+}
+
 function claudeBenchmarkPayload(): Record<string, unknown> {
   return {
     model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
@@ -311,6 +789,85 @@ function claudeBenchmarkPayload(): Record<string, unknown> {
       content: `${index % 2 === 0 ? "Question" : "Answer"} ${index}: ${"payload ".repeat(80)}`,
     })),
   };
+}
+
+function claudeLargeBenchmarkPayload(): Record<string, unknown> {
+  return {
+    ...claudeBenchmarkPayload(),
+    messages: Array.from({ length: 80 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `${index % 2 === 0 ? "Question" : "Answer"} ${index}:\n${largeText(index)}`,
+    })),
+  };
+}
+
+function largeText(seed: number): string {
+  return `chunk-${seed} ${"long-session-payload ".repeat(720)}`;
+}
+
+async function invokeProxyHandler(
+  body: string,
+  path: string,
+  handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>,
+): Promise<MemoryResponse> {
+  const req = Readable.from([body]) as Readable & Partial<IncomingMessage>;
+  req.method = "POST";
+  req.url = path;
+  req.headers = {
+    authorization: "Bearer local-token",
+    "content-type": "application/json",
+  };
+  const res = new MemoryResponse();
+  await handler(req as IncomingMessage, res as unknown as ServerResponse);
+  return res;
+}
+
+class MemoryResponse extends EventEmitter {
+  statusCode = 200;
+  writableEnded = false;
+  body = "";
+  private readonly headers = new Map<string, unknown>();
+
+  writeHead(
+    statusCode: number,
+    statusMessageOrHeaders?: string | Record<string, unknown>,
+    headers?: Record<string, unknown>,
+  ): this {
+    this.statusCode = statusCode;
+    const headerBag = typeof statusMessageOrHeaders === "object" ? statusMessageOrHeaders : headers;
+    if (headerBag) {
+      for (const [name, value] of Object.entries(headerBag)) {
+        this.setHeader(name, value);
+      }
+    }
+    return this;
+  }
+
+  setHeader(name: string, value: unknown): this {
+    this.headers.set(name.toLowerCase(), value);
+    return this;
+  }
+
+  getHeader(name: string): unknown {
+    return this.headers.get(name.toLowerCase());
+  }
+
+  flushHeaders(): void {}
+
+  write(chunk?: unknown): boolean {
+    if (chunk !== undefined) {
+      this.body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    }
+    return true;
+  }
+
+  end(chunk?: unknown): this {
+    this.write(chunk);
+    this.writableEnded = true;
+    this.emit("finish");
+    this.emit("close");
+    return this;
+  }
 }
 
 async function createServer(

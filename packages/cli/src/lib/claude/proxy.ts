@@ -13,7 +13,7 @@ import {
   type ImageBlock,
   type UrlBlock,
 } from "./vision.js";
-import { stableHash, stableStringify } from "../stable-hash.js";
+import { stableHash } from "../stable-hash.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -248,13 +248,17 @@ function estimatePayloadInputTokens(payload: Record<string, unknown>): number {
   return Math.max(
     1,
     Math.ceil(
-      byteLength({
+      jsonByteLength({
         messages: payload.messages,
         tools: payload.tools,
         tool_choice: payload.tool_choice,
       }) / APPROX_CHARS_PER_TOKEN,
     ),
   );
+}
+
+function jsonByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
 function trimPayloadInputByApproxTokens(
@@ -501,10 +505,6 @@ export async function handleProxyRequest(
   }
 
   writeJson(res, 200, anthropicMessage);
-}
-
-function byteLength(value: unknown): number {
-  return Buffer.byteLength(stableStringify(value), "utf8");
 }
 
 function trimPayloadInputForContextLengthRetry(
@@ -824,7 +824,7 @@ export function countTokensResponse(
   const targetModel = options
     ? resolveTargetModel(body.model, options as ClaudeProxyOptions).definition
     : undefined;
-  const text = stableStringify({
+  const estimatedBytes = jsonByteLength({
     messages: targetModel
       ? toOpenAIMessages({ ...body, max_tokens: 1 }, targetModel)
       : [
@@ -836,10 +836,7 @@ export function countTokensResponse(
     tools: body.tools,
     tool_choice: body.tool_choice,
   });
-  const estimatedTokens = Math.max(
-    1,
-    Math.ceil(Buffer.byteLength(text, "utf8") / APPROX_CHARS_PER_TOKEN),
-  );
+  const estimatedTokens = Math.max(1, Math.ceil(estimatedBytes / APPROX_CHARS_PER_TOKEN));
   return {
     input_tokens: estimatedTokens,
   };

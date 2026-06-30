@@ -11,7 +11,8 @@
     "test:claude": "node scripts/run-vitest.mjs src/Claude.test.ts",
     "test:opencode": "node scripts/run-vitest.mjs src/OpenCode.test.ts",
     "test:pi": "node scripts/run-vitest.mjs src/Pi.test.ts",
-    "bench:proxy": "pnpm -F @togetherlink/cli build && pnpm exec vitest run --config vitest.bench.config.ts benchmarks/proxy-performance.bench.ts --reporter verbose"
+    "bench:proxy": "pnpm -F @togetherlink/cli build && pnpm exec vitest run --config vitest.bench.config.ts benchmarks/proxy-performance.bench.ts --reporter verbose",
+    "capture:proxy-fixtures": "pnpm -F @togetherlink/cli build && node scripts/capture-proxy-fixtures.mjs"
   },
   "devDependencies": {
     "@togetherlink/models": "workspace:*",
