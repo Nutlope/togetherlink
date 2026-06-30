@@ -1715,7 +1715,7 @@ async function streamAnthropicFromTogether(
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
-  res.flushHeaders();
+  res.flushHeaders?.();
   res.socket?.setNoDelay(true);
 
   const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
@@ -1921,22 +1921,27 @@ async function streamAnthropicNativeToolLoop({
       })),
     });
 
-    for (const toolCall of nativeToolCalls) {
-      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
-      const name = toolCall.function.name ?? "web_search";
-      const nativeTool = nativeTools.find((tool) => tool.name === name);
-      const input = parseJsonOrEmpty(toolCall.function.arguments);
-      const priorUses = nativeToolUses.get(name) ?? 0;
-      const maxUses = nativeTool ? nativeToolMaxUses(nativeTool.definition) : 0;
-      let result: string;
-      if (priorUses >= maxUses) {
-        result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
-      } else if (nativeTool?.kind === "web_search") {
-        nativeToolUses.set(name, priorUses + 1);
-        result = await runExaSearch(input, nativeTool.definition, options);
-      } else {
-        result = "Unsupported native server tool.";
-      }
+    const toolResults = await Promise.all(
+      nativeToolCalls.map(async (toolCall) => {
+        const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+        const name = toolCall.function.name ?? "web_search";
+        const nativeTool = nativeTools.find((tool) => tool.name === name);
+        const input = parseJsonOrEmpty(toolCall.function.arguments);
+        const priorUses = nativeToolUses.get(name) ?? 0;
+        const maxUses = nativeTool ? nativeToolMaxUses(nativeTool.definition) : 0;
+        let result: string;
+        if (priorUses >= maxUses) {
+          result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
+        } else if (nativeTool?.kind === "web_search") {
+          nativeToolUses.set(name, priorUses + 1);
+          result = await runExaSearch(input, nativeTool.definition, options);
+        } else {
+          result = "Unsupported native server tool.";
+        }
+        return { id, result };
+      }),
+    );
+    for (const { id, result } of toolResults) {
       messages.push({ role: "tool", tool_call_id: id, content: result });
     }
 

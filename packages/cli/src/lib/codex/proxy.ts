@@ -1164,7 +1164,7 @@ async function streamResponseFromTogether(
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
-  res.flushHeaders();
+  res.flushHeaders?.();
   res.socket?.setNoDelay(true);
   writeResponsesSse(res, "response.created", {
     type: "response.created",
