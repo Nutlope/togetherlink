@@ -7,6 +7,7 @@ import type { CostTracker } from "../claude/cost.js";
 import { createProxyPerfTracer, type ProxyPerfTracer } from "../proxy-perf.js";
 import { readJsonBody, requestPath, writeJson } from "../claude/proxy.js";
 import { writeDebugLogLine } from "../debug-log.js";
+import { upstreamFetch } from "../upstream-fetch.js";
 
 type ResponsesContentPart = {
   type?: string;
@@ -500,7 +501,7 @@ async function postTogetherChat(
   signal?: AbortSignal,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= MAX_TOGETHER_RETRIES; attempt += 1) {
-    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+    const response = await upstreamFetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.apiKey}`,
@@ -895,7 +896,7 @@ async function runExaSearch(
   }
 
   debugLog(options, "exa search request", { query, hasApiKey: Boolean(exaApiKey), body });
-  const response = await fetch("https://api.exa.ai/search", {
+  const response = await upstreamFetch("https://api.exa.ai/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
