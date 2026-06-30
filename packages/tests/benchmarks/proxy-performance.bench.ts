@@ -423,6 +423,123 @@ test("captured headless proxy payload breakdown", async () => {
   expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
 }, 30_000);
 
+test("streaming TTFT and concurrent captured proxy load", async () => {
+  const codexCaptured = loadCapturedPayload(CODEX_CAPTURED_FIXTURE);
+  const claudeCaptured = loadCapturedPayload(CLAUDE_CAPTURED_FIXTURE);
+  if (!codexCaptured || !claudeCaptured) {
+    throw new Error("captured fixtures are required for TTFT and concurrent proxy load benchmark");
+  }
+
+  let upstreamRequests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+      if (href.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+
+      upstreamRequests += 1;
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream) {
+        return delayedSseResponse([
+          { choices: [{ delta: { reasoning_content: "ok " } }] },
+          { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] },
+          { usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 } },
+        ]);
+      }
+
+      return jsonResponse({
+        id: "chatcmpl_bench",
+        choices: [{ message: { reasoning: "ok", content: "hello" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 },
+      });
+    }),
+  );
+
+  const codexProxyOptions = codexOptions();
+  const claudeProxyOptions = claudeOptions();
+  const proxy = await createServer((req, res) => {
+    const path = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    const handler =
+      path === "/v1/responses"
+        ? handleCodexProxyRequest(req, res, codexProxyOptions)
+        : handleProxyRequest(req, res, claudeProxyOptions);
+    handler.catch((err) => {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    });
+  });
+
+  try {
+    const codexBody = JSON.stringify({ ...codexCaptured, stream: true });
+    const claudeBody = JSON.stringify({ ...claudeCaptured, stream: true });
+    const codexTtft = await benchmarkStreamingTtft("codex-captured-stream-ttft", 40, 8, async () =>
+      fetchTextWithTtft(`${proxy.url}/v1/responses`, codexBody, {
+        firstMarker: "response.reasoning_text.delta",
+        completionMarker: "response.completed",
+      }),
+    );
+    const claudeTtft = await benchmarkStreamingTtft(
+      "claude-captured-stream-ttft",
+      40,
+      8,
+      async () =>
+        fetchTextWithTtft(`${proxy.url}/v1/messages`, claudeBody, {
+          firstMarker: "content_block_delta",
+          completionMarker: "message_stop",
+        }),
+    );
+    const concurrentCaptured = await benchmark(
+      "concurrent-captured-proxy-load",
+      30,
+      5,
+      async () => {
+        await Promise.all([
+          fetchTextWithTtft(`${proxy.url}/v1/responses`, codexBody, {
+            firstMarker: "response.reasoning_text.delta",
+            completionMarker: "response.completed",
+          }),
+          fetchTextWithTtft(`${proxy.url}/v1/responses`, codexBody, {
+            firstMarker: "response.reasoning_text.delta",
+            completionMarker: "response.completed",
+          }),
+          fetchTextWithTtft(`${proxy.url}/v1/messages`, claudeBody, {
+            firstMarker: "content_block_delta",
+            completionMarker: "message_stop",
+          }),
+          fetchTextWithTtft(`${proxy.url}/v1/messages`, claudeBody, {
+            firstMarker: "content_block_delta",
+            completionMarker: "message_stop",
+          }),
+        ]);
+      },
+    );
+
+    const result = {
+      ttftRows: [codexTtft, claudeTtft],
+      concurrentRows: [concurrentCaptured],
+      concurrentRequestsPerIteration: 4,
+      payloadBytes: {
+        codexCaptured: byteLength(codexCaptured),
+        claudeCaptured: byteLength(claudeCaptured),
+      },
+      upstreamRequests,
+      notes: [
+        "TTFT is measured from local client request start to the first visible streamed delta marker.",
+        "The concurrent row runs two Codex and two Claude captured stream requests against one local proxy server per iteration.",
+      ],
+    };
+
+    console.log(JSON.stringify(result, null, 2));
+    expect(upstreamRequests).toBeGreaterThan(0);
+    expect([codexTtft, claudeTtft, concurrentCaptured].every((row) => row.p95Ms < 250)).toBe(true);
+    expect([codexTtft, claudeTtft].every((row) => row.ttft.p95Ms < 250)).toBe(true);
+  } finally {
+    await proxy.close();
+  }
+}, 30_000);
+
 async function benchmark(
   name: string,
   iterations: number,
@@ -451,6 +568,41 @@ async function benchmark(
     p99Ms: round(percentile(durations, 99)),
     meanMs: round(sum / durations.length),
     maxMs: round(durations[durations.length - 1] ?? 0),
+  };
+}
+
+function summarizeDurations(name: string, iterations: number, durations: number[]): BenchmarkRow {
+  durations.sort((a, b) => a - b);
+  const summary = summarizeDurationSet(durations);
+  return {
+    name,
+    iterations,
+    ...summary,
+  };
+}
+
+async function benchmarkStreamingTtft(
+  name: string,
+  iterations: number,
+  warmup: number,
+  fn: () => Promise<StreamingTtftResult>,
+): Promise<StreamingTtftBenchmarkRow> {
+  for (let i = 0; i < warmup; i += 1) {
+    await fn();
+  }
+
+  const durations: number[] = [];
+  const ttfts: number[] = [];
+  for (let i = 0; i < iterations; i += 1) {
+    const started = performance.now();
+    const { ttftMs } = await fn();
+    durations.push(performance.now() - started);
+    ttfts.push(ttftMs);
+  }
+
+  return {
+    ...summarizeDurations(name, iterations, durations),
+    ttft: summarizeDurationSet(ttfts),
   };
 }
 
@@ -493,6 +645,23 @@ type BenchmarkRow = {
   name: string;
   iterations: number;
   baselineSize?: "medium" | "large";
+  minMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  meanMs: number;
+  maxMs: number;
+};
+
+type StreamingTtftResult = {
+  ttftMs: number;
+};
+
+type StreamingTtftBenchmarkRow = BenchmarkRow & {
+  ttft: DurationSummary;
+};
+
+type DurationSummary = {
   minMs: number;
   p50Ms: number;
   p95Ms: number;
@@ -617,6 +786,19 @@ function summarizeJsonStats(
     stringifyBytesPerRun: Math.round(stats.stringify.bytes / iterations),
     jsonMeanMs: round(jsonMeanMs),
     nonJsonMeanMs: round(Math.max(0, totalMeanMs - jsonMeanMs)),
+  };
+}
+
+function summarizeDurationSet(values: number[]): DurationSummary {
+  values.sort((a, b) => a - b);
+  const sum = values.reduce((total, value) => total + value, 0);
+  return {
+    minMs: round(values[0] ?? 0),
+    p50Ms: round(percentile(values, 50)),
+    p95Ms: round(percentile(values, 95)),
+    p99Ms: round(percentile(values, 99)),
+    meanMs: round(values.length === 0 ? 0 : sum / values.length),
+    maxMs: round(values[values.length - 1] ?? 0),
   };
 }
 
@@ -901,4 +1083,73 @@ function sseResponse(chunks: unknown[]): Response {
       headers: { "content-type": "text/event-stream" },
     },
   );
+}
+
+function delayedSseResponse(chunks: unknown[], delayMs = 1): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const chunk of chunks) {
+          await sleep(delayMs);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+        }
+        await sleep(delayMs);
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    },
+  );
+}
+
+async function fetchTextWithTtft(
+  url: string,
+  body: string,
+  markers: { firstMarker: string; completionMarker: string },
+): Promise<StreamingTtftResult> {
+  const started = performance.now();
+  const response = await realFetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer local-token" },
+    body,
+  });
+  if (!response.body) {
+    throw new Error("missing streaming response body");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let ttftMs: number | undefined;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    text += decoder.decode(value, { stream: true });
+    if (ttftMs === undefined && text.includes(markers.firstMarker)) {
+      ttftMs = performance.now() - started;
+    }
+  }
+  text += decoder.decode();
+
+  if (response.status !== 200) {
+    throw new Error(`stream request failed: ${response.status} ${text}`);
+  }
+  if (!text.includes(markers.completionMarker)) {
+    throw new Error(`missing stream completion marker ${markers.completionMarker}`);
+  }
+  if (ttftMs === undefined) {
+    throw new Error(`missing first stream marker ${markers.firstMarker}`);
+  }
+  return { ttftMs };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
