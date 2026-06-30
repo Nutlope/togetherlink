@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, test } from "vitest";
 import { CODEX_SUPPORTED_MODELS } from "../../cli/src/lib/codex/defaults.js";
 import { CLAUDE_SUPPORTED_MODELS } from "../../cli/src/lib/claude/defaults.js";
 import { assert, assertCommandExists } from "./assert.js";
+import { codexExecArgs } from "./codex-exec.js";
 import { runCommand } from "./command.js";
 import { cleanupTmpDir, createTestContext, resetTmpDir } from "./context.js";
 import { asRecord, jsonLines, parseLastJsonObject } from "./json-lines.js";
@@ -200,13 +201,9 @@ async function runCodex(
     model.selector,
     "codex",
     "--",
-    "exec",
-    "--json",
-    "--ephemeral",
-    "--skip-git-repo-check",
-    "--ignore-user-config",
-    "--ignore-rules",
-    prompt,
+    ...codexExecArgs(prompt, {
+      allowLocalTools: kind === "tool" || kind === "subagent",
+    }),
   ], { timeoutMs });
 }
 

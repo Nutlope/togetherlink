@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assert, assertCommandExists, looksLikeContextError } from "../assert.js";
+import { codexExecArgs } from "../codex-exec.js";
 import { runCommand } from "../command.js";
 import { codingTaskPrompt, createFixtureRepo } from "../fixture-repo.js";
 import { asRecord, jsonLines } from "../json-lines.js";
@@ -18,13 +19,7 @@ export function codexScenarios(): Scenario[] {
           context.cliBin,
           "codex",
           "--",
-          "exec",
-          "--json",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "--ignore-user-config",
-          "--ignore-rules",
-          "Reply with exactly: hi",
+          ...codexExecArgs("Reply with exactly: hi"),
         ]);
         assert(result.status === 0, `exit ${result.status}`);
         const events = codexEvents(result.stdout);
@@ -43,13 +38,10 @@ export function codexScenarios(): Scenario[] {
           context.cliBin,
           "codex",
           "--",
-          "exec",
-          "--json",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "--ignore-user-config",
-          "--ignore-rules",
-          `Use a shell command to read this exact file path: ${probePath}. Answer with exactly the file contents and nothing else.`,
+          ...codexExecArgs(
+            `Use a shell command to read this exact file path: ${probePath}. Answer with exactly the file contents and nothing else.`,
+            { allowLocalTools: true },
+          ),
         ], { timeoutMs: 180_000 });
         assert(result.status === 0, `exit ${result.status}`);
         assert(result.stdout.includes(token), "expected probe file contents in output");
@@ -65,15 +57,7 @@ export function codexScenarios(): Scenario[] {
             context.cliBin,
             "codex",
             "--",
-            "exec",
-            "--json",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "workspace-write",
-            "--ignore-user-config",
-            "--ignore-rules",
-            codingTaskPrompt(),
+            ...codexExecArgs(codingTaskPrompt(), { allowLocalTools: true }),
           ], { cwd: repo.path, timeoutMs: 300_000 });
           assert(result.status === 0, `exit ${result.status}`);
           await assertFixtureRepoSolved(repo.path);
@@ -89,17 +73,14 @@ export function codexScenarios(): Scenario[] {
           context.cliBin,
           "codex",
           "--",
-          "exec",
-          "--json",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "--ignore-user-config",
-          "--ignore-rules",
-          "-c",
-          'model_reasoning_effort="high"',
-          "-c",
-          'model_reasoning_summary="detailed"',
-          "Think carefully, then answer in one sentence: what is 23 * 41?",
+          ...codexExecArgs("Think carefully, then answer in one sentence: what is 23 * 41?", {
+            extraArgs: [
+              "-c",
+              'model_reasoning_effort="high"',
+              "-c",
+              'model_reasoning_summary="detailed"',
+            ],
+          }),
         ], { timeoutMs: 180_000 });
         assert(result.status === 0, `exit ${result.status}`);
         const completed = codexEvents(result.stdout).find((event) => event.type === "turn.completed");
@@ -119,13 +100,7 @@ export function codexScenarios(): Scenario[] {
           context.cliBin,
           "codex",
           "--",
-          "exec",
-          "--json",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "--ignore-user-config",
-          "--ignore-rules",
-          "-",
+          ...codexExecArgs("-"),
         ], { timeoutMs: 300_000, stdin: prompt });
         assert(result.status === 0, `exit ${result.status}`);
         assert(result.stdout.includes("CODEX_FINAL_CHECKSUM_9371"), "missing final checksum");
