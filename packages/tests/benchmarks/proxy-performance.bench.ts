@@ -232,6 +232,10 @@ test("large proxy in-process translation breakdown", async () => {
   const codexLargeStreamBody = JSON.stringify({ ...codexLargePayload, stream: true });
   const claudeLargePayload = claudeLargeBenchmarkPayload();
   const claudeLargeBody = JSON.stringify(claudeLargePayload);
+  const claudeLargeNoToolsPayload = { ...claudeLargePayload };
+  delete claudeLargeNoToolsPayload.tools;
+  delete claudeLargeNoToolsPayload.tool_choice;
+  const claudeLargeNoToolsBody = JSON.stringify(claudeLargeNoToolsPayload);
   let upstreamRequests = 0;
   let upstreamStream = false;
   const upstreamJsonBody = JSON.stringify({
@@ -302,6 +306,9 @@ test("large proxy in-process translation breakdown", async () => {
     await benchmarkWithJsonInstrumentation("claude-large-direct-buffered", 40, 8, () =>
       callClaudeDirect(claudeLargeBody),
     ),
+    await benchmarkWithJsonInstrumentation("claude-large-no-tools-direct-buffered", 40, 8, () =>
+      callClaudeDirect(claudeLargeNoToolsBody),
+    ),
   ];
   const result = {
     rows,
@@ -309,6 +316,7 @@ test("large proxy in-process translation breakdown", async () => {
       codexLarge: Buffer.byteLength(codexLargeBody, "utf8"),
       codexLargeStream: Buffer.byteLength(codexLargeStreamBody, "utf8"),
       claudeLarge: Buffer.byteLength(claudeLargeBody, "utf8"),
+      claudeLargeNoTools: Buffer.byteLength(claudeLargeNoToolsBody, "utf8"),
     },
     upstreamRequests,
     notes: [
