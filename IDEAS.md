@@ -67,7 +67,7 @@
 
 1. **Done**: Add `TOGETHERLINK_PERF=1` phase timings (body read, translate, vision, fetch, first delta, etc.) in the proxy handlers.
 2. **Done**: Extend the benchmark with streaming TTFT measurement and concurrent captured-payload load.
-3. **Done**: Implement Claude `flushHeaders()` + `setNoDelay(true)`. Next live A/B tests should use real Together traffic for keep-alive tuning and end-to-end TTFT.
+3. **Done**: Implement Claude `flushHeaders()` + `setNoDelay(true)`. Live proxy and connection diagnostics now exist for real Together validation.
 
 These steps focus on measurement first and the highest-confidence, lowest-risk wins.
 
@@ -122,63 +122,59 @@ Still a major potential source of added latency + cost because it introduces ext
 
 ---
 
-## Refined Ideas (experiment-driven)
+## Classified Ideas (experiment-driven)
 
-### Do these soon (high confidence, easy to validate)
+### Completed or retained
 
-1. **Phase timings under `TOGETHERLINK_PERF=1`** (or gated debug)
-   - Record: body read, translation, vision, upstream fetch (with retry count), response map, time-to-first-delta, total handler time.
-   - Make it easy to turn on for real Claude/Codex sessions.
+1. **Phase timings under `TOGETHERLINK_PERF=1`**
+   - Implemented. Records body parse, translation, vision, upstream fetch, response mapping, first-delta timing, and total handler time.
 
 2. **Claude streaming hygiene**
-   - Add `res.flushHeaders()` and `res.socket?.setNoDelay(true)` in the Anthropic streaming path (matching what Codex already does).
+   - Implemented. Local TTFT p95 improved in the captured streaming benchmark.
 
 3. **Eliminate sync side effects in debug**
-   - Remove or async-ify the `appendFileSync` path when `TOGETHERLINK_DEBUG_LOG` is set.
-   - Consider structured logging that only stringifies when a sink is active.
+   - Implemented. The value is removing debug-mode filesystem stalls; normal timings were neutral/noisy.
 
 4. **Common-case fast path**
-   - Early return / lighter code when there are no image blocks, no native server tools, and no special reasoning config.
-   - This aligns with the "optimize the 80% path" instinct.
+   - Retain the first simple guards. Stop further generic fast-path work until real telemetry shows translation is material.
 
-5. **Benchmark upgrades (required before big claims)**
-   - Add TTFT measurement for streaming responses.
-   - Add concurrent load (multiple sessions against one daemon).
-   - Keep the synthetic vs captured distinction.
-   - Consider a "live against real Together" mode (with cost accounting) for validation.
+5. **Benchmark upgrades**
+   - Implemented. The suite now covers TTFT, concurrent captured load, high-volume SSE parsing, native search latency, vision failover, and opt-in live Together validation.
 
-### Approach carefully or later
+### Rejected or gated
 
-- **Vision failover**: Only consider parallel after first model is observably slow (delayed race), or make it explicitly opt-in. Parallel calls risk doubling vision spend if both are billed.
+- **Vision failover**: Implemented only as an opt-in delayed race. It stays off by default because the faster path uses two vision requests per image.
 - **Keep-alive tuning**: Rejected for now. The custom dispatcher failed local validation, and the live `/models` connection diagnostic did not show a clear default keep-alive win over forced close.
-- **Worker threads, alternate runtime, HTTP/2**: Treat as "investigate only after real telemetry shows local CPU time is a first-order contributor compared with network + model latency."
+- **Worker threads, alternate runtime, HTTP/2**: Rejected by mocked and live timing gates. Reopen only if real telemetry shows local CPU is a first-order contributor.
 
-### Other worthwhile work
+### Other completed work
 
-- Cheaper context estimation (length heuristic before stringify).
+- Cheaper context estimation for simple no-tools payloads.
 - Concurrent Exa calls when multiple native searches are requested in one turn.
-- Tighter streaming SSE parsing (less per-chunk string work).
-- Instrument real sessions (sampled or under perf flag) so we stop guessing.
+- Tighter Claude high-volume SSE parsing.
+- Session-level perf aggregation under the perf flag.
+- Cold daemon launch polling reduction.
 
 ---
 
 ## Measurement & Diagnostics (the real priority)
 
-Before any architectural change, we need to know:
+Before any new architectural change, use the implemented diagnostics to answer:
 
 1. In actual user sessions, what fraction of end-to-end time is spent inside the proxy vs waiting on Together / vision / Exa?
 2. What is real TTFT (first visible token to the user) with and without the proposed cheap changes?
 3. How does the daemon behave under 2–4 concurrent agent sessions?
 4. How often do images and native tools actually appear in real traffic?
 
-Planned instrumentation:
+Implemented instrumentation:
 
 - `TOGETHERLINK_PERF=1` mode that logs phase timings + token counts per request.
-- Extend the benchmark to report TTFT and support concurrent execution.
-- Add lightweight per-turn proxy overhead to session telemetry (debug-gated or sampled).
+- Benchmarks that report TTFT and support concurrent execution.
+- Lightweight per-turn proxy overhead in session telemetry under the perf flag.
+- Opt-in live Together proxy and connection diagnostics.
 - Vision cost is tracked in cost accounting (CostTracker), but not surfaced clearly to users today.
 
-Only after the above data exists should we seriously evaluate worker threads, Rust shims, or protocol upgrades.
+Only if those diagnostics show local CPU or connection setup is a first-order contributor should we reopen worker threads, Rust shims, custom dispatchers, or protocol upgrades.
 
 ---
 
