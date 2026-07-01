@@ -1178,6 +1178,41 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
+  test("defaults max_tokens to the model output budget when Codex omits max_output_tokens", async () => {
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+        });
+      }),
+    );
+
+    await postResponses({
+      model: GLM_5_2.id,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Hi." }] }],
+    });
+
+    // Together silently caps omitted max_tokens at 2048, which truncates
+    // long-reasoning models (Kimi K2.6/K2.7) mid-turn; the proxy must always
+    // send an explicit budget. A tiny input leaves the full output limit free.
+    expect(requests[0]?.max_tokens).toBe(GLM_5_2.limit.output);
+
+    await postResponses({
+      model: GLM_5_2.id,
+      max_output_tokens: 1234,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Hi." }] }],
+    });
+
+    expect(requests[1]?.max_tokens).toBe(1234);
+  });
+
   test("routes Codex memory extraction requests to the default long-context Together model", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal(

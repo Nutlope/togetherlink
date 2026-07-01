@@ -178,6 +178,14 @@ const MAX_TOGETHER_STREAM_IDLE_RETRIES = 3;
 const DEFAULT_CODEX_STREAM_IDLE_TIMEOUT_MS = 120_000;
 // Ten minutes: leak protection for a whole streamed Codex turn, not a normal thinking limit.
 const DEFAULT_CODEX_STREAM_TURN_TIMEOUT_MS = 600_000;
+// Together defaults max_tokens to 2048 when a chat request omits it. Codex rarely
+// sends max_output_tokens, and reasoning models (Kimi K2.6/K2.7 Code) can spend the
+// whole 2048 budget on reasoning alone, so the turn ends with finish_reason "length"
+// before any visible text or tool call and Codex renders a silently truncated reply.
+// Always send an explicit budget: the model's output limit, clamped to the context
+// space the (roughly estimated) input leaves free.
+const CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
+const CODEX_APPROX_CHARS_PER_TOKEN = 4;
 
 type ResolvedCodexRequestModel = {
   requestedModelId: string;
@@ -592,7 +600,9 @@ function toChatPayload(
   return {
     model: requestModel.targetModelId,
     messages: messagesWithNativePrompt,
-    max_tokens: body.max_output_tokens,
+    max_tokens:
+      body.max_output_tokens ??
+      defaultMaxOutputTokens(requestModel.definition, messagesWithNativePrompt, toolTranslation),
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
     tool_choice: toChatToolChoice(body.tool_choice, toolTranslation),
@@ -2036,6 +2046,21 @@ function recordUsage(
     usage.completion_tokens ?? 0,
     modelDefinition,
   );
+}
+
+function defaultMaxOutputTokens(
+  modelDefinition: ModelDefinition,
+  messages: ChatMessage[],
+  toolTranslation: CodexToolTranslation,
+): number {
+  const estimatedInputTokens = Math.ceil(
+    Buffer.byteLength(JSON.stringify({ messages, tools: toolTranslation.tools }), "utf8") /
+      CODEX_APPROX_CHARS_PER_TOKEN,
+  );
+  const availableOutputTokens = Math.floor(
+    modelDefinition.limit.context - estimatedInputTokens - CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS,
+  );
+  return Math.max(1, Math.min(modelDefinition.limit.output, availableOutputTokens));
 }
 
 function maxTokensForContextLengthRetry(
