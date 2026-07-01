@@ -67,7 +67,9 @@ describe("Codex App alpha config", () => {
     expect(second).not.toContain("/session/old/v1");
     expect(second).toContain('model = "moonshotai/Kimi-K2.7-Code"');
     expect(second).toContain('model_provider = "togetherlink_codex_app"');
-    expect(second.match(/approval_policy = "untrusted"/g)).toHaveLength(1);
+    expect(second.match(/approval_policy = "on-request"/g)).toHaveLength(1);
+    expect(second.match(/sandbox_mode = "workspace-write"/g)).toHaveLength(1);
+    expect(second.match(/approvals_reviewer = "auto_review"/g)).toHaveLength(1);
     expect(second).not.toContain("openai_base_url");
     expect(second).toContain('base_url = "http://127.0.0.1:7878/session/new/v1"');
     expect(second).toContain("/session/new/v1");
@@ -121,7 +123,8 @@ describe("Codex App alpha config", () => {
     );
 
     expect(config).toContain('approval_policy = "never"');
-    expect(config).not.toContain('approval_policy = "untrusted"');
+    expect(config).not.toContain('approval_policy = "on-request"');
+    expect(config).not.toContain('approvals_reviewer = "auto_review"');
   });
 
   test("emits the full ModelInfo schema Codex Desktop expects", () => {
