@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexModelCatalogJson } from "./catalog.js";
 import { CODEX_AUTH_ENV, CODEX_PROVIDER_ID, resolveCodexModel } from "./defaults.js";
+import { codexArgsIgnoreUserConfig, ensureCodexGenericUserDefaults } from "./user-config.js";
 import {
   ensureDaemon,
   daemonFetch,
@@ -18,6 +19,7 @@ import { sendTelemetryEvent, randomSessionId } from "../telemetry.js";
 
 export type CodexLaunchOptions = {
   apiKey: string;
+  home: string;
   modelId?: string;
   args?: string[];
 };
@@ -30,6 +32,11 @@ export type CodexLaunchResult = {
 const MODEL_OVERRIDE_FLAGS = new Set(["--model", "-m"]);
 
 export async function runCodexTogether(options: CodexLaunchOptions): Promise<CodexLaunchResult> {
+  const args = options.args ?? [];
+  if (!codexArgsIgnoreUserConfig(args)) {
+    await ensureCodexGenericUserDefaults(options.home);
+  }
+
   const selectedModel = resolveCodexModel(options.modelId);
   const modelId = selectedModel.definition.id;
   const modelName = selectedModel.definition.name;
@@ -80,7 +87,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const child = spawn(
     "codex",
     [
-      ...codexArgsWithoutModelOverrides(options.args ?? []),
+      ...codexArgsWithoutModelOverrides(args),
       ...codexConfigArgs(agentProxyUrl, authToken, modelId, catalog.path),
     ],
     {

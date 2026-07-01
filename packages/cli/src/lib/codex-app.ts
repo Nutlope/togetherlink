@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
 import { codexModelCatalogJson } from "./codex/catalog.js";
+import { applyCodexGenericUserDefaults } from "./codex/user-config.js";
 import {
   daemonFetch,
   daemonSessionUrl,
@@ -160,7 +161,8 @@ export function buildCodexAppConfig(
     `model_providers.${options.providerId}`,
     `model_providers."${options.providerId}"`,
   ]);
-  const [preamble, rest] = splitTomlPreamble(withoutLegacyTables);
+  const withGenericDefaults = applyCodexGenericUserDefaults(withoutLegacyTables);
+  const [preamble, rest] = splitTomlPreamble(withGenericDefaults);
   const managedPreamble = upsertTopLevelTomlKeys(preamble, {
     model: tomlString(options.modelId),
     model_provider: tomlString(options.providerId),

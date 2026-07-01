@@ -20,6 +20,7 @@ export default defineHarness({
     const selectedModel = resolveCodexModel(ctx.main);
     const result = await runCodexTogether({
       apiKey,
+      home: ctx.home,
       modelId: selectedModel.id,
       ...(ctx.passthrough ? { args: ctx.passthrough } : {}),
     });

@@ -28,6 +28,7 @@ describe("Codex App alpha config", () => {
     expect(config).toContain('model = "zai-org/GLM-5.2"');
     expect(config).toContain('model_provider = "togetherlink_codex_app"');
     expect(config).toContain('model_catalog_json = "/tmp/models.json"');
+    expect(config).not.toContain("approval_policy");
     expect(config).toContain("model_context_window = 196608");
     expect(config).toContain("model_auto_compact_token_limit = 137625");
     expect(config).not.toContain("model_reasoning_effort");
@@ -66,6 +67,7 @@ describe("Codex App alpha config", () => {
     expect(second).not.toContain("/session/old/v1");
     expect(second).toContain('model = "moonshotai/Kimi-K2.7-Code"');
     expect(second).toContain('model_provider = "togetherlink_codex_app"');
+    expect(second.match(/approval_policy = "untrusted"/g)).toHaveLength(1);
     expect(second).not.toContain("openai_base_url");
     expect(second).toContain('base_url = "http://127.0.0.1:7878/session/new/v1"');
     expect(second).toContain("/session/new/v1");
@@ -101,6 +103,25 @@ describe("Codex App alpha config", () => {
     expect(config.match(/\[model_providers\.togetherlink_codex_app\]/g)).toHaveLength(1);
     expect(config).not.toContain("http://old.invalid/v1");
     expect(config).toContain('[projects."/repo"]');
+  });
+
+  test("preserves an existing approval policy preference", () => {
+    const config = buildCodexAppConfig(
+      ['approval_policy = "never"', "", '[projects."/repo"]', 'trust_level = "trusted"', ""].join(
+        "\n",
+      ),
+      {
+        modelId: "zai-org/GLM-5.2",
+        providerId: "togetherlink_codex_app",
+        providerName: "Togetherlink",
+        baseUrl: "http://127.0.0.1:7878/session/local-secret/v1",
+        bearerToken: "local-secret",
+        catalogPath: "/tmp/models.json",
+      },
+    );
+
+    expect(config).toContain('approval_policy = "never"');
+    expect(config).not.toContain('approval_policy = "untrusted"');
   });
 
   test("emits the full ModelInfo schema Codex Desktop expects", () => {

@@ -174,6 +174,10 @@ type StreamProxyResult =
 const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
 const MAX_TOGETHER_RETRIES = 3;
 const MAX_TOGETHER_STREAM_IDLE_RETRIES = 3;
+// Two minutes: allow slow reasoning gaps without treating the upstream stream as dead.
+const DEFAULT_CODEX_STREAM_IDLE_TIMEOUT_MS = 120_000;
+// Ten minutes: leak protection for a whole streamed Codex turn, not a normal thinking limit.
+const DEFAULT_CODEX_STREAM_TURN_TIMEOUT_MS = 600_000;
 
 type ResolvedCodexRequestModel = {
   requestedModelId: string;
@@ -1937,13 +1941,17 @@ async function readSseChunk(
 function codexStreamIdleTimeoutMs(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 120_000;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(100, parsed)
+    : DEFAULT_CODEX_STREAM_IDLE_TIMEOUT_MS;
 }
 
 function codexStreamTurnTimeoutMs(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 600_000;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(100, parsed)
+    : DEFAULT_CODEX_STREAM_TURN_TIMEOUT_MS;
 }
 
 function codexStreamIdleRetries(): number {
