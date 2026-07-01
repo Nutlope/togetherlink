@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
 import { codexModelCatalogJson } from "./codex/catalog.js";
 import { applyCodexGenericUserDefaults } from "./codex/user-config.js";
+import { clearAppRegistration, writeAppRegistration } from "./daemon/app-registration.js";
 import {
   daemonFetch,
   daemonSessionUrl,
@@ -13,6 +14,7 @@ import {
   localProxyAuthToken,
   registerDaemonSession,
 } from "./daemon/launch.js";
+import type { RegisterSessionRequest } from "./daemon/state.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
@@ -67,7 +69,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionToken);
   const catalogPath = await writePersistentModelCatalog(ctx.home);
 
-  await registerDaemonSession(proxyUrl, {
+  const registration: RegisterSessionRequest = {
     token: sessionToken,
     authToken,
     agent: "codex-app",
@@ -78,7 +80,12 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
     ...(process.env.TOGETHERLINK_DEBUG === "1" ? { debug: true } : {}),
-  });
+  };
+  await registerDaemonSession(proxyUrl, registration);
+  // This command exits after configuring, so no launcher stays alive to
+  // re-register the session. Persist the register body so the daemon can
+  // rebuild the session on demand (restart, idle reap) from disk.
+  await writeAppRegistration(registration, togetherlinkHomeDir(ctx.home));
 
   const configPath = codexConfigPath(ctx.home);
   const backup = await backupCodexAppConfig(ctx.home, configPath);
@@ -220,6 +227,9 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   }
   await rm(modelCatalogPath(home), { force: true });
   await rm(appSessionLockPath(home), { force: true });
+  // Drop the persisted registration so the daemon stops lazily resurrecting
+  // the codex-app session after the user restores their original profile.
+  await clearAppRegistration(togetherlinkHomeDir(home));
   // Restore should also drop the models cache: a stale OpenAI-only cache left
   // behind by a togetherlink session would make Codex show "Unknown model"
   // warnings for the user's real (restored) model until the cache expires.
@@ -499,11 +509,11 @@ async function bustStaleModelsCache(home: string): Promise<void> {
 }
 
 function appSessionLockPath(home: string): string {
-  return path.join(
-    process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink"),
-    "codex-app",
-    "session.json",
-  );
+  return path.join(togetherlinkHomeDir(home), "codex-app", "session.json");
+}
+
+function togetherlinkHomeDir(home: string): string {
+  return process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink");
 }
 
 function codexAppSessionToken(authToken: string): string {

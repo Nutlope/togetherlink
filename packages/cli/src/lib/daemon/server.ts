@@ -16,11 +16,13 @@ import {
   extractToken,
 } from "../claude/proxy.js";
 import { handleCodexProxyRequest } from "../codex/proxy.js";
+import { readAppRegistration } from "./app-registration.js";
 import {
   sessions,
   buildSession,
   toPublicSessionView,
   type RegisterSessionRequest,
+  type SessionState,
   type UsageReportRequest,
   isProxiedAgent,
 } from "./state.js";
@@ -332,7 +334,10 @@ async function handleDaemonRequest(
   // misconfiguration; refuse it clearly.
   const sessionRoute = localSessionRoute(req, path_);
   const token = sessionRoute?.token ?? extractToken(req);
-  const session = token !== undefined ? sessions.get(token) : undefined;
+  let session = token !== undefined ? sessions.get(token) : undefined;
+  if (session === undefined && token !== undefined) {
+    session = await restoreAppSession(token);
+  }
   if (!session) {
     writeAnthropicError(res, 401, "authentication_error", "Unauthorized local proxy request.");
     return;
@@ -364,6 +369,23 @@ async function handleDaemonRequest(
   } finally {
     sessionRoute?.restore();
   }
+}
+
+/**
+ * Re-register the persistent codex-app session from its on-disk registration.
+ * The Codex desktop app holds the stable local-proxy token in its config with
+ * no launcher process alive to re-register when this daemon loses the session
+ * (restart, idle reap, kill -9). Without this fallback every request from the
+ * app 401s until the user re-runs `togetherlink codex-app`.
+ */
+async function restoreAppSession(token: string): Promise<SessionState | undefined> {
+  const registration = await readAppRegistration();
+  if (registration === undefined || registration.token !== token) {
+    return undefined;
+  }
+  const state = buildSession(registration);
+  sessions.register(state);
+  return state;
 }
 
 function localSessionRoute(
