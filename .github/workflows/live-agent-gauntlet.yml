@@ -43,6 +43,7 @@ jobs:
       CI: "true"
       TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
       TOGETHERLINK_DEBUG: "1"
+      VITEST_RETRY: "3"
       HARNESS: ${{ github.event.inputs.harness || 'all' }}
 
     steps:
