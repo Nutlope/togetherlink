@@ -21,6 +21,8 @@ const GLM_5_2 = {
 
 export type TestDaemon = {
   url: string;
+  /** The daemon's isolated TOGETHERLINK_HOME. */
+  home: string;
   stderr: () => string;
   stop: () => Promise<void>;
 };
@@ -53,6 +55,7 @@ export async function startTestDaemon(context: TestContext): Promise<TestDaemon>
       if (response.ok) {
         return {
           url,
+          home,
           stderr: () => stderr,
           stop: async () => {
             child.kill("SIGTERM");
