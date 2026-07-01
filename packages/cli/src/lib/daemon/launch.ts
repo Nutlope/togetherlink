@@ -15,7 +15,7 @@ import {
 } from "./server.js";
 import type { RegisterSessionRequest } from "./state.js";
 
-const HEALTH_POLL_INTERVAL_MS = 200;
+const HEALTH_POLL_INTERVAL_MS = 50;
 const HEALTH_POLL_TIMEOUT_MS = 5000;
 
 /** Timeout for the launcher's internal daemon calls (register/cost/deregister). */

@@ -1,6 +1,5 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { appendFileSync } from "node:fs";
 import { TOGETHER_BASE_URL } from "../together-core.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
@@ -14,6 +13,8 @@ import {
   type UrlBlock,
 } from "./vision.js";
 import { stableHash } from "../stable-hash.js";
+import { createProxyPerfTracer, type ProxyPerfSink, type ProxyPerfTracer } from "../proxy-perf.js";
+import { writeDebugLogLine } from "../debug-log.js";
 
 // Re-exported so the daemon's agent-agnostic session model (daemon/state.ts)
 // can reference the model type without depending on @togetherlink/models directly.
@@ -211,6 +212,18 @@ function applyEstimatedContextBudget(
   if (typeof currentMaxTokens !== "number" || !Number.isFinite(currentMaxTokens)) {
     return;
   }
+  const roughInputTokens = roughPayloadInputTokens(payload);
+  if (roughInputTokens !== undefined) {
+    const roughInputTokensWithHeadroom = roughInputTokens + Math.ceil(roughInputTokens / 5);
+    if (
+      currentMaxTokens <= model.limit.output &&
+      roughInputTokensWithHeadroom + currentMaxTokens + CONTEXT_OUTPUT_SAFETY_TOKENS <
+        model.limit.context
+    ) {
+      return;
+    }
+  }
+
   let estimatedInputTokens = estimatePayloadInputTokens(payload);
   const reserveOverflowTokens =
     estimatedInputTokens + currentMaxTokens + CONTEXT_OUTPUT_SAFETY_TOKENS - model.limit.context;
@@ -255,6 +268,28 @@ function estimatePayloadInputTokens(payload: Record<string, unknown>): number {
       }) / APPROX_CHARS_PER_TOKEN,
     ),
   );
+}
+
+function roughPayloadInputTokens(payload: Record<string, unknown>): number | undefined {
+  if (payload.tools !== undefined || payload.tool_choice !== undefined) {
+    return undefined;
+  }
+  const messages = payload.messages;
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  let chars = 0;
+  for (const message of messages) {
+    if (typeof message !== "object" || message === null) {
+      return undefined;
+    }
+    const record = message as Record<string, unknown>;
+    if (typeof record.role !== "string" || typeof record.content !== "string") {
+      return undefined;
+    }
+    chars += record.role.length + record.content.length + 32;
+  }
+  return Math.max(1, Math.ceil(chars / APPROX_CHARS_PER_TOKEN));
 }
 
 function jsonByteLength(value: unknown): number {
@@ -360,6 +395,7 @@ export type ClaudeProxyOptions = {
   authToken: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  perfSink?: ProxyPerfSink | undefined;
 };
 
 /**
@@ -376,6 +412,14 @@ export async function handleProxyRequest(
   options: ClaudeProxyOptions,
 ): Promise<void> {
   const path = requestPath(req);
+  const perf = createProxyPerfTracer(
+    "claude.proxy",
+    {
+      method: req.method,
+      path,
+    },
+    options.perfSink,
+  );
   debugLog(options, "http request", { method: req.method, url: req.url, path });
 
   if (req.method === "HEAD" && path === "/") {
@@ -447,7 +491,9 @@ export async function handleProxyRequest(
     return;
   }
 
-  const body = (await readJsonBody(req)) as AnthropicMessagesRequest;
+  const body = (await perf.span("body_read_parse", () =>
+    readJsonBody(req),
+  )) as AnthropicMessagesRequest;
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -459,22 +505,32 @@ export async function handleProxyRequest(
     }
   });
   options.costTracker?.beginRequest();
-  debugLog(options, "anthropic request", {
+  debugLog(options, "anthropic request", () => ({
     model: body.model,
     stream: body.stream,
     messageCount: body.messages?.length ?? 0,
     toolCount: body.tools?.length ?? 0,
     tools: summarizeAnthropicTools(body.tools),
-  });
+  }));
   const imageBlocks = extractImageBlocks(body);
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
   // GLM-5.2 can't see images: describe each image/url block with a vision model
   // and replace it with a text block, so GLM reasons over the description.
-  await resolveImageBlocks(body, options);
+  if (imageBlocks.length > 0) {
+    await perf.span("vision_image_resolution", () => resolveImageBlocks(body, options), {
+      imageBlockCount: imageBlocks.length,
+    });
+  } else {
+    perf.mark("vision_image_resolution_skipped", { imageBlockCount: 0 });
+  }
   if (body.stream) {
-    await streamAnthropicFromTogether(res, body, options, upstreamAbort.signal);
+    await perf.span(
+      "stream_response",
+      () => streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, perf),
+      { nativeToolCount: nativeServerTools(body.tools).length },
+    );
     const delta = options.costTracker?.requestDelta;
     const totals = options.costTracker?.totals;
     if (options.debug && delta && totals) {
@@ -486,11 +542,19 @@ export async function handleProxyRequest(
         sessionTotalCostUsd: Number(totals.costUsd.toFixed(6)),
       });
     }
+    perf.end({ status: res.statusCode, stream: true });
     return;
   }
 
-  const openAiResponse = await callTogetherChatCompletions(body, options, upstreamAbort.signal);
-  const anthropicMessage = toAnthropicMessage(openAiResponse, body.model ?? options.modelId);
+  const openAiResponse = await callTogetherChatCompletions(
+    body,
+    options,
+    upstreamAbort.signal,
+    perf,
+  );
+  const anthropicMessage = perf.spanSync("response_map", () =>
+    toAnthropicMessage(openAiResponse, body.model ?? options.modelId),
+  );
 
   const delta = options.costTracker?.requestDelta;
   const totals = options.costTracker?.totals;
@@ -505,6 +569,7 @@ export async function handleProxyRequest(
   }
 
   writeJson(res, 200, anthropicMessage);
+  perf.end({ status: res.statusCode, stream: false });
 }
 
 function trimPayloadInputForContextLengthRetry(
@@ -618,13 +683,26 @@ async function callTogetherChatCompletions(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<OpenAIChatResponse> {
-  const targetModel = resolveTargetModel(body.model, options);
-  const nativeTools = nativeServerTools(body.tools);
+  const translated =
+    perf?.spanSync("translate_request", () => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const nativeTools = nativeServerTools(body.tools);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const tools = toOpenAITools(body.tools, options);
+      return { targetModel, nativeTools, messages, tools };
+    }) ??
+    (() => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const nativeTools = nativeServerTools(body.tools);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const tools = toOpenAITools(body.tools, options);
+      return { targetModel, nativeTools, messages, tools };
+    })();
+  const { targetModel, nativeTools, messages, tools } = translated;
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
-  const messages = toOpenAIMessages(body, targetModel.definition);
-  const tools = toOpenAITools(body.tools, options);
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
@@ -655,7 +733,11 @@ async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    let response = await fetchTogether(payload, options, signal);
+    let response = await (perf?.span(
+      "upstream_fetch",
+      () => fetchTogether(payload, options, signal),
+      { turn },
+    ) ?? fetchTogether(payload, options, signal));
     if (!response.ok) {
       const initialError = response.error;
       const retryMaxTokens = maxTokensForContextLengthRetry(
@@ -672,7 +754,11 @@ async function callTogetherChatCompletions(
           originalError: initialError.message,
           turn,
         });
-        response = await fetchTogether(payload, options, signal);
+        response = await (perf?.span(
+          "upstream_fetch_retry",
+          () => fetchTogether(payload, options, signal),
+          { turn, reason: "max_tokens" },
+        ) ?? fetchTogether(payload, options, signal));
       } else if (canTrimInputForContextLengthRetry(initialError, targetModel.definition)) {
         const trimmed = trimPayloadInputForContextLengthRetry(
           payload,
@@ -686,7 +772,11 @@ async function callTogetherChatCompletions(
             originalError: initialError.message,
             turn,
           });
-          response = await fetchTogether(payload, options, signal);
+          response = await (perf?.span(
+            "upstream_fetch_retry",
+            () => fetchTogether(payload, options, signal),
+            { turn, reason: "trim_context" },
+          ) ?? fetchTogether(payload, options, signal));
         }
       }
     }
@@ -757,7 +847,11 @@ async function callTogetherChatCompletions(
         result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
       } else if (nativeTool?.kind === "web_search") {
         nativeToolUses.set(name, priorUses + 1);
-        result = await runExaSearch(input, nativeTool.definition, options);
+        result = await (perf?.span(
+          "native_tool",
+          () => runExaSearch(input, nativeTool.definition, options),
+          { name },
+        ) ?? runExaSearch(input, nativeTool.definition, options));
       } else {
         result = "Unsupported native server tool.";
       }
@@ -1421,15 +1515,49 @@ async function streamAnthropicFromTogether(
   body: AnthropicMessagesRequest,
   options: ClaudeProxyOptions,
   signal?: AbortSignal,
+  perf?: ProxyPerfTracer,
 ): Promise<StreamProxyResult> {
-  const targetModel = resolveTargetModel(body.model, options);
-  const messages = toOpenAIMessages(body, targetModel.definition);
-  const nativeTools = nativeServerTools(body.tools);
-  const upstreamMessages =
-    nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
-  const tools = toOpenAITools(body.tools, options);
-  const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-  let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+  const translated =
+    perf?.spanSync("translate_request", () => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const nativeTools = nativeServerTools(body.tools);
+      const upstreamMessages =
+        nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+      const tools = toOpenAITools(body.tools, options);
+      const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+      const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+      return {
+        targetModel,
+        messages,
+        nativeTools,
+        upstreamMessages,
+        tools,
+        reasoningEffort,
+        maxTokens,
+      };
+    }) ??
+    (() => {
+      const targetModel = resolveTargetModel(body.model, options);
+      const messages = toOpenAIMessages(body, targetModel.definition);
+      const nativeTools = nativeServerTools(body.tools);
+      const upstreamMessages =
+        nativeTools.length > 0 ? withNativeToolSystemPrompt(messages, nativeTools) : messages;
+      const tools = toOpenAITools(body.tools, options);
+      const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+      const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+      return {
+        targetModel,
+        messages,
+        nativeTools,
+        upstreamMessages,
+        tools,
+        reasoningEffort,
+        maxTokens,
+      };
+    })();
+  const { targetModel, nativeTools, upstreamMessages, tools, reasoningEffort } = translated;
+  let { maxTokens } = translated;
 
   const payload = {
     model: targetModel.definition.id,
@@ -1459,15 +1587,26 @@ async function streamAnthropicFromTogether(
 
   let response: Response;
   try {
-    response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
+    response = await (perf?.span("upstream_fetch", () =>
+      fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        ...(signal ? { signal } : {}),
+      }),
+    ) ??
+      fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        ...(signal ? { signal } : {}),
+      }));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1486,15 +1625,29 @@ async function streamAnthropicFromTogether(
         originalError: error.message,
       });
       try {
-        response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${options.apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-          ...(signal ? { signal } : {}),
-        });
+        response = await (perf?.span(
+          "upstream_fetch_retry",
+          () =>
+            fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${options.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+              ...(signal ? { signal } : {}),
+            }),
+          { reason: "max_tokens" },
+        ) ??
+          fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${options.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            ...(signal ? { signal } : {}),
+          }));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1512,15 +1665,29 @@ async function streamAnthropicFromTogether(
           originalError: error.message,
         });
         try {
-          response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${options.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-            ...(signal ? { signal } : {}),
-          });
+          response = await (perf?.span(
+            "upstream_fetch_retry",
+            () =>
+              fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${options.apiKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+                ...(signal ? { signal } : {}),
+              }),
+            { reason: "trim_context" },
+          ) ??
+            fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${options.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+              ...(signal ? { signal } : {}),
+            }));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           writeAnthropicError(res, 503, "overloaded_error", message);
@@ -1553,6 +1720,8 @@ async function streamAnthropicFromTogether(
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
 
   const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
   const model = body.model ?? options.modelId;
@@ -1616,13 +1785,16 @@ async function streamAnthropicFromTogether(
         if (delta) {
           const reasoning = delta.reasoning ?? delta.reasoning_content;
           if (typeof reasoning === "string" && reasoning.length > 0) {
+            perf?.markOnce("first_delta", { kind: "thinking" });
             blockManager.emitThinking(reasoning);
           }
           if (typeof delta.content === "string" && delta.content.length > 0) {
+            perf?.markOnce("first_delta", { kind: "text" });
             blockManager.emitText(delta.content);
           }
           if (Array.isArray(delta.tool_calls)) {
             for (const toolCall of delta.tool_calls) {
+              perf?.markOnce("first_delta", { kind: "tool_call" });
               blockManager.emitToolCall(toolCall);
             }
           }
@@ -1754,22 +1926,27 @@ async function streamAnthropicNativeToolLoop({
       })),
     });
 
-    for (const toolCall of nativeToolCalls) {
-      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
-      const name = toolCall.function.name ?? "web_search";
-      const nativeTool = nativeTools.find((tool) => tool.name === name);
-      const input = parseJsonOrEmpty(toolCall.function.arguments);
-      const priorUses = nativeToolUses.get(name) ?? 0;
-      const maxUses = nativeTool ? nativeToolMaxUses(nativeTool.definition) : 0;
-      let result: string;
-      if (priorUses >= maxUses) {
-        result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
-      } else if (nativeTool?.kind === "web_search") {
-        nativeToolUses.set(name, priorUses + 1);
-        result = await runExaSearch(input, nativeTool.definition, options);
-      } else {
-        result = "Unsupported native server tool.";
-      }
+    const toolResults = await Promise.all(
+      nativeToolCalls.map(async (toolCall) => {
+        const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+        const name = toolCall.function.name ?? "web_search";
+        const nativeTool = nativeTools.find((tool) => tool.name === name);
+        const input = parseJsonOrEmpty(toolCall.function.arguments);
+        const priorUses = nativeToolUses.get(name) ?? 0;
+        const maxUses = nativeTool ? nativeToolMaxUses(nativeTool.definition) : 0;
+        let result: string;
+        if (priorUses >= maxUses) {
+          result = `Web search error: max_uses_exceeded for ${name}. Do not call this tool again; answer from the results already provided or say search is unavailable.`;
+        } else if (nativeTool?.kind === "web_search") {
+          nativeToolUses.set(name, priorUses + 1);
+          result = await runExaSearch(input, nativeTool.definition, options);
+        } else {
+          result = "Unsupported native server tool.";
+        }
+        return { id, result };
+      }),
+    );
+    for (const { id, result } of toolResults) {
       messages.push({ role: "tool", tool_call_id: id, content: result });
     }
 
@@ -2020,26 +2197,75 @@ function parseStreamData(data: string): {
  * into one payload before parsing.
  */
 function consumeSseLines(buffer: string, onData: (data: string) => void): string {
-  let remaining = buffer;
+  let consumed = 0;
   for (;;) {
-    // Find the next event boundary (blank line = \n\n, or \r\n\r\n).
-    const boundary = remaining.search(/\r?\n\r?\n/);
-    if (boundary === -1) {
+    const boundary = findSseBoundary(buffer, consumed);
+    if (!boundary) {
       break;
     }
-    const rawEvent = remaining.slice(0, boundary);
-    remaining = remaining.replace(/.*?(\r?\n){2}/s, "");
-    // Within one event, concatenate every `data:` line (strip the prefix). A
-    // multi-line data field arrives as separate `data:` lines per OpenAI SSE.
-    const dataLines = rawEvent
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).replace(/^ /, ""));
-    if (dataLines.length > 0) {
-      onData(dataLines.join("\n"));
+    const data = sseDataPayload(buffer.slice(consumed, boundary.index));
+    if (data !== undefined) {
+      onData(data);
     }
+    consumed = boundary.index + boundary.length;
   }
-  return remaining;
+  return buffer.slice(consumed);
+}
+
+function findSseBoundary(
+  buffer: string,
+  fromIndex: number,
+): { index: number; length: number } | undefined {
+  let newline = buffer.indexOf("\n", fromIndex);
+  while (newline !== -1) {
+    const next = newline + 1;
+    const nextCode = buffer.charCodeAt(next);
+    if (nextCode === 10) {
+      return { index: newline, length: 2 };
+    }
+    if (nextCode === 13 && buffer.charCodeAt(next + 1) === 10) {
+      return { index: newline, length: 3 };
+    }
+    if (newline > fromIndex && buffer.charCodeAt(newline - 1) === 13) {
+      if (nextCode === 10) {
+        return { index: newline - 1, length: 3 };
+      }
+      if (nextCode === 13 && buffer.charCodeAt(next + 1) === 10) {
+        return { index: newline - 1, length: 4 };
+      }
+    }
+    newline = buffer.indexOf("\n", next);
+  }
+  return undefined;
+}
+
+function sseDataPayload(rawEvent: string): string | undefined {
+  let payload = "";
+  let hasData = false;
+  let lineStart = 0;
+  for (;;) {
+    let lineEnd = rawEvent.indexOf("\n", lineStart);
+    if (lineEnd === -1) {
+      lineEnd = rawEvent.length;
+    }
+    const line =
+      lineEnd > lineStart && rawEvent.charCodeAt(lineEnd - 1) === 13
+        ? rawEvent.slice(lineStart, lineEnd - 1)
+        : rawEvent.slice(lineStart, lineEnd);
+    if (line.startsWith("data:")) {
+      const valueStart = line.charCodeAt(5) === 32 ? 6 : 5;
+      if (hasData) {
+        payload += "\n";
+      }
+      payload += line.slice(valueStart);
+      hasData = true;
+    }
+    if (lineEnd === rawEvent.length) {
+      break;
+    }
+    lineStart = lineEnd + 1;
+  }
+  return hasData ? payload : undefined;
 }
 
 /**
@@ -2226,15 +2452,17 @@ export function isTogetherApiError(value: unknown): value is TogetherApiError {
   );
 }
 
-function debugLog(options: ClaudeProxyOptions, label: string, value: unknown): void {
+function debugLog(
+  options: ClaudeProxyOptions,
+  label: string,
+  value: unknown | (() => unknown),
+): void {
   if (!options.debug) {
     return;
   }
-  const line = `[togetherlink proxy] ${label}: ${JSON.stringify(value)}\n`;
-  process.stderr.write(line);
-  if (process.env.TOGETHERLINK_DEBUG_LOG) {
-    appendFileSync(process.env.TOGETHERLINK_DEBUG_LOG, line);
-  }
+  const payload = typeof value === "function" ? value() : value;
+  const line = `[togetherlink proxy] ${label}: ${JSON.stringify(payload)}\n`;
+  writeDebugLogLine(line);
 }
 
 export function requestPath(req: IncomingMessage): string {

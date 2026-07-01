@@ -11,6 +11,7 @@ type InstallSummary = DashboardData["installSummaries"][number];
 type RecentSession = DashboardData["recentSessions"][number];
 
 const REFRESH_INTERVAL_MS = 15_000;
+const RECENT_SESSIONS_LIMIT = 10;
 
 async function dashboardSession() {
   return useSession<{ authed?: boolean }>({
@@ -151,9 +152,9 @@ function DashboardRoute() {
       ? data.installSummaries.find((install) => install.installId === selectedInstallId)
       : null;
   const focusedSessions =
-    data?.recentSessions.filter(
-      (session) => selectedInstallId === "all" || session.installId === selectedInstallId,
-    ) ?? [];
+    data?.recentSessions
+      .filter((session) => selectedInstallId === "all" || session.installId === selectedInstallId)
+      .slice(0, RECENT_SESSIONS_LIMIT) ?? [];
   const focusedDaily =
     data?.installDaily.filter(
       (day) => selectedInstallId !== "all" && day.installId === selectedInstallId,

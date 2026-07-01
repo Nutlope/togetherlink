@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
 import { CostTracker } from "../../cli/src/lib/claude/cost.js";
 import { handleProxyRequest, type ClaudeProxyOptions } from "../../cli/src/lib/claude/proxy.js";
+import { describeImage } from "../../cli/src/lib/claude/vision.js";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
@@ -232,6 +233,12 @@ test("large proxy in-process translation breakdown", async () => {
   const codexLargeStreamBody = JSON.stringify({ ...codexLargePayload, stream: true });
   const claudeLargePayload = claudeLargeBenchmarkPayload();
   const claudeLargeBody = JSON.stringify(claudeLargePayload);
+  const claudeLargeNoToolsPayload = { ...claudeLargePayload };
+  delete claudeLargeNoToolsPayload.tools;
+  delete claudeLargeNoToolsPayload.tool_choice;
+  const claudeLargeNoToolsBody = JSON.stringify(claudeLargeNoToolsPayload);
+  const claudeContextFitNoToolsPayload = claudeContextFitNoToolsBenchmarkPayload();
+  const claudeContextFitNoToolsBody = JSON.stringify(claudeContextFitNoToolsPayload);
   let upstreamRequests = 0;
   let upstreamStream = false;
   const upstreamJsonBody = JSON.stringify({
@@ -302,6 +309,15 @@ test("large proxy in-process translation breakdown", async () => {
     await benchmarkWithJsonInstrumentation("claude-large-direct-buffered", 40, 8, () =>
       callClaudeDirect(claudeLargeBody),
     ),
+    await benchmarkWithJsonInstrumentation("claude-large-no-tools-direct-buffered", 40, 8, () =>
+      callClaudeDirect(claudeLargeNoToolsBody),
+    ),
+    await benchmarkWithJsonInstrumentation(
+      "claude-context-fit-no-tools-direct-buffered",
+      40,
+      8,
+      () => callClaudeDirect(claudeContextFitNoToolsBody),
+    ),
   ];
   const result = {
     rows,
@@ -309,6 +325,8 @@ test("large proxy in-process translation breakdown", async () => {
       codexLarge: Buffer.byteLength(codexLargeBody, "utf8"),
       codexLargeStream: Buffer.byteLength(codexLargeStreamBody, "utf8"),
       claudeLarge: Buffer.byteLength(claudeLargeBody, "utf8"),
+      claudeLargeNoTools: Buffer.byteLength(claudeLargeNoToolsBody, "utf8"),
+      claudeContextFitNoTools: Buffer.byteLength(claudeContextFitNoToolsBody, "utf8"),
     },
     upstreamRequests,
     notes: [
@@ -423,6 +441,334 @@ test("captured headless proxy payload breakdown", async () => {
   expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
 }, 30_000);
 
+test("streaming TTFT and concurrent captured proxy load", async () => {
+  const codexCaptured = loadCapturedPayload(CODEX_CAPTURED_FIXTURE);
+  const claudeCaptured = loadCapturedPayload(CLAUDE_CAPTURED_FIXTURE);
+  if (!codexCaptured || !claudeCaptured) {
+    throw new Error("captured fixtures are required for TTFT and concurrent proxy load benchmark");
+  }
+
+  let upstreamRequests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+      if (href.startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+
+      upstreamRequests += 1;
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream) {
+        return delayedSseResponse([
+          { choices: [{ delta: { reasoning_content: "ok " } }] },
+          { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] },
+          { usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 } },
+        ]);
+      }
+
+      return jsonResponse({
+        id: "chatcmpl_bench",
+        choices: [{ message: { reasoning: "ok", content: "hello" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 128, completion_tokens: 8, total_tokens: 136 },
+      });
+    }),
+  );
+
+  const codexProxyOptions = codexOptions();
+  const claudeProxyOptions = claudeOptions();
+  const proxy = await createServer((req, res) => {
+    const path = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    const handler =
+      path === "/v1/responses"
+        ? handleCodexProxyRequest(req, res, codexProxyOptions)
+        : handleProxyRequest(req, res, claudeProxyOptions);
+    handler.catch((err) => {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    });
+  });
+
+  try {
+    const codexBody = JSON.stringify({ ...codexCaptured, stream: true });
+    const claudeBody = JSON.stringify({ ...claudeCaptured, stream: true });
+    const codexTtft = await benchmarkStreamingTtft("codex-captured-stream-ttft", 40, 8, async () =>
+      fetchTextWithTtft(`${proxy.url}/v1/responses`, codexBody, {
+        firstMarker: "response.reasoning_text.delta",
+        completionMarker: "response.completed",
+      }),
+    );
+    const claudeTtft = await benchmarkStreamingTtft(
+      "claude-captured-stream-ttft",
+      40,
+      8,
+      async () =>
+        fetchTextWithTtft(`${proxy.url}/v1/messages`, claudeBody, {
+          firstMarker: "content_block_delta",
+          completionMarker: "message_stop",
+        }),
+    );
+    const concurrentCaptured = await benchmark(
+      "concurrent-captured-proxy-load",
+      30,
+      5,
+      async () => {
+        await Promise.all([
+          fetchTextWithTtft(`${proxy.url}/v1/responses`, codexBody, {
+            firstMarker: "response.reasoning_text.delta",
+            completionMarker: "response.completed",
+          }),
+          fetchTextWithTtft(`${proxy.url}/v1/responses`, codexBody, {
+            firstMarker: "response.reasoning_text.delta",
+            completionMarker: "response.completed",
+          }),
+          fetchTextWithTtft(`${proxy.url}/v1/messages`, claudeBody, {
+            firstMarker: "content_block_delta",
+            completionMarker: "message_stop",
+          }),
+          fetchTextWithTtft(`${proxy.url}/v1/messages`, claudeBody, {
+            firstMarker: "content_block_delta",
+            completionMarker: "message_stop",
+          }),
+        ]);
+      },
+    );
+
+    const result = {
+      ttftRows: [codexTtft, claudeTtft],
+      concurrentRows: [concurrentCaptured],
+      concurrentRequestsPerIteration: 4,
+      payloadBytes: {
+        codexCaptured: byteLength(codexCaptured),
+        claudeCaptured: byteLength(claudeCaptured),
+      },
+      upstreamRequests,
+      notes: [
+        "TTFT is measured from local client request start to the first visible streamed delta marker.",
+        "The concurrent row runs two Codex and two Claude captured stream requests against one local proxy server per iteration.",
+      ],
+    };
+
+    console.log(JSON.stringify(result, null, 2));
+    expect(upstreamRequests).toBeGreaterThan(0);
+    expect([codexTtft, claudeTtft, concurrentCaptured].every((row) => row.p95Ms < 250)).toBe(true);
+    expect([codexTtft, claudeTtft].every((row) => row.ttft.p95Ms < 250)).toBe(true);
+  } finally {
+    await proxy.close();
+  }
+}, 30_000);
+
+test("high-volume streaming parser throughput", async () => {
+  const highVolumeSseBody = highVolumeSseResponseBody(1_000);
+  let upstreamRequests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      upstreamRequests += 1;
+      return new Response(highVolumeSseBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }),
+  );
+
+  const claudeProxyOptions = claudeOptions();
+  const claudeBody = JSON.stringify({ ...claudeNoToolsBenchmarkPayload(), stream: true });
+  const rows = [
+    await benchmarkWithJsonInstrumentation("claude-high-volume-stream-parser", 30, 5, async () => {
+      const response = await invokeProxyHandler(claudeBody, "/v1/messages", (req, res) =>
+        handleProxyRequest(req, res, claudeProxyOptions),
+      );
+      if (response.statusCode !== 200) {
+        throw new Error(
+          `Claude high-volume stream failed: ${response.statusCode} ${response.body}`,
+        );
+      }
+      if (!response.body.includes("message_stop")) {
+        throw new Error("missing Claude high-volume stream completion");
+      }
+    }),
+  ];
+
+  const result = {
+    rows,
+    upstreamRequests,
+    upstreamEventsPerRun: 1_000,
+    upstreamBytes: Buffer.byteLength(highVolumeSseBody, "utf8"),
+    notes: [
+      "Mocks one Together streaming response with many SSE data events and calls the real Claude proxy handler in-process.",
+      "This isolates local SSE decode/parse/Anthropic re-emit overhead; upstream network latency is not included.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(upstreamRequests).toBeGreaterThan(0);
+  expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
+}, 30_000);
+
+test("streamed native web search tool latency", async () => {
+  vi.stubEnv("EXA_API_KEY", "test-exa-key");
+  const exaDelayMs = 4;
+  let exaRequests = 0;
+  let togetherRequests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href.includes("api.exa.ai/search")) {
+        exaRequests += 1;
+        await sleep(exaDelayMs);
+        return jsonResponse({
+          results: [
+            {
+              title: `Native result ${exaRequests}`,
+              url: `https://example.com/native-${exaRequests}`,
+              text: "Mock Exa result for native web search latency.",
+            },
+          ],
+        });
+      }
+
+      togetherRequests += 1;
+      if (togetherRequests % 2 === 1) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: nativeSearchToolCalls(4),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+          },
+          { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+        ]);
+      }
+
+      return sseResponse([
+        {
+          choices: [{ delta: { content: "NATIVE_SEARCH_DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 80, completion_tokens: 4, total_tokens: 84 },
+        },
+      ]);
+    }),
+  );
+
+  const claudeProxyOptions = claudeOptions();
+  const claudeBody = JSON.stringify({
+    model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    max_tokens: 128,
+    stream: true,
+    messages: [{ role: "user", content: "Search four things." }],
+    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
+  });
+  const rows = [
+    await benchmarkWithJsonInstrumentation(
+      "claude-stream-native-web-search-four-calls",
+      20,
+      3,
+      async () => {
+        const response = await invokeProxyHandler(claudeBody, "/v1/messages", (req, res) =>
+          handleProxyRequest(req, res, claudeProxyOptions),
+        );
+        if (response.statusCode !== 200) {
+          throw new Error(`Claude native search stream failed: ${response.statusCode}`);
+        }
+        if (!response.body.includes("NATIVE_SEARCH_DONE")) {
+          throw new Error("missing Claude native search final answer");
+        }
+      },
+    ),
+  ];
+
+  const result = {
+    rows,
+    exaDelayMs,
+    nativeToolCallsPerRun: 4,
+    exaRequests,
+    togetherRequests,
+    notes: [
+      "Mocks one streamed Together tool-call turn with four native web_search calls, each backed by delayed Exa.",
+      "This isolates proxy-side native tool scheduling latency without live Exa or Together traffic.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(exaRequests).toBe((20 + 3) * 4);
+  expect(togetherRequests).toBe((20 + 3) * 2);
+  expect(rows.every((row) => row.p95Ms < sanityP95CeilingMs())).toBe(true);
+}, 30_000);
+
+test("vision delayed failover timing", async () => {
+  const defaultResult = await benchmarkVisionScenario(
+    "claude-vision-default-primary-success",
+    5,
+    1,
+    async () => {
+      vi.unstubAllEnvs();
+      let requests = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+          requests += 1;
+          await sleep(20, init?.signal);
+          return visionJsonResponse("primary description");
+        }),
+      );
+
+      const result = await describeImage(visionBenchmarkImage(), { apiKey: "local-token" });
+      if (result.description !== "primary description") {
+        throw new Error(`unexpected default vision description: ${result.description}`);
+      }
+      return requests;
+    },
+  );
+  const raceResult = await benchmarkVisionScenario(
+    "claude-vision-opt-in-delayed-failover-race",
+    5,
+    1,
+    async () => {
+      vi.stubEnv("TOGETHERLINK_VISION_FAILOVER_RACE_DELAY_MS", "5");
+      let requests = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+          requests += 1;
+          if (requests === 1) {
+            await sleep(40, init?.signal);
+            return visionJsonResponse("slow primary description");
+          }
+          await sleep(5, init?.signal);
+          return visionJsonResponse("fast fallback description");
+        }),
+      );
+
+      const result = await describeImage(visionBenchmarkImage(), { apiKey: "local-token" });
+      if (result.description !== "fast fallback description") {
+        throw new Error(`unexpected raced vision description: ${result.description}`);
+      }
+      return requests;
+    },
+  );
+  const result = {
+    rows: [defaultResult.row, raceResult.row],
+    requestCounts: {
+      default: defaultResult.requestCounts,
+      optInRace: raceResult.requestCounts,
+    },
+    notes: [
+      "Mocks primary vision latency and delayed fallback latency through the real describeImage path.",
+      "The opt-in race is faster only in the slow-primary scenario and uses two vision requests per image.",
+    ],
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  expect(defaultResult.requestCounts.every((count) => count === 1)).toBe(true);
+  expect(raceResult.requestCounts.every((count) => count === 2)).toBe(true);
+  expect(raceResult.row.p50Ms).toBeLessThan(defaultResult.row.p50Ms);
+}, 30_000);
+
 async function benchmark(
   name: string,
   iterations: number,
@@ -451,6 +797,63 @@ async function benchmark(
     p99Ms: round(percentile(durations, 99)),
     meanMs: round(sum / durations.length),
     maxMs: round(durations[durations.length - 1] ?? 0),
+  };
+}
+
+function summarizeDurations(name: string, iterations: number, durations: number[]): BenchmarkRow {
+  durations.sort((a, b) => a - b);
+  const summary = summarizeDurationSet(durations);
+  return {
+    name,
+    iterations,
+    ...summary,
+  };
+}
+
+async function benchmarkVisionScenario(
+  name: string,
+  iterations: number,
+  warmup: number,
+  fn: () => Promise<number>,
+): Promise<{ row: BenchmarkRow; requestCounts: number[] }> {
+  for (let i = 0; i < warmup; i += 1) {
+    await fn();
+  }
+
+  const durations: number[] = [];
+  const requestCounts: number[] = [];
+  for (let i = 0; i < iterations; i += 1) {
+    const started = performance.now();
+    const requests = await fn();
+    durations.push(performance.now() - started);
+    requestCounts.push(requests);
+  }
+
+  return { row: summarizeDurations(name, iterations, durations), requestCounts };
+}
+
+async function benchmarkStreamingTtft(
+  name: string,
+  iterations: number,
+  warmup: number,
+  fn: () => Promise<StreamingTtftResult>,
+): Promise<StreamingTtftBenchmarkRow> {
+  for (let i = 0; i < warmup; i += 1) {
+    await fn();
+  }
+
+  const durations: number[] = [];
+  const ttfts: number[] = [];
+  for (let i = 0; i < iterations; i += 1) {
+    const started = performance.now();
+    const { ttftMs } = await fn();
+    durations.push(performance.now() - started);
+    ttfts.push(ttftMs);
+  }
+
+  return {
+    ...summarizeDurations(name, iterations, durations),
+    ttft: summarizeDurationSet(ttfts),
   };
 }
 
@@ -493,6 +896,23 @@ type BenchmarkRow = {
   name: string;
   iterations: number;
   baselineSize?: "medium" | "large";
+  minMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  meanMs: number;
+  maxMs: number;
+};
+
+type StreamingTtftResult = {
+  ttftMs: number;
+};
+
+type StreamingTtftBenchmarkRow = BenchmarkRow & {
+  ttft: DurationSummary;
+};
+
+type DurationSummary = {
   minMs: number;
   p50Ms: number;
   p95Ms: number;
@@ -617,6 +1037,19 @@ function summarizeJsonStats(
     stringifyBytesPerRun: Math.round(stats.stringify.bytes / iterations),
     jsonMeanMs: round(jsonMeanMs),
     nonJsonMeanMs: round(Math.max(0, totalMeanMs - jsonMeanMs)),
+  };
+}
+
+function summarizeDurationSet(values: number[]): DurationSummary {
+  values.sort((a, b) => a - b);
+  const sum = values.reduce((total, value) => total + value, 0);
+  return {
+    minMs: round(values[0] ?? 0),
+    p50Ms: round(percentile(values, 50)),
+    p95Ms: round(percentile(values, 95)),
+    p99Ms: round(percentile(values, 99)),
+    meanMs: round(values.length === 0 ? 0 : sum / values.length),
+    maxMs: round(values[values.length - 1] ?? 0),
   };
 }
 
@@ -791,6 +1224,20 @@ function claudeBenchmarkPayload(): Record<string, unknown> {
   };
 }
 
+function claudeNoToolsBenchmarkPayload(): Record<string, unknown> {
+  return {
+    model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    max_tokens: 512,
+    system: "You are benchmarking local streaming parser overhead.",
+    messages: [
+      {
+        role: "user",
+        content: "Stream a long answer for parser benchmarking.",
+      },
+    ],
+  };
+}
+
 function claudeLargeBenchmarkPayload(): Record<string, unknown> {
   return {
     ...claudeBenchmarkPayload(),
@@ -801,8 +1248,24 @@ function claudeLargeBenchmarkPayload(): Record<string, unknown> {
   };
 }
 
+function claudeContextFitNoToolsBenchmarkPayload(): Record<string, unknown> {
+  return {
+    model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+    max_tokens: 512,
+    system: "You are benchmarking local translation overhead.",
+    messages: Array.from({ length: 40 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `${index % 2 === 0 ? "Question" : "Answer"} ${index}:\n${contextFitText(index)}`,
+    })),
+  };
+}
+
 function largeText(seed: number): string {
   return `chunk-${seed} ${"long-session-payload ".repeat(720)}`;
+}
+
+function contextFitText(seed: number): string {
+  return `chunk-${seed} ${"long-session-payload ".repeat(1000)}`;
 }
 
 async function invokeProxyHandler(
@@ -893,6 +1356,24 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+function visionJsonResponse(content: string): Response {
+  return jsonResponse({
+    choices: [{ message: { content } }],
+    usage: { prompt_tokens: 10, completion_tokens: 3 },
+  });
+}
+
+function visionBenchmarkImage() {
+  return {
+    type: "image" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "image/png",
+      data: "abc123",
+    },
+  };
+}
+
 function sseResponse(chunks: unknown[]): Response {
   return new Response(
     `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
@@ -901,4 +1382,113 @@ function sseResponse(chunks: unknown[]): Response {
       headers: { "content-type": "text/event-stream" },
     },
   );
+}
+
+function delayedSseResponse(chunks: unknown[], delayMs = 1): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const chunk of chunks) {
+          await sleep(delayMs);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+        }
+        await sleep(delayMs);
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    },
+  );
+}
+
+function highVolumeSseResponseBody(events: number): string {
+  const chunks: string[] = [];
+  for (let index = 0; index < events; index += 1) {
+    chunks.push(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: `token-${index} ` } }] })}\n\n`,
+    );
+  }
+  chunks.push(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
+  chunks.push(
+    `data: ${JSON.stringify({ usage: { prompt_tokens: 128, completion_tokens: events, total_tokens: events + 128 } })}\n\n`,
+  );
+  chunks.push("data: [DONE]\n\n");
+  return chunks.join("");
+}
+
+function nativeSearchToolCalls(count: number): Array<Record<string, unknown>> {
+  return Array.from({ length: count }, (_, index) => ({
+    index,
+    id: `call_native_${index}`,
+    type: "function",
+    function: {
+      name: "web_search",
+      arguments: JSON.stringify({ query: `native search ${index}` }),
+    },
+  }));
+}
+
+async function fetchTextWithTtft(
+  url: string,
+  body: string,
+  markers: { firstMarker: string; completionMarker: string },
+): Promise<StreamingTtftResult> {
+  const started = performance.now();
+  const response = await realFetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer local-token" },
+    body,
+  });
+  if (!response.body) {
+    throw new Error("missing streaming response body");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let ttftMs: number | undefined;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    text += decoder.decode(value, { stream: true });
+    if (ttftMs === undefined && text.includes(markers.firstMarker)) {
+      ttftMs = performance.now() - started;
+    }
+  }
+  text += decoder.decode();
+
+  if (response.status !== 200) {
+    throw new Error(`stream request failed: ${response.status} ${text}`);
+  }
+  if (!text.includes(markers.completionMarker)) {
+    throw new Error(`missing stream completion marker ${markers.completionMarker}`);
+  }
+  if (ttftMs === undefined) {
+    throw new Error(`missing first stream marker ${markers.firstMarker}`);
+  }
+  return { ttftMs };
+}
+
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
 }
