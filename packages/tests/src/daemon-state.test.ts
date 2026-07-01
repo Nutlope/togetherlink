@@ -16,7 +16,7 @@ const MODEL = {
   temperature: true,
   tool_call: true,
   modalities: { input: ["text"], output: ["text"] },
-};
+} satisfies RegisterSessionRequest["modelDefinition"];
 
 describe("daemon session state", () => {
   afterEach(() => {
