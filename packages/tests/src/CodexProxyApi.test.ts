@@ -899,7 +899,7 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(response).toContain("response.reasoning_text.delta");
     expect(response).toContain("response.failed");
-    expect(response).toContain("Together stream produced no SSE event for 100ms.");
+    expect(response).toContain("Together stream exceeded maximum turn duration of 100ms.");
     expect(response).not.toContain("Recovered after reasoning timeout.");
     expect(response).not.toContain("response.completed");
     expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(1);

@@ -206,9 +206,18 @@ type StreamTurnResult =
 
 type SseChunkReadResult = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>;
 
+type SseTimeoutKind = "idle" | "turn";
+
 class SseIdleTimeoutError extends Error {
-  constructor(readonly timeoutMs: number) {
-    super(`Together stream produced no SSE event for ${timeoutMs}ms.`);
+  constructor(
+    readonly timeoutMs: number,
+    readonly kind: SseTimeoutKind = "idle",
+  ) {
+    super(
+      kind === "turn"
+        ? `Together stream exceeded maximum turn duration of ${timeoutMs}ms.`
+        : `Together stream produced no SSE event for ${timeoutMs}ms.`,
+    );
     this.name = "SseIdleTimeoutError";
   }
 }
@@ -1375,7 +1384,7 @@ function assertStreamProgress(lastProgressAt: number, timeoutMs: number): void {
 
 function assertStreamTurnDuration(startedAt: number, timeoutMs: number): void {
   if (Date.now() - startedAt > timeoutMs) {
-    throw new SseIdleTimeoutError(timeoutMs);
+    throw new SseIdleTimeoutError(timeoutMs, "turn");
   }
 }
 
@@ -1928,13 +1937,13 @@ async function readSseChunk(
 function codexStreamIdleTimeoutMs(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 20_000;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 120_000;
 }
 
 function codexStreamTurnTimeoutMs(): number {
   const raw = process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 30_000;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : 600_000;
 }
 
 function codexStreamIdleRetries(): number {
