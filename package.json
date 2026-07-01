@@ -9,6 +9,7 @@
     "build": "pnpm -r build",
     "build:bundle": "bash scripts/build-bundle.sh",
     "build:site": "pnpm build:bundle && pnpm --dir site exec convex codegen --typecheck disable && pnpm --filter @togetherlink/site build",
+    "build:site:preview": "pnpm build:bundle && pnpm --filter @togetherlink/site build",
     "dev": "pnpm -F @togetherlink/cli dev",
     "dev:site": "pnpm --filter @togetherlink/site dev",
     "format": "oxfmt --write .",
