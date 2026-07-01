@@ -130,7 +130,7 @@ export const QWEN_3_7_MAX: ModelDefinition = {
   id: "Qwen/Qwen3.7-Max",
   name: "Qwen 3.7 Max · vision · 1M",
   anthropicAlias: null,
-  cost: { input: 2.5, output: 7.5, cache_read: 0 },
+  cost: { input: 2.5, output: 3.75, cache_read: 0.125 },
   limit: { context: 1_000_000, output: 65_536 },
   attachment: true,
   reasoning: true,
@@ -174,7 +174,7 @@ export const KIMI_K2_7_CODE: ModelDefinition = {
   name: "Kimi K2.7 Code",
   anthropicAlias: "together-kimi-k2-7-code",
   cost: { input: 0.95, output: 4.0, cache_read: 0.19 },
-  limit: { context: 131_072, output: 32_768 },
+  limit: { context: 262_144, output: 32_768 },
   attachment: true,
   reasoning: true,
   temperature: true,
@@ -190,7 +190,7 @@ export const QWEN_3_5_9B: ModelDefinition = {
   name: "Qwen3.5 9B",
   anthropicAlias: null,
   cost: { input: 0.17, output: 0.25, cache_read: 0 },
-  limit: { context: 131_072, output: 32_768 },
+  limit: { context: 262_144, output: 32_768 },
   attachment: true,
   reasoning: true,
   temperature: true,
@@ -233,8 +233,8 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
  */
 export const SELECTABLE_MODELS: readonly ModelDefinition[] = [
   GLM_5_2,
-  KIMI_K2_6,
   VISION_PRIMARY, // moonshotai/Kimi-K2.7-Code — also the @vision subagent model
+  KIMI_K2_6,
   MINIMAX_M3,
   QWEN_3_7_MAX,
   DEEPSEEK_V4_PRO,
