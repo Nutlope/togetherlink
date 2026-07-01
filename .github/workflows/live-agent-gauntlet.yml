@@ -71,7 +71,7 @@ jobs:
         run: pnpm install --frozen-lockfile --config.confirmModulesPurge=false
 
       - name: Restore Turborepo cache
-        uses: actions/cache/restore@v7
+        uses: actions/cache/restore@v4
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -168,7 +168,7 @@ jobs:
 
       - name: Save Turborepo cache
         if: always()
-        uses: actions/cache/save@v7
+        uses: actions/cache/save@v4
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
