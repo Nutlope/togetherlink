@@ -352,6 +352,17 @@ async function handleDaemonRequest(
     return;
   }
 
+  // The secret session-URL path token already authenticated this request, but
+  // the proxy handlers re-check the Authorization header against the session's
+  // authToken. Claude Code 2.1.197+ overrides ANTHROPIC_AUTH_TOKEN with the
+  // user's claude.ai OAuth token when they are logged in, so rewrite the header
+  // to the expected token (this also keeps the OAuth credential out of any
+  // downstream logging).
+  if (sessionRoute !== undefined) {
+    req.headers.authorization = `Bearer ${session.options.authToken}`;
+    delete req.headers["x-api-key"];
+  }
+
   if (session.agent === "codex" || session.agent === "codex-app") {
     try {
       await handleCodexProxyRequest(req, res, session.options);
