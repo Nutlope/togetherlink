@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
 const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | sh";
+const githubUrl = "https://github.com/Nutlope/togetherlink";
+const togetherReferralUrl =
+  "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
 const features = [
   {
@@ -204,12 +207,12 @@ function Home() {
           togetherlink
         </div>
         <nav className="ml-auto flex gap-[22px] text-sm font-medium text-muted max-[520px]:ml-0 max-[520px]:basis-full max-[520px]:gap-[18px]">
-          <a className="transition-colors hover:text-ink" href="https://github.com/riccardogiorato">
+          <a className="transition-colors hover:text-ink" href={githubUrl}>
             GitHub
           </a>
           <a
             className="transition-colors hover:text-ink"
-            href="https://api.together.ai/settings/api-keys"
+            href={togetherReferralUrl}
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -220,7 +223,7 @@ function Home() {
 
       <section className="py-[74px] pb-4 text-center max-[520px]:pt-14">
         <a
-          href="https://www.together.ai/"
+          href={togetherReferralUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="mb-7 inline-flex items-center gap-2 rounded-full border border-line-strong bg-white px-3.5 py-1.5 text-[13px] font-medium text-muted shadow-[0_1px_2px_rgba(10,10,10,.04)] transition-colors hover:text-ink"
@@ -476,18 +479,15 @@ function Home() {
 
       <footer className="border-t border-line py-8 pb-14 text-sm text-faint">
         <div className="mb-2.5 flex flex-wrap gap-[22px] text-muted">
-          <a className="transition-colors hover:text-ink" href="https://github.com/riccardogiorato">
+          <a className="transition-colors hover:text-ink" href={githubUrl}>
             GitHub
           </a>
-          <a
-            className="transition-colors hover:text-ink"
-            href="https://github.com/riccardogiorato/togetherlink#readme"
-          >
+          <a className="transition-colors hover:text-ink" href={`${githubUrl}#readme`}>
             Docs
           </a>
           <a
             className="transition-colors hover:text-ink"
-            href="https://api.together.ai"
+            href={togetherReferralUrl}
             target="_blank"
             rel="noopener noreferrer"
           >

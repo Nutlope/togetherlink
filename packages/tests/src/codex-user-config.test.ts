@@ -19,8 +19,15 @@ describe("Codex generic user config", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  test("adds the cautious approval default for empty config", () => {
-    expect(applyCodexGenericUserDefaults("")).toBe('approval_policy = "untrusted"\n');
+  test("adds the auto approve-for-me defaults for empty config", () => {
+    expect(applyCodexGenericUserDefaults("")).toBe(
+      [
+        'approval_policy = "on-request"',
+        'sandbox_mode = "workspace-write"',
+        'approvals_reviewer = "auto_review"',
+        "",
+      ].join("\n"),
+    );
   });
 
   test("leaves existing config without approval policy untouched", () => {
@@ -41,7 +48,14 @@ describe("Codex generic user config", () => {
     await ensureCodexGenericUserDefaults(tmpDir);
 
     const config = await readFile(path.join(tmpDir, ".codex", "config.toml"), "utf8");
-    expect(config).toBe('approval_policy = "untrusted"\n');
+    expect(config).toBe(
+      [
+        'approval_policy = "on-request"',
+        'sandbox_mode = "workspace-write"',
+        'approvals_reviewer = "auto_review"',
+        "",
+      ].join("\n"),
+    );
     expect(config).not.toContain("model_provider");
     expect(config).not.toContain("model_catalog_json");
   });

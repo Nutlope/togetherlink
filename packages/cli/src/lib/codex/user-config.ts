@@ -1,7 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const DEFAULT_APPROVAL_POLICY = "untrusted";
+const FIRST_RUN_CODEX_DEFAULTS = {
+  approval_policy: "on-request",
+  sandbox_mode: "workspace-write",
+  approvals_reviewer: "auto_review",
+} as const;
 
 export async function ensureCodexGenericUserDefaults(home: string): Promise<void> {
   const configPath = codexConfigPath(home);
@@ -18,14 +22,9 @@ export function applyCodexGenericUserDefaults(rawConfig: string): string {
     return rawConfig;
   }
 
-  const [preamble, rest] = splitTomlPreamble(rawConfig);
-  if (hasTopLevelTomlKey(preamble, "approval_policy")) {
-    return rawConfig;
-  }
-
-  const compact = preamble.trimEnd();
-  const prefix = compact ? `${compact}\n` : "";
-  return `${prefix}approval_policy = ${tomlString(DEFAULT_APPROVAL_POLICY)}\n${rest}`;
+  return `${Object.entries(FIRST_RUN_CODEX_DEFAULTS)
+    .map(([key, value]) => `${key} = ${tomlString(value)}`)
+    .join("\n")}\n`;
 }
 
 export function codexArgsIgnoreUserConfig(args: string[]): boolean {
@@ -34,22 +33,6 @@ export function codexArgsIgnoreUserConfig(args: string[]): boolean {
 
 function codexConfigPath(home: string): string {
   return path.join(home, ".codex", "config.toml");
-}
-
-function splitTomlPreamble(raw: string): [string, string] {
-  const match = raw.match(/(?:^|\n)\s*\[/);
-  if (!match || match.index === undefined) {
-    return [raw, ""];
-  }
-  const tableStart = match[0].startsWith("\n") ? match.index + 1 : match.index;
-  return [raw.slice(0, tableStart), raw.slice(tableStart)];
-}
-
-function hasTopLevelTomlKey(preamble: string, key: string): boolean {
-  return preamble.split(/\n/).some((line) => {
-    const match = /^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$/.exec(line);
-    return match?.[2] === key;
-  });
 }
 
 async function readTextIfExists(file: string): Promise<string | undefined> {

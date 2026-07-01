@@ -4,7 +4,7 @@
 
 ![TogetherLink hero](assets/togetherlink-hero.png)
 
-Use Together AI models from local coding-agent CLIs.
+Use [Together AI](https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app) models from local coding-agent CLIs.
 
 ## Install
 
@@ -85,5 +85,5 @@ Testing commands and live smoke notes live in [TESTING.md](TESTING.md).
 
 ## Author
 
-- [Riccardo Giorato](https://github.com/riccardogiorato)
-- [Hassan](https://github.com/Nutlope)
+- [Riccardo Giorato](https://github.com/riccardogiorato) ([X](https://x.com/riccardogiorato))
+- [Hassan](https://github.com/Nutlope) ([X](https://x.com/nutlope))
