@@ -25,9 +25,11 @@
     "@types/node": "^26.0.0",
     "lefthook": "2.1.9",
     "oxfmt": "0.57.0",
+    "turbo": "^2.10.1",
     "typescript": "7.0.1-rc"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "packageManager": "pnpm@11.9.0"
 }

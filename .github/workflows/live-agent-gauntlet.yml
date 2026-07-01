@@ -67,11 +67,17 @@ jobs:
             exit 1
           fi
 
-      - name: Approve required dependency build scripts
-        run: pnpm approve-builds esbuild
-
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile --config.confirmModulesPurge=false
+
+      - name: Restore Turborepo cache
+        uses: actions/cache/restore@v7
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ github.ref_name }}-
+            turbo-${{ runner.os }}-
 
       - name: Verify TypeScript native compiler
         run: node_modules/.bin/tsc --version
@@ -124,9 +130,7 @@ jobs:
           esac
 
       - name: Build togetherlink CLI
-        run: |
-          pnpm --filter @togetherlink/models build
-          pnpm --filter @togetherlink/cli build
+        run: pnpm exec turbo run build --filter @togetherlink/models --filter @togetherlink/cli
 
       - name: Typecheck live tests
         run: node_modules/.bin/tsc -p packages/tests/tsconfig.json --noEmit
@@ -135,22 +139,22 @@ jobs:
         run: |
           case "$HARNESS" in
             all)
-              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts
+              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm exec turbo run test:gauntlet:core test:gauntlet:claude test:gauntlet:codex test:gauntlet:opencode test:gauntlet:pi --filter @togetherlink/tests --concurrency=1
               ;;
             claude)
-              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts
+              pnpm exec turbo run test:gauntlet:claude --filter @togetherlink/tests
               ;;
             codex)
-              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
+              pnpm exec turbo run test:gauntlet:codex --filter @togetherlink/tests
               ;;
             live-models-check)
-              TOGETHERLINK_LIVE_MODELS_CHECK=1 VITEST_MAX_CONCURRENCY=6 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/livemodelscheck.test.ts
+              pnpm exec turbo run test:gauntlet:live-models-check --filter @togetherlink/tests
               ;;
             opencode)
-              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
+              pnpm exec turbo run test:gauntlet:opencode --filter @togetherlink/tests
               ;;
             pi)
-              packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Pi.test.ts
+              pnpm exec turbo run test:gauntlet:pi --filter @togetherlink/tests
               ;;
             *)
               echo "Unknown harness: $HARNESS" >&2
@@ -161,6 +165,13 @@ jobs:
       - name: Stop togetherlink daemon
         if: always()
         run: node packages/cli/dist/bin/togetherlink.js daemon stop || true
+
+      - name: Save Turborepo cache
+        if: always()
+        uses: actions/cache/save@v7
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload live test artifacts
         if: always()

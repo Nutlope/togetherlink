@@ -1,0 +1,137 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "globalPassThroughEnv": [
+    "CI",
+    "TOGETHER_API_KEY",
+    "TOGETHERLINK_DEBUG",
+    "TOGETHERLINK_LIVE_MODELS_CHECK",
+    "VITEST_FILE_PARALLELISM",
+    "VITEST_MAX_CONCURRENCY",
+    "VITEST_RETRY"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "test:gauntlet:core": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/**/*.test.ts",
+        "src/*.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    },
+    "test:gauntlet:claude": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/Claude.test.ts",
+        "src/harnesses/claude.ts",
+        "src/assert.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/context-limit.ts",
+        "src/daemon-session.ts",
+        "src/fixture-repo.ts",
+        "src/json-lines.ts",
+        "src/long-context.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    },
+    "test:gauntlet:codex": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/Codex.test.ts",
+        "src/harnesses/codex.ts",
+        "src/assert.ts",
+        "src/codex-exec.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/context-limit.ts",
+        "src/daemon-session.ts",
+        "src/fixture-repo.ts",
+        "src/json-lines.ts",
+        "src/long-context.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    },
+    "test:gauntlet:live-models-check": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/livemodelscheck.test.ts",
+        "src/assert.ts",
+        "src/codex-exec.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/json-lines.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    },
+    "test:gauntlet:opencode": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/OpenCode.test.ts",
+        "src/harnesses/opencode.ts",
+        "src/assert.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/json-lines.ts",
+        "src/long-context.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    },
+    "test:gauntlet:pi": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/Pi.test.ts",
+        "src/harnesses/pi.ts",
+        "src/assert.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/json-lines.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    }
+  }
+}
