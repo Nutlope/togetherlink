@@ -16,7 +16,7 @@ import os from "node:os";
 import { VERSION } from "./version.js";
 
 /** Single origin for the landing page, manifest, and downloadable bundle. */
-export const UPDATE_ORIGIN = "https://togetherlink.vercel.app";
+const UPDATE_ORIGIN = "https://togetherlink.vercel.app";
 /** Override for testing/local mirrors; normally unset. */
 function resolveManifestUrl(): string {
   return process.env.TOGETHERLINK_MANIFEST_URL ?? `${UPDATE_ORIGIN}/latest.json`;
@@ -39,7 +39,7 @@ function resolveInstallDir(): string {
 }
 
 /** Installed bundle path. `togetherlink` wrapper runs `bun run` on this. */
-export function installedBundlePath(): string {
+function installedBundlePath(): string {
   return path.join(resolveInstallDir(), "bin", "togetherlink.js");
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "togetherlink",
-  "version": "0.5.10",
+  "version": "0.5.11",
   "private": true,
   "description": "Use Together AI models in Claude Code, OpenCode, Codex, and Pi Code",
   "license": "Apache-2.0",

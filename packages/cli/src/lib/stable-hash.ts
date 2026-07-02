@@ -4,7 +4,7 @@ export function stableHash(value: unknown): string {
   return createHash("sha256").update(stableStringify(value)).digest("hex").slice(0, 16);
 }
 
-export function stableStringify(value: unknown): string {
+function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
   }

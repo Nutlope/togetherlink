@@ -12,7 +12,6 @@ export const OPENCODE_PROVIDER_ID = "togetherai";
 // `${OPENCODE_PROVIDER_ID}/${OPENCODE_DEFAULT_MODEL}` (slash form, per the
 // OpenCode config schema: "provider/model, eg anthropic/claude-2").
 export const OPENCODE_DEFAULT_MODEL = GLM_5_2.id;
-export const OPENCODE_DEFAULT_MODEL_NAME = GLM_5_2.name;
 
 /**
  * The shape of a model entry inside an OpenCode provider's `models` block.
@@ -54,7 +53,7 @@ function toOpencodeModelEntry(model: ModelDefinition): OpencodeModelEntry {
  * only place a hint can live. Declaring them inline lets OpenCode enforce real
  * context/output limits, gate image attachments client-side, and compute
  * accurate cost locally from the per-token rates. The `@vision` subagent is
- * pinned to {@link OPENCODE_VISION_MODEL_ID} (Kimi-K2.7-Code), which is also in
+ * pinned to the primary vision model (Kimi-K2.7-Code), which is also in
  * this list.
  */
 export const OPENCODE_MODEL_ENTRIES: Record<string, OpencodeModelEntry> = Object.fromEntries(
@@ -69,23 +68,8 @@ export const OPENCODE_MODEL_ENTRIES: Record<string, OpencodeModelEntry> = Object
  */
 export const OPENCODE_MODEL_WHITELIST: string[] = SELECTABLE_MODELS.map((model) => model.id);
 
-/**
- * GLM-5.2 model entry for the OpenCode provider config. Declaring it inline
- * lets OpenCode enforce the real context/output limits, gate image attachments
- * client-side (GLM-5.2 is text-only — `attachment: false`, no image modality
- * means OpenCode won't send image parts to it, avoiding fake-vision), and
- * compute accurate cost locally from the per-token rates.
- */
-export const OPENCODE_GLM52_MODEL_ENTRY = OPENCODE_MODEL_ENTRIES[GLM_5_2.id];
-
-/** Together id of the vision model the `@vision` subagent uses (the primary). */
-export const OPENCODE_VISION_MODEL_ID = VISION_PRIMARY.id;
-
 /** OpenCode selector form for the vision subagent's model: provider/<together-id>. */
-export const OPENCODE_VISION_MODEL_SELECTOR = `${OPENCODE_PROVIDER_ID}/${OPENCODE_VISION_MODEL_ID}`;
-
-/** Shared image-description prompt (re-exported for the subagent's system prompt). */
-export { VISION_PROMPT as OPENCODE_VISION_PROMPT };
+export const OPENCODE_VISION_MODEL_SELECTOR = `${OPENCODE_PROVIDER_ID}/${VISION_PRIMARY.id}`;
 
 /**
  * Neutral system prompt for the primary `build` agent. Replaces OpenCode's

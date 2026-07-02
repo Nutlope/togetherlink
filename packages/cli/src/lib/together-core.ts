@@ -59,18 +59,6 @@ export async function resolveTogetherApiKey({
   return process.env.TOGETHER_API_KEY?.trim() ?? "";
 }
 
-export function detectApiKeyType(key: string | undefined): "together" | "unknown" {
-  if (!key) {
-    return "unknown";
-  }
-  // Together keys are flat opaque strings with no documented prefix
-  // convention (unlike Fireworks's fw_/fpk_ split), so there's nothing to
-  // branch on yet — kept as a named function so harness code reads the
-  // same way fireconnect's does, and so a future prefix convention (if
-  // Together introduces one) only needs to change here.
-  return "together";
-}
-
 function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
 }
