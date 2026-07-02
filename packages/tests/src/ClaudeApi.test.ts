@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2 } from "../../models/src/index.js";
+import { GLM_5_2, type ModelDefinition } from "../../models/src/index.js";
 import { buildClaudeEnv } from "../../cli/src/lib/claude/core.js";
 import { CLAUDE_HAIKU_MODEL } from "../../cli/src/lib/claude/defaults.js";
-import { handleProxyRequest, type ModelDefinition } from "../../cli/src/lib/claude/proxy.js";
+import { handleProxyRequest } from "../../cli/src/lib/claude/proxy.js";
 import type { ClaudeProxyOptions } from "../../cli/src/lib/claude/proxy.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 

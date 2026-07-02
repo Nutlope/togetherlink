@@ -6,15 +6,9 @@ import path from "node:path";
 import os from "node:os";
 import { VERSION } from "../version.js";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
-import {
-  handleProxyRequest,
-  requestPath,
-  readJsonBody,
-  writeJson,
-  writeAnthropicError,
-  isTogetherApiError,
-  extractToken,
-} from "../claude/proxy.js";
+import { extractToken, readJsonBody, requestPath, writeJson } from "../http-util.js";
+import { handleProxyRequest } from "../claude/proxy.js";
+import { writeAnthropicError, isTogetherApiError } from "../claude/together-call.js";
 import { handleCodexProxyRequest } from "../codex/proxy.js";
 import { readAppRegistration } from "./app-registration.js";
 import {

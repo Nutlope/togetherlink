@@ -1,5 +1,6 @@
 import { CostTracker } from "../claude/cost.js";
-import type { ClaudeProxyOptions, ModelDefinition } from "../claude/proxy.js";
+import type { ModelDefinition } from "@togetherlink/models";
+import type { ClaudeProxyOptions } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyPerfPayload } from "../proxy-perf.js";
 import { sendTelemetryEvent } from "../telemetry.js";
