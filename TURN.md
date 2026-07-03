@@ -127,9 +127,9 @@ surfacing a hard error mid-session — but:
 
 `countTokensResponse` currently re-translates and stringifies the entire
 conversation on an endpoint Claude Code polls routinely. Replace with:
-`estimator.estimate(rawBytes)` of the count_tokens request body itself (the
+`estimator.estimate(rawBytes)` of the count*tokens request body itself (the
 handler gets `rawBytes` from 1a). This makes Claude Code's context gauge
-_more_ accurate (calibrated against Together's real tokenizer instead of ÷4),
+\_more* accurate (calibrated against Together's real tokenizer instead of ÷4),
 which directly improves compaction timing — the root-cause fix that keeps the
 trim path cold.
 
@@ -224,8 +224,50 @@ automatic fallback on 4xx/415. (Independent of Part 1; only worth doing after
 3. **1g + 2a + 2b + 2c** (serialize-once, SSE write merge, watchdog timer,
    translate dedup) — one mechanical PR.
 4. **1e** (trim telemetry/alarm) — small PR, adds the regression tripwire.
-5. **2d** (connection reuse measurement → fix) — measure first, then decide.
-6. **2e** (gzip experiment) — last, behind a flag, only if 2d looks healthy.
+5. **2d** (connection reuse) — ✅ measured, no fix shipped. See findings below.
+6. **2e** (gzip experiment) — ✅ investigated, not viable. See findings below.
 
 Every PR: `pnpm typecheck && pnpm test && pnpm bench:proxy`, fixture capture
 diff, and a live `test:gauntlet:core` run before merge.
+
+## Findings — 2d and 2e (measured, no code shipped)
+
+Steps 1–4 landed and were benchmarked (large-context Claude proxy overhead
+roughly halved at p50; see the commit message). Steps 2d and 2e were then
+resolved by live measurement against `api.together.ai` rather than speculative
+code — both came back "no action."
+
+**2e — gzip request bodies: not viable. Do not reopen.** Together does not
+decompress request bodies. Live A/B with an identical `chat/completions`
+payload: uncompressed → HTTP 200; the same body gzip-encoded with
+`Content-Encoding: gzip` → HTTP 400 `Invalid JSON payload` (the server fed the
+gzip magic bytes `1f 8b` straight into its JSON parser). This is not a size
+threshold — the server isn't honoring `Content-Encoding` at all. The upload
+payload therefore can't be shrunk client-side; prompt caching (Together's side)
+remains the only lever on re-sent input.
+
+**2d — upstream connection reuse: the shipped runtime already reuses; no fix
+warranted.**
+
+- **Bun (what ships — the installed bundle is Bun-targeted and the wrapper runs
+  `exec bun`): already holds connections.** Request latency to
+  `api.together.ai` stayed flat at ~190–280ms across idle gaps from 0.5s to
+  60s, with no upward step — the signature of a pool that is not reconnecting.
+  (Timing-based, so strong signal rather than proof: Bun exposes no undici
+  diagnostics channel for a deterministic socket count.)
+- **Node (dev only): reconnects after 4s idle.** Deterministic socket count via
+  `node:diagnostics_channel` `undici:client:connected` — zero timing noise:
+  socket reused at 0s/0.5s/3s gaps, then a NEW socket at 5s/10s/30s. That is
+  undici's default 4000ms `keepAliveTimeout`, and since agent turns are almost
+  always >4s apart, dev-mode Node runs pay a fresh ~130ms TCP+TLS handshake per
+  turn.
+
+Conclusion: the ~130ms/turn handshake is real but lives in the **dev** runtime,
+not the product. A global undici keep-alive `Agent` would fix Node, but Node is
+dev-only and Bun ignores undici Agents, so it would be pure dev ergonomics for
+zero user benefit — not worth the code. If a future Bun version regresses
+connection reuse, the way to catch it is perf-tracer connect-timing on the
+existing `upstream_fetch` span (deferred — not shipped here), surfaced via a
+real-world `TOGETHERLINK_PERF=1` trace. Probe scripts used for these findings:
+`conn-probe.mjs` (timing, both runtimes) and `socket-count.mjs` (deterministic,
+Node) — not committed; recreate from this section if re-measuring.
