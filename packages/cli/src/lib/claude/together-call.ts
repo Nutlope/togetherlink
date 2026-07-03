@@ -34,6 +34,10 @@ export async function fetchTogether(
   options: TogetherCallOptions,
   signal?: AbortSignal,
 ): Promise<TogetherFetchResult> {
+  // Serialize the wire body exactly once: every retry attempt resends the
+  // identical payload (only 429/503 transient faults are retried — the payload
+  // is never mutated within this loop), so stringify once and reuse.
+  const body = JSON.stringify(payload);
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let response: Response;
     try {
@@ -43,7 +47,7 @@ export async function fetchTogether(
           Authorization: `Bearer ${options.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body,
         ...(signal ? { signal } : {}),
       });
     } catch (err) {

@@ -4,6 +4,7 @@ import { stableHash } from "../stable-hash.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { APPROX_CHARS_PER_TOKEN, jsonByteLength, safeClaudeInputLimit } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
+import type { TokenEstimator } from "./cost.js";
 import { toOpenAIMessages } from "./translate-request.js";
 import type {
   AnthropicCountTokensRequest,
@@ -67,7 +68,21 @@ export function claudeModelResponse(model: ResolvedClaudeModel): Record<string, 
 export function countTokensResponse(
   body: AnthropicCountTokensRequest,
   options?: ClaudeModelOptions,
+  rawBytes?: number,
+  estimator?: TokenEstimator,
 ): { input_tokens: number } {
+  // Estimate from the inbound request's raw byte size via the same
+  // self-calibrating estimator used by the context-budget gate. This avoids
+  // re-translating + re-stringifying the whole conversation on an endpoint
+  // Claude Code polls routinely, and is calibrated against Together's real
+  // tokenizer instead of a fixed ÷4, which improves compaction timing.
+  if (typeof rawBytes === "number" && rawBytes > 0) {
+    const estimate = estimator?.estimate(rawBytes) ?? Math.ceil(rawBytes / APPROX_CHARS_PER_TOKEN);
+    return { input_tokens: Math.max(1, estimate) };
+  }
+  // Defensive fallback: no raw byte length available (e.g. a direct unit-test
+  // call without a sized body read). Fall back to the payload-stringify path so
+  // we never return 0 for a real conversation.
   const targetModel = options ? resolveTargetModel(body.model, options).definition : undefined;
   const estimatedBytes = jsonByteLength({
     messages: targetModel

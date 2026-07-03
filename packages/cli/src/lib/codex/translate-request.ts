@@ -27,7 +27,6 @@ const CODEX_IDENTITY_PROMPT =
 const CODEX_MEMORY_MODEL_ENV = "TOGETHERLINK_CODEX_MEMORY_MODEL";
 const CODEX_MEMORY_REQUESTED_MODELS = new Set(["gpt-5.4-mini"]);
 const CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
-const CODEX_APPROX_CHARS_PER_TOKEN = 4;
 
 export const EMPTY_CODEX_TOOL_TRANSLATION: CodexToolTranslation = {
   tools: [],
@@ -60,6 +59,7 @@ export function toChatPayload(
   stream: boolean,
   toolTranslation: CodexToolTranslation,
   requestModel: ResolvedCodexRequestModel,
+  estimatedInputTokens: number,
 ): Record<string, unknown> {
   const messages = toChatMessages(body, options, toolTranslation);
   const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
@@ -72,7 +72,7 @@ export function toChatPayload(
     messages: messagesWithNativePrompt,
     max_tokens:
       body.max_output_tokens ??
-      defaultMaxOutputTokens(requestModel.definition, messagesWithNativePrompt, toolTranslation),
+      defaultMaxOutputTokens(requestModel.definition, estimatedInputTokens),
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
     tool_choice: toChatToolChoice(body.tool_choice, toolTranslation),
@@ -505,13 +505,26 @@ function reasoningEffort(body: ResponsesRequest, model: ModelDefinition): string
 
 function defaultMaxOutputTokens(
   modelDefinition: ModelDefinition,
-  messages: ChatMessage[],
-  toolTranslation: CodexToolTranslation,
+  estimatedInputTokens: number,
 ): number {
-  const estimatedInputTokens = Math.ceil(
-    Buffer.byteLength(JSON.stringify({ messages, tools: toolTranslation.tools }), "utf8") /
-      CODEX_APPROX_CHARS_PER_TOKEN,
-  );
+  // Fast path: when the estimate says we are comfortably inside the window,
+  // skip the clamp arithmetic and return the full output budget directly. The
+  // 1.15 factor is the headroom that accounts for estimation error (the
+  // calibrated ratio is good but not exact). This is the ~95% of turns where
+  // the session is nowhere near the context window — the budget check is now
+  // two comparisons, no payload serialization.
+  if (
+    estimatedInputTokens * 1.15 +
+      modelDefinition.limit.output +
+      CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS <
+    modelDefinition.limit.context
+  ) {
+    return modelDefinition.limit.output;
+  }
+  // Near the window: clamp max_tokens down so input + max_tokens stays inside
+  // the context window, with a safety margin. The reactive 400-retry path in
+  // together-call.ts (maxTokensForContextLengthRetry) remains the accuracy
+  // backstop — it parses Together's exact token counts from the error.
   const availableOutputTokens = Math.floor(
     modelDefinition.limit.context - estimatedInputTokens - CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS,
   );

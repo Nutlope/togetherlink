@@ -77,6 +77,12 @@ describe("Claude proxy compatibility API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
+        // The trim path now fires an always-on context_trim telemetry event
+        // (TURN.md 1e) which also routes through global fetch. Skip it so this
+        // stub only captures the upstream Together request bodies under test.
+        if (typeof _url === "string" && _url.includes("/api/telemetry")) {
+          return new Response(null, { status: 204 });
+        }
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         upstreamBodies.push(body);
         return new Response(
@@ -167,6 +173,12 @@ describe("Claude proxy compatibility API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
+        // The reactive trim path now fires a context_trim telemetry event
+        // (TURN.md 1e) which also routes through global fetch. Skip it so this
+        // stub only captures the upstream Together request bodies under test.
+        if (typeof _url === "string" && _url.includes("/api/telemetry")) {
+          return new Response(null, { status: 204 });
+        }
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         upstreamBodies.push(body);
         if (upstreamBodies.length === 1) {

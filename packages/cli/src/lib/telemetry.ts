@@ -13,7 +13,28 @@ export type TelemetryEventType =
   | "install_completed"
   | "cli_started"
   | "session_started"
-  | "session_ended";
+  | "session_ended"
+  | "context_trim";
+
+/**
+ * Structured payload for a `context_trim` event. A trim firing means the
+ * proxy lossily shortened conversation input to fit a model's context window
+ * — compaction is the harness's job, so every firing is a bug report against
+ * our advertised limits / count_tokens accuracy (see TURN.md 1e/1f). Sent
+ * fire-and-forget exactly like the lifecycle events.
+ */
+export type ContextTrimTelemetryInfo = {
+  /** Which trim path fired. */
+  path: "preemptive" | "retry";
+  /** Model id the input was trimmed to fit (Together target model id). */
+  model: string;
+  /** Number of conversation chars dropped by the trim. */
+  trimmedChars: number;
+  /** Estimated (preemptive) or parsed-exact (retry) input token count. */
+  inputTokens: number;
+  /** Model context window in tokens. */
+  contextWindow: number;
+};
 
 export type TelemetryUsage = {
   promptTokens?: number;
@@ -43,6 +64,8 @@ export type TelemetryEvent = {
   exitCode?: number;
   signal?: string;
   errorKind?: string;
+  /** Present on `context_trim` events. */
+  contextTrim?: ContextTrimTelemetryInfo;
 };
 
 function installIdPath(home = os.homedir()): string {

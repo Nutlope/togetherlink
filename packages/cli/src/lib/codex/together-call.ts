@@ -177,6 +177,10 @@ async function postTogetherChat(
   options: CodexTogetherOptions,
   signal?: AbortSignal,
 ): Promise<Response> {
+  // Serialize the wire body exactly once: every retry attempt resends the
+  // identical payload (only 429/503 transient faults are retried — the payload
+  // is never mutated within this loop), so stringify once and reuse.
+  const body = JSON.stringify(payload);
   for (let attempt = 0; attempt <= MAX_TOGETHER_RETRIES; attempt += 1) {
     const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
       method: "POST",
@@ -184,7 +188,7 @@ async function postTogetherChat(
         Authorization: `Bearer ${options.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body,
       ...(signal ? { signal } : {}),
     });
     if (
