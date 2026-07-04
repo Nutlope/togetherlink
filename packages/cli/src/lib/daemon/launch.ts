@@ -14,6 +14,7 @@ import {
   type DaemonHealth,
 } from "./server.js";
 import type { RegisterSessionRequest } from "./state.js";
+import { togetherlinkHome, isProcessAlive } from "../paths.js";
 
 const HEALTH_POLL_INTERVAL_MS = 50;
 const HEALTH_POLL_TIMEOUT_MS = 5000;
@@ -110,7 +111,7 @@ async function currentScriptIdentity(): Promise<ScriptIdentity> {
 }
 
 function daemonMatchesCurrentScript(health: DaemonHealth, current: ScriptIdentity): boolean {
-  if (health.home !== null && health.home !== resolveTogetherlinkHome()) {
+  if (health.home !== null && health.home !== togetherlinkHome()) {
     return false;
   }
   if (health.scriptPath !== current.scriptPath) {
@@ -220,15 +221,6 @@ async function clearStalePidFile(): Promise<void> {
   }
 }
 
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -280,7 +272,7 @@ export async function updateDaemonSessionPid(
 }
 
 export async function localProxyAuthToken(): Promise<string> {
-  const file = path.join(resolveTogetherlinkHome(), LOCAL_PROXY_TOKEN_FILE);
+  const file = path.join(togetherlinkHome(), LOCAL_PROXY_TOKEN_FILE);
   try {
     const token = (await readFile(file, "utf8")).trim();
     if (token) {
@@ -374,7 +366,3 @@ export function startDaemonSessionKeepalive(
 }
 
 export { CLAUDE_LOCAL_PROXY_HOST };
-
-function resolveTogetherlinkHome(): string {
-  return process.env.TOGETHERLINK_HOME || path.join(os.homedir(), ".togetherlink");
-}

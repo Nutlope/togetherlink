@@ -178,7 +178,7 @@ function summarizeResponsesTools(
   }));
 }
 
-function writeOpenAIError(
+export function writeOpenAIError(
   res: ServerResponse,
   status: number,
   type: string,

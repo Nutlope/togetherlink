@@ -14,6 +14,49 @@ import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
 
+async function daemonStop(): Promise<void> {
+  const { resolveDaemonPort, daemonUrl, daemonPidPath } = await import("../lib/daemon/server.js");
+  const { readFile, unlink } = await import("node:fs/promises");
+  const pidPath = daemonPidPath();
+  const port = resolveDaemonPort();
+  let pid: number | undefined;
+  try {
+    const raw = (await readFile(pidPath, "utf8")).trim();
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    pid = Number.isFinite(parsed) ? parsed : undefined;
+  } catch {
+    pid = undefined;
+  }
+  if (pid === undefined) {
+    console.log(`togetherlink daemon: not running (no pid file at ${pidPath}).`);
+    return;
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") {
+      try {
+        await unlink(pidPath);
+      } catch {
+        // ignore
+      }
+      console.log(`togetherlink daemon: not running (stale pid file removed).`);
+      return;
+    }
+    throw err;
+  }
+  // Best-effort: the daemon removes its own pid file on SIGTERM. Give it a
+  // moment, then clear a leftover if the signal was lost.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  try {
+    await unlink(pidPath);
+  } catch {
+    // already cleaned by the daemon
+  }
+  console.log(`togetherlink daemon: stopped (pid ${pid}) on ${daemonUrl(port)}.`);
+}
+
 async function loadStoredExaKey(): Promise<void> {
   if (process.env.EXA_API_KEY) {
     return;
@@ -156,14 +199,25 @@ async function main() {
   }
 
   // User-facing daemon control. Not a harness, so handle it before the harness
-  // dispatch (which would reject "daemon" as an unknown harness).
+  // dispatch (which would reject "daemon" as an unknown harness). Inlined from
+  // the former daemon/cli.ts (a shallow pass-through with exactly one caller):
+  // `serve` is already covered by the `--daemon` branch above, so only `stop`
+  // reaches here.
   if (command === "daemon") {
-    if (rawVerb === undefined) {
+    const verb = rawVerb;
+    if (verb === undefined) {
       throw new Error('Unknown "daemon" command. Expected: stop.');
     }
-    const { runDaemonCommand } = await import("../lib/daemon/cli.js");
-    await runDaemonCommand(rawVerb);
-    return;
+    if (verb === "stop") {
+      await daemonStop();
+      return;
+    }
+    if (verb === "serve") {
+      const { runDaemon } = await import("../lib/daemon/server.js");
+      await runDaemon();
+      return;
+    }
+    throw new Error(`Unknown "daemon ${verb}" command. Expected: stop.`);
   }
 
   if (command === "codex-app") {

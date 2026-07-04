@@ -4,6 +4,7 @@ import type { ClaudeProxyOptions } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyPerfPayload } from "../proxy-perf.js";
 import { sendTelemetryEvent } from "../telemetry.js";
+import { isProcessAlive } from "../paths.js";
 import {
   createSessionStore,
   type SessionPersistInput,
@@ -207,7 +208,7 @@ class SessionRegistry {
     let restored = 0;
     const now = Date.now();
     for (const session of persisted) {
-      if (session.pid !== undefined && !isAlive(session.pid)) {
+      if (session.pid !== undefined && !isProcessAlive(session.pid)) {
         this.store.markSessionEnded(
           session.token,
           now,
@@ -273,7 +274,7 @@ class SessionRegistry {
         }
         continue;
       }
-      if (!isAlive(state.pid)) {
+      if (!isProcessAlive(state.pid)) {
         this.delete(state.token);
         removed += 1;
       }
@@ -335,17 +336,6 @@ class SessionRegistry {
       }
     }
     return removed;
-  }
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // ESRCH = no such process (dead) → not alive. EPERM = exists but not ours
-    // → treat as alive so we don't reap a session we can't verify.
-    return (err as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 
