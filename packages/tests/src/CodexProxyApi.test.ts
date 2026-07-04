@@ -44,6 +44,50 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.use_responses_lite).toBe(false);
   });
 
+  test("preserves prior reasoning items when translating Codex history", async () => {
+    const requests: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Start." }] },
+        {
+          type: "reasoning",
+          content: [{ type: "reasoning_text", text: "Remember marker BLUE-CHAIR-8273." }],
+        },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "READY" }],
+        },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
+      ],
+    });
+
+    expect(requests[0]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: "READY",
+          reasoning_content: "Remember marker BLUE-CHAIR-8273.",
+        }),
+      ]),
+    );
+  });
+
   test("maps custom tool calls back to Codex custom_tool_call items", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal(

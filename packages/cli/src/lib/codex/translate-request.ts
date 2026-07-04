@@ -137,17 +137,32 @@ function toChatMessages(
     return messages;
   }
   const pendingToolCalls: NonNullable<ChatMessage["tool_calls"]> = [];
+  const pendingReasoningParts: string[] = [];
+  const takePendingReasoning = () => {
+    const reasoning = pendingReasoningParts.join("\n");
+    pendingReasoningParts.length = 0;
+    return reasoning;
+  };
   const flushPendingToolCalls = () => {
     if (pendingToolCalls.length === 0) {
       return;
     }
+    const reasoning = takePendingReasoning();
     messages.push({
       role: "assistant",
       content: null,
       tool_calls: pendingToolCalls.splice(0),
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
     });
   };
   for (const item of body.input ?? []) {
+    if (item.type === "reasoning") {
+      const reasoning = stringifyResponsesContent(item.content);
+      if (reasoning) {
+        pendingReasoningParts.push(reasoning);
+      }
+      continue;
+    }
     if (item.type === "function_call") {
       pendingToolCalls.push({
         id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
@@ -181,7 +196,12 @@ function toChatMessages(
     }
     if (item.type === "message" || item.role) {
       const role = toChatRole(item.role);
-      messages.push({ role, content: toChatMessageContent(item.content) });
+      const reasoning = role === "assistant" ? takePendingReasoning() : "";
+      messages.push({
+        role,
+        content: toChatMessageContent(item.content),
+        ...(reasoning ? { reasoning_content: reasoning } : {}),
+      });
     }
   }
   flushPendingToolCalls();
@@ -389,7 +409,12 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
   }
   return (content ?? [])
     .map((part) => {
-      if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+      if (
+        part.type === "input_text" ||
+        part.type === "output_text" ||
+        part.type === "text" ||
+        part.type === "reasoning_text"
+      ) {
         return part.text ?? "";
       }
       return "";

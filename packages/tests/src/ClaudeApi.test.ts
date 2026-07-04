@@ -168,6 +168,62 @@ describe("Claude proxy compatibility API", () => {
     expect(String(content[0]?.signature).length).toBeLessThan(40);
   });
 
+  test("preserves prior Claude thinking blocks when translating history", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_preserved_thinking",
+            choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [
+          { role: "user", content: "Start." },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "Remember marker BLUE-CHAIR-8273.",
+                signature: "togetherlink:test",
+              },
+              { type: "text", text: "READY" },
+            ],
+          },
+          { role: "user", content: "Continue." },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamMessages(upstreamBodies[0])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: "READY",
+          reasoning_content: "Remember marker BLUE-CHAIR-8273.",
+        }),
+      ]),
+    );
+  });
+
   test("recovers from Together input-over-context errors by trimming old prompt text", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
