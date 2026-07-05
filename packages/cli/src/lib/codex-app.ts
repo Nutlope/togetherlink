@@ -109,7 +109,6 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     baseUrl: `${agentProxyUrl}/v1`,
     bearerToken: authToken,
     catalogPath,
-    contextWindow: selectedModel.definition.limit.context,
   });
   await writeTextAtomic(configPath, next);
   // Codex caches remote model metadata in models_cache.json. If a previous
@@ -170,7 +169,6 @@ export function buildCodexAppConfig(
     baseUrl: string;
     bearerToken: string;
     catalogPath: string;
-    contextWindow?: number;
   },
 ): string {
   const withoutManagedBlock = tomlRemoveManagedBlock(
@@ -187,20 +185,25 @@ export function buildCodexAppConfig(
   const withGenericDefaults = applyCodexGenericUserDefaults(withoutLegacyTables);
   const [preamble, rest] = splitTomlPreamble(withGenericDefaults);
   const managedPreamble = upsertTopLevelTomlKeys(preamble, {
+    // Per-model context windows live in the generated model catalog; do not
+    // emit global `model_context_window`/`model_auto_compact_token_limit`
+    // overrides here. A global override is tied to whichever model was
+    // selected when this config was written, so switching models inside
+    // Codex Desktop leaves the override stale and clamps the displayed
+    // context length (e.g. every 262k model gets stuck at ~249k).
     model: tomlString(options.modelId),
     model_provider: tomlString(options.providerId),
     model_catalog_json: tomlString(options.catalogPath),
-    ...(options.contextWindow
-      ? {
-          model_context_window: String(options.contextWindow),
-          model_auto_compact_token_limit: String(Math.floor(options.contextWindow * 0.7)),
-        }
-      : {}),
   });
   const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, [
     "model_reasoning_effort",
     "openai_base_url",
     "profile",
+    // Strip legacy global context-window overrides that were emitted by early
+    // versions of the togetherlink managed config. They become stale the
+    // moment the user switches models inside Codex Desktop.
+    "model_context_window",
+    "model_auto_compact_token_limit",
   ]);
   const providerBlock = [
     CODEX_APP_CONFIG_MARKER_START,

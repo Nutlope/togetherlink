@@ -21,7 +21,6 @@ describe("Codex App alpha config", () => {
         baseUrl: "http://127.0.0.1:7878/session/local-secret/v1",
         bearerToken: "local-secret",
         catalogPath: "/tmp/models.json",
-        contextWindow: 196_608,
       },
     );
 
@@ -29,8 +28,8 @@ describe("Codex App alpha config", () => {
     expect(config).toContain('model_provider = "togetherlink_codex_app"');
     expect(config).toContain('model_catalog_json = "/tmp/models.json"');
     expect(config).not.toContain("approval_policy");
-    expect(config).toContain("model_context_window = 196608");
-    expect(config).toContain("model_auto_compact_token_limit = 137625");
+    expect(config).not.toContain("model_context_window");
+    expect(config).not.toContain("model_auto_compact_token_limit");
     expect(config).not.toContain("model_reasoning_effort");
     expect(config).not.toContain("openai_base_url");
     expect(config).toContain('[projects."/repo"]');
