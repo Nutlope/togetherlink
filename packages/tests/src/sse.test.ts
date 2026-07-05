@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type ServerResponse } from "node:http";
-import { createSseIdleWatchdog, writeSse, writeResponsesSse } from "../../cli/src/lib/sse.js";
+import { createSseIdleWatchdog, writeSse } from "../../cli/src/lib/sse.js";
+import { writeResponsesSse } from "../../cli/src/lib/codex/sse.js";
 
 /**
  * Minimal ServerResponse stand-in that records every res.write() call's

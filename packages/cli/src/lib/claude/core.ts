@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import {
   CLAUDE_HAIKU_MODEL_SELECTION,
   CLAUDE_MODEL_CAPABILITIES,
@@ -7,16 +5,8 @@ import {
   resolveClaudeModel,
   type ClaudeModelSelection,
 } from "./defaults.js";
-import {
-  ensureDaemon,
-  daemonFetch,
-  registerDaemonSession,
-  updateDaemonSessionPid,
-  startDaemonSessionKeepalive,
-  localProxyAuthToken,
-  daemonSessionUrl,
-} from "../daemon/launch.js";
-import { sendTelemetryEvent, randomSessionId } from "../telemetry.js";
+import {} from "../daemon/launch.js";
+import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session.js";
 
 const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -133,196 +123,28 @@ function setTierModelEnv(
 
 export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<ClaudeLaunchResult> {
   const selectedModel = resolveClaudeModel(options.modelId);
-  const modelId = selectedModel.alias;
-  const targetModelId = selectedModel.definition.id;
-  const modelName = selectedModel.definition.name;
-  const debug = process.env.TOGETHERLINK_DEBUG === "1";
-  const sessionId = randomLocalProxyToken();
-  const authToken = await localProxyAuthToken();
-  const telemetrySessionId = randomSessionId();
-
-  // Ensure the shared daemon is up (spawn-once/reuse by healthz probe). The
-  // daemon outlives this launcher, so N `togetherlink claude` sessions share one
-  // proxy process instead of each running its own in-process proxy.
-  const { url: proxyUrl } = await ensureDaemon();
-  const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
-
-  // Register this session: the daemon builds a per-session CostTracker keyed by
-  // our auth token. Sessions bring their own apiKey + model, so the daemon needs
-  // no daemon-wide credentials. A failure here means claude's first /v1/messages
-  // would get an opaque 401, so surface the registration error explicitly on
-  // stderr instead of letting the user chase a phantom "bad key" error.
-  const registration = {
-    token: sessionId,
-    authToken,
-    agent: "claude" as const,
+  const result: ProxiedSessionResult = await runProxiedSession({
+    agent: "claude",
     apiKey: options.apiKey,
-    modelLabel: modelName,
-    modelId,
-    targetModelId,
-    modelName,
+    modelId: selectedModel.alias,
+    registrationModelId: selectedModel.alias,
+    targetModelId: selectedModel.definition.id,
+    modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
-    ...(debug ? { debug: true } : {}),
-  };
-  try {
-    await registerDaemonSession(proxyUrl, registration);
-  } catch (err) {
-    throw new Error(
-      `Could not register this Claude session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  const startedAt = Date.now();
-  void sendTelemetryEvent({
-    event: "session_started",
-    sessionId: telemetrySessionId,
-    agent: "claude",
-    initialModel: targetModelId,
-    startedAt,
-  });
-
-  // Always-on banner so the user can never be in doubt that this is routing
-  // to Together AI, not Anthropic — the model picker alone isn't
-  // enough since most users never open it. Goes to stderr so it never
-  // corrupts claude's stdout (which pipelines/headless mode depend on).
-  process.stderr.write(
-    `togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`,
-  );
-  if (debug) {
-    process.stderr.write(`[togetherlink proxy] daemon: ${proxyUrl}\n`);
-    process.stderr.write(`[togetherlink proxy] session: ${agentProxyUrl}\n`);
-    process.stderr.write(`[togetherlink claude] custom model: ${modelId}\n`);
-  }
-
-  const child = spawn(
-    "claude",
-    [
-      ...claudeArgsWithoutModelOverrides(options.args ?? []),
-      ...claudeCacheFriendlyArgs(options.args ?? []),
-      ...claudeExtraSettingsArgs(options.args ?? []),
+    args: options.args ?? [],
+    binary: "claude",
+    keepaliveLabel: "Claude session",
+    banner: (modelName) =>
+      `togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`,
+    buildEnv: ({ proxyUrl, authToken, modelId, modelName }) =>
+      buildClaudeEnv({ ...options, modelId, modelName, proxyUrl, authToken }),
+    buildArgs: ({ args }) => [
+      ...claudeArgsWithoutModelOverrides(args),
+      ...claudeCacheFriendlyArgs(args),
+      ...claudeExtraSettingsArgs(args),
     ],
-    {
-      env: buildClaudeEnv({ ...options, modelId, modelName, proxyUrl: agentProxyUrl, authToken }),
-      stdio: "inherit",
-    },
-  );
-
-  // Tell the daemon which pid this session's claude child runs as, so it can
-  // reap the session if this launcher is killed (kill -9) before it can
-  // deregister. Best-effort: if this fails, the reaper just can't auto-clean —
-  // the normal exit path still deregisters explicitly below.
-  if (typeof child.pid === "number") {
-    try {
-      await updateDaemonSessionPid(proxyUrl, sessionId, child.pid);
-    } catch {
-      // best-effort
-    }
-  }
-  const keepalive = startDaemonSessionKeepalive(registration, {
-    ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
-    debug,
-    label: "Claude session",
   });
-
-  // Await the child, but capture the result even on a spawn error so the cost
-  // line + deregister always run (the old code guaranteed these in a finally
-  // block). On child.on("error") we treat it as a non-zero exit rather than
-  // rejecting past the cleanup below.
-  const result: ClaudeLaunchResult = await new Promise<ClaudeLaunchResult>((resolve) => {
-    child.on("error", (err) => {
-      process.stderr.write(`togetherlink ▸ Failed to launch claude: ${err.message}.\n`);
-      resolve({ status: 1, signal: null });
-    });
-    child.on("exit", (status, signal) => resolve({ status, signal }));
-  });
-
-  // Print the real Together model cost at shutdown — Claude Code's own /usage
-  // estimate can't price a non-Anthropic model, so this is the accurate source.
-  // The daemon owns the tracker (keyed by our token); fetch its summary. Goes to
-  // stderr so it never corrupts claude's stdout. Best-effort: a dead/unreachable
-  // daemon (or a timeout) just means no cost line, never a broken command.
-  const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
-  keepalive.stop();
-  // Deregister so the daemon doesn't keep a finished session's tracker around.
-  // (A kill -9 of this launcher skips this; the daemon reaps orphaned sessions
-  // on a timer — see daemon/state.ts.)
-  try {
-    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, {
-      method: "DELETE",
-    });
-  } catch {
-    // best-effort
-  }
-
-  const endedAt = Date.now();
-  void sendTelemetryEvent({
-    event: "session_ended",
-    sessionId: telemetrySessionId,
-    agent: "claude",
-    initialModel: targetModelId,
-    finalModel: targetModelId,
-    startedAt,
-    endedAt,
-    durationMs: endedAt - startedAt,
-    ...(usage ? { usage } : {}),
-    ...(usageByModel && usageByModel.length > 0 ? { usageByModel } : {}),
-    ...(typeof result.status === "number" ? { exitCode: result.status } : {}),
-    ...(result.signal ? { signal: result.signal } : {}),
-  });
-
   return result;
-}
-
-type SessionCostResult = {
-  usage?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
-  usageByModel?: Array<{
-    model: string;
-    promptTokens: number;
-    cachedTokens: number;
-    completionTokens: number;
-    costUsd: number;
-  }>;
-};
-
-async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
-  try {
-    const response = await daemonFetch(
-      `${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`,
-    );
-    if (response.ok) {
-      const { summary, totals, totalsByModel } = (await response.json()) as {
-        summary?: string;
-        totals?: {
-          promptTokens: number;
-          cachedTokens: number;
-          completionTokens: number;
-          costUsd: number;
-        };
-        totalsByModel?: Array<{
-          model: string;
-          promptTokens: number;
-          cachedTokens: number;
-          completionTokens: number;
-          costUsd: number;
-        }>;
-      };
-      if (summary) {
-        process.stderr.write(`${summary}\n`);
-      }
-      return {
-        ...(totals ? { usage: totals } : {}),
-        ...(totalsByModel ? { usageByModel: totalsByModel } : {}),
-      };
-    }
-  } catch {
-    // Daemon gone, unreachable, or timed out: skip the cost line rather than
-    // fail the command (or hang it — daemonFetch bounds the wait).
-  }
-  return {};
-}
-
-function randomLocalProxyToken(): string {
-  return `togetherlink-${randomBytes(24).toString("base64url")}`;
 }
 
 function claudeArgsWithoutModelOverrides(args: string[]): string[] {

@@ -1,4 +1,4 @@
-import { CostTracker } from "../claude/cost.js";
+import { CostTracker } from "../cost.js";
 import type { ModelDefinition } from "@togetherlink/models";
 import type { ClaudeProxyOptions } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
@@ -149,7 +149,7 @@ export type UsageReportRequest = {
   summary?: string;
 };
 
-class SessionRegistry {
+export class SessionRegistry {
   private readonly map = new Map<string, SessionState>();
   private store: SessionStore | undefined;
 

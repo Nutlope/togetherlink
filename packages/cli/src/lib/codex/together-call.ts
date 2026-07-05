@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type ModelDefinition } from "@togetherlink/models";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
-import { TOGETHER_BASE_URL } from "../together-core.js";
-import { backoffMs, parseRetryAfter, sleep } from "../together-retry.js";
+import { postChatCompletion } from "../together-client.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
 import type {
@@ -12,9 +11,6 @@ import type {
   CodexToolTranslation,
   TogetherChatResult,
 } from "./wire-types.js";
-
-const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
-const MAX_TOGETHER_RETRIES = 3;
 
 type CodexTogetherOptions = {
   apiKey: string;
@@ -177,42 +173,11 @@ async function postTogetherChat(
   options: CodexTogetherOptions,
   signal?: AbortSignal,
 ): Promise<Response> {
-  // Serialize the wire body exactly once: every retry attempt resends the
-  // identical payload (only 429/503 transient faults are retried — the payload
-  // is never mutated within this loop), so stringify once and reuse.
-  const body = JSON.stringify(payload);
-  for (let attempt = 0; attempt <= MAX_TOGETHER_RETRIES; attempt += 1) {
-    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body,
-      ...(signal ? { signal } : {}),
-    });
-    if (
-      response.ok ||
-      !RETRYABLE_CHAT_STATUSES.has(response.status) ||
-      attempt >= MAX_TOGETHER_RETRIES
-    ) {
-      return response;
-    }
-    debugLog(options, "retrying together request after transient error", {
-      status: response.status,
-      attempt,
-      model: payload.model,
-    });
-    await response.arrayBuffer().catch(() => undefined);
-    await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoffMs(attempt));
-  }
-  return new Response(
-    JSON.stringify({ error: { message: "Together request failed after retries." } }),
-    {
-      status: 503,
-      headers: { "content-type": "application/json" },
-    },
-  );
+  // Delegate the fetch + 429/503 retry loop to the shared Together client
+  // (together-client.ts). The retry contract (serialize-once, Retry-After,
+  // exponential backoff) lives in one place; this harness keeps only the
+  // Codex-specific debug logging and error mapping on top.
+  return postChatCompletion(payload, options, signal);
 }
 
 function maxTokensForContextLengthRetry(

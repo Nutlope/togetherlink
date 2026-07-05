@@ -2,8 +2,6 @@ import { type ServerResponse } from "node:http";
 
 type SseChunkReadResult = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>;
 
-const responseSequenceNumbers = new WeakMap<ServerResponse, number>();
-
 export function consumeSseLines(buffer: string, onData: (data: string) => void): string {
   let consumed = 0;
   for (;;) {
@@ -206,14 +204,4 @@ export async function readSseChunk(
  */
 export function writeSse(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
-export function writeResponsesSse(res: ServerResponse, event: string, data: unknown): void {
-  const sequenceNumber = responseSequenceNumbers.get(res) ?? 0;
-  responseSequenceNumbers.set(res, sequenceNumber + 1);
-  const payload =
-    data && typeof data === "object" && !Array.isArray(data) && !("sequence_number" in data)
-      ? { ...(data as Record<string, unknown>), sequence_number: sequenceNumber }
-      : data;
-  writeSse(res, event, payload);
 }

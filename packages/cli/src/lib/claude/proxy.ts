@@ -1,7 +1,7 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { type ModelDefinition } from "@togetherlink/models";
-import { CostTracker } from "./cost.js";
+import { CostTracker } from "../cost.js";
 import { createProxyPerfTracer, type ProxyPerfSink } from "../proxy-perf.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { isAuthorized, readJsonBodyWithSize, requestPath, writeJson } from "../http-util.js";
@@ -143,7 +143,7 @@ export async function handleProxyRequest(
   }
 
   // readJsonBodyWithSize captures the raw inbound byte length — the cheap
-  // signal the self-calibrating token estimator keys on (see claude/cost.ts).
+  // signal the self-calibrating token estimator keys on (see cost.ts).
   const { body: parsedBody, rawBytes } = await perf.span("body_read_parse", () =>
     readJsonBodyWithSize(req),
   );

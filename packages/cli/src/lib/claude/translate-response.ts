@@ -4,7 +4,7 @@ import { stableHash } from "../stable-hash.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { APPROX_CHARS_PER_TOKEN, jsonByteLength, safeClaudeInputLimit } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
-import type { TokenEstimator } from "./cost.js";
+import type { TokenEstimator } from "../cost.js";
 import { toOpenAIMessages } from "./translate-request.js";
 import type {
   AnthropicCountTokensRequest,

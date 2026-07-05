@@ -1,21 +1,11 @@
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexModelCatalogJson } from "./catalog.js";
 import { CODEX_AUTH_ENV, CODEX_PROVIDER_ID, resolveCodexModel } from "./defaults.js";
 import { codexArgsIgnoreUserConfig, ensureCodexGenericUserDefaults } from "./user-config.js";
-import {
-  ensureDaemon,
-  daemonFetch,
-  registerDaemonSession,
-  updateDaemonSessionPid,
-  startDaemonSessionKeepalive,
-  localProxyAuthToken,
-  daemonSessionUrl,
-} from "../daemon/launch.js";
-import { sendTelemetryEvent, randomSessionId } from "../telemetry.js";
+import {} from "../daemon/launch.js";
+import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session.js";
 
 export type CodexLaunchOptions = {
   apiKey: string;
@@ -38,112 +28,35 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   }
 
   const selectedModel = resolveCodexModel(options.modelId);
-  const modelId = selectedModel.definition.id;
-  const modelName = selectedModel.definition.name;
-  const debug = process.env.TOGETHERLINK_DEBUG === "1";
-  const sessionId = randomLocalProxyToken();
-  const authToken = await localProxyAuthToken();
-  const telemetrySessionId = randomSessionId();
-  const { url: proxyUrl } = await ensureDaemon();
-  const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
-  const registration = {
-    token: sessionId,
-    authToken,
-    agent: "codex" as const,
+  let catalog: { path: string; cleanup: () => void } | undefined;
+  const result: ProxiedSessionResult = await runProxiedSession({
+    agent: "codex",
     apiKey: options.apiKey,
-    modelLabel: modelName,
-    modelId,
-    targetModelId: modelId,
-    modelName,
+    modelId: selectedModel.definition.id,
+    targetModelId: selectedModel.definition.id,
+    modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
-    ...(debug ? { debug: true } : {}),
-  };
-
-  try {
-    await registerDaemonSession(proxyUrl, registration);
-  } catch (err) {
-    throw new Error(
-      `Could not register this Codex session with the togetherlink daemon: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  const startedAt = Date.now();
-  void sendTelemetryEvent({
-    event: "session_started",
-    sessionId: telemetrySessionId,
-    agent: "codex",
-    initialModel: modelId,
-    startedAt,
-  });
-
-  process.stderr.write(`togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`);
-  if (debug) {
-    process.stderr.write(`[togetherlink proxy] daemon: ${proxyUrl}\n`);
-    process.stderr.write(`[togetherlink proxy] session: ${agentProxyUrl}\n`);
-    process.stderr.write(`[togetherlink codex] model: ${modelId}\n`);
-  }
-
-  const catalog = writeCodexModelCatalog();
-  const child = spawn(
-    "codex",
-    [
-      ...codexArgsWithoutModelOverrides(args),
-      ...codexConfigArgs(agentProxyUrl, authToken, modelId, catalog.path),
-    ],
-    {
-      env: buildCodexEnv(authToken),
-      stdio: "inherit",
+    args,
+    binary: "codex",
+    keepaliveLabel: "Codex session",
+    banner: (modelName) =>
+      `togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`,
+    beforeSpawn: () => {
+      catalog = writeCodexModelCatalog();
+      return catalog;
     },
-  );
-
-  if (typeof child.pid === "number") {
-    try {
-      await updateDaemonSessionPid(proxyUrl, sessionId, child.pid);
-    } catch {
-      // best-effort
-    }
-  }
-  const keepalive = startDaemonSessionKeepalive(registration, {
-    ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
-    debug,
-    label: "Codex session",
+    buildEnv: ({ authToken }) => buildCodexEnv(authToken),
+    buildArgs: ({ proxyUrl, authToken, modelId, beforeSpawnResult }) => [
+      ...codexArgsWithoutModelOverrides(args),
+      ...codexConfigArgs(
+        proxyUrl,
+        authToken,
+        modelId,
+        (beforeSpawnResult as { path: string; cleanup: () => void } | undefined)?.path ?? "",
+      ),
+    ],
+    afterDeregister: () => catalog?.cleanup(),
   });
-
-  const result = await new Promise<CodexLaunchResult>((resolve) => {
-    child.on("error", (err) => {
-      process.stderr.write(`togetherlink ▸ Failed to launch codex: ${err.message}.\n`);
-      resolve({ status: 1, signal: null });
-    });
-    child.on("exit", (status, signal) => resolve({ status, signal }));
-  });
-
-  const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
-  keepalive.stop();
-  try {
-    await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, {
-      method: "DELETE",
-    });
-  } catch {
-    // best-effort
-  }
-  catalog.cleanup();
-
-  const endedAt = Date.now();
-  void sendTelemetryEvent({
-    event: "session_ended",
-    sessionId: telemetrySessionId,
-    agent: "codex",
-    initialModel: modelId,
-    finalModel: modelId,
-    startedAt,
-    endedAt,
-    durationMs: endedAt - startedAt,
-    ...(usage ? { usage } : {}),
-    ...(usageByModel && usageByModel.length > 0 ? { usageByModel } : {}),
-    ...(typeof result.status === "number" ? { exitCode: result.status } : {}),
-    ...(result.signal ? { signal: result.signal } : {}),
-  });
-
   return result;
 }
 
@@ -212,55 +125,4 @@ function codexArgsWithoutModelOverrides(args: string[]): string[] {
     sanitized.push(arg);
   }
   return sanitized;
-}
-
-type SessionCostResult = {
-  usage?: { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number };
-  usageByModel?: Array<{
-    model: string;
-    promptTokens: number;
-    cachedTokens: number;
-    completionTokens: number;
-    costUsd: number;
-  }>;
-};
-
-async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
-  try {
-    const response = await daemonFetch(
-      `${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`,
-    );
-    if (response.ok) {
-      const { summary, totals, totalsByModel } = (await response.json()) as {
-        summary?: string;
-        totals?: {
-          promptTokens: number;
-          cachedTokens: number;
-          completionTokens: number;
-          costUsd: number;
-        };
-        totalsByModel?: Array<{
-          model: string;
-          promptTokens: number;
-          cachedTokens: number;
-          completionTokens: number;
-          costUsd: number;
-        }>;
-      };
-      if (summary) {
-        process.stderr.write(`${summary}\n`);
-      }
-      return {
-        ...(totals ? { usage: totals } : {}),
-        ...(totalsByModel ? { usageByModel: totalsByModel } : {}),
-      };
-    }
-  } catch {
-    // best-effort
-  }
-  return {};
-}
-
-function randomLocalProxyToken(): string {
-  return `togetherlink-${randomBytes(24).toString("base64url")}`;
 }

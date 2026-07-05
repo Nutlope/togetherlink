@@ -5,8 +5,8 @@ import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
 import { consumeSseLines, writeSse } from "../sse.js";
-import { TOGETHER_BASE_URL } from "../together-core.js";
-import { CostTracker } from "./cost.js";
+import { postChatCompletionStream } from "../together-client.js";
+import { CostTracker } from "../cost.js";
 import {
   APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
@@ -554,16 +554,7 @@ async function postTogetherStream(
    */
   body?: string,
 ): Promise<Response> {
-  const request = () =>
-    fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: body ?? JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
+  const request = () => postChatCompletionStream(payload, options, signal, body);
   return await (perf?.span(spanName, request, spanFields) ?? request());
 }
 

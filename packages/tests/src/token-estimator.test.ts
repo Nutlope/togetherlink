@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { KIMI_K2_7_CODE } from "../../models/src/index.js";
 import type { ModelDefinition } from "../../models/src/index.js";
-import { CostTracker } from "../../cli/src/lib/claude/cost.js";
+import { CostTracker } from "../../cli/src/lib/cost.js";
 import { applyEstimatedContextBudget } from "../../cli/src/lib/claude/context-budget.js";
 import { countTokensResponse } from "../../cli/src/lib/claude/translate-response.js";
 import type { AnthropicCountTokensRequest } from "../../cli/src/lib/claude/wire-types.js";

@@ -8,7 +8,7 @@ export function requestPath(req: IncomingMessage): string {
 /**
  * Read the full request body as JSON, returning both the parsed value and the
  * raw byte length of the inbound body. The byte length is the cheap signal the
- * proxy's self-calibrating token estimator keys on (see claude/cost.ts): the
+ * proxy's self-calibrating token estimator keys on (see cost.ts): the
  * Anthropic-JSON size tracks the translated OpenAI-JSON size within a few
  * percent, so it lets us estimate input tokens without serializing the payload
  * a second time.

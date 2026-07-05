@@ -13,7 +13,8 @@ import { handleCodexProxyRequest, writeOpenAIError } from "../codex/proxy.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
 import {
-  sessions,
+  sessions as defaultSessions,
+  SessionRegistry,
   buildSession,
   toPublicSessionView,
   type RegisterSessionRequest,
@@ -21,6 +22,9 @@ import {
   type UsageReportRequest,
   isProxiedAgent,
 } from "./state.js";
+
+/** Active registry — runDaemon may override this with an injected one. */
+let activeSessions: SessionRegistry = defaultSessions;
 
 export const DEFAULT_DAEMON_PORT = 7878;
 
@@ -67,6 +71,12 @@ export function daemonUrl(port = resolveDaemonPort()): string {
 
 type DaemonOptions = {
   debug?: boolean;
+  /**
+   * Injected session registry — defaults to the process-wide singleton. Tests
+   * pass a fresh registry to exercise the lifecycle in isolation rather than
+   * booting a real daemon process (#5: the interface is the test surface).
+   */
+  sessions?: SessionRegistry;
 };
 
 /**
@@ -145,7 +155,8 @@ export function renderDaemonError(
 export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   const port = resolveDaemonPort();
   const debug = options.debug ?? process.env.TOGETHERLINK_DEBUG === "1";
-  const restored = await sessions.restorePersisted();
+  activeSessions = options.sessions ?? defaultSessions;
+  const restored = await activeSessions.restorePersisted();
 
   // Per-request agent context: handleDaemonRequest sets this so the catch-all
   // renders errors in the wire format the client actually speaks. Without it,
@@ -180,7 +191,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   // deregistering — e.g. the launcher was kill -9'd. Keeps the registry from
   // growing without bound over the daemon's lifetime.
   const reaper = setInterval(() => {
-    const removed = sessions.reapDead();
+    const removed = activeSessions.reapDead();
     if (debug && removed > 0) {
       process.stderr.write(`[togetherlink daemon] reaped ${removed} dead session(s).\n`);
     }
@@ -196,7 +207,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
     if (debug) {
       process.stderr.write(`[togetherlink daemon] ${signal} — shutting down.\n`);
     }
-    sessions.closeStore();
+    activeSessions.closeStore();
     server.close();
     try {
       await unlink(daemonPidPath());
@@ -245,7 +256,7 @@ async function handleDaemonRequest(
       scriptPath: RUNNING_DAEMON_IDENTITY.scriptPath,
       scriptSize: RUNNING_DAEMON_IDENTITY.scriptSize,
       scriptMtimeMs: RUNNING_DAEMON_IDENTITY.scriptMtimeMs,
-      activeSessionCount: sessions.size,
+      activeSessionCount: activeSessions.size,
     } satisfies DaemonHealth);
     return;
   }
@@ -255,7 +266,7 @@ async function handleDaemonRequest(
       ok: true,
       service: "togetherlink daemon",
       version: VERSION,
-      activeSessionCount: sessions.size,
+      activeSessionCount: activeSessions.size,
     });
     return;
   }
@@ -277,8 +288,8 @@ async function handleDaemonRequest(
       // the count + agent/modelLabel/started; per-session detail
       // (cost/delete/usage) is keyed by a token only the owning launcher knows.
       writeJson(res, 200, {
-        count: sessions.size,
-        sessions: sessions.list().map(toPublicSessionView),
+        count: activeSessions.size,
+        sessions: activeSessions.list().map(toPublicSessionView),
       });
       return;
     }
@@ -288,7 +299,7 @@ async function handleDaemonRequest(
 
   const costMatch = path_.match(COST_ROUTE);
   if (costMatch && req.method === "GET") {
-    const state = sessions.get(decodeURIComponent(costMatch[1] as string));
+    const state = activeSessions.get(decodeURIComponent(costMatch[1] as string));
     if (!state) {
       writeAnthropicError(res, 404, "not_found_error", "Unknown session token.");
       return;
@@ -304,7 +315,7 @@ async function handleDaemonRequest(
 
   const usageMatch = path_.match(USAGE_ROUTE);
   if (usageMatch && req.method === "POST") {
-    const state = sessions.get(decodeURIComponent(usageMatch[1] as string));
+    const state = activeSessions.get(decodeURIComponent(usageMatch[1] as string));
     if (!state) {
       writeAnthropicError(res, 404, "not_found_error", "Unknown session token.");
       return;
@@ -327,7 +338,7 @@ async function handleDaemonRequest(
     if (typeof body?.summary === "string" && body.summary) {
       state.costTracker.setExternalSummary(body.summary);
     }
-    sessions.updateUsage(
+    activeSessions.updateUsage(
       state.token,
       typeof body?.summary === "string" && body.summary ? body.summary : undefined,
     );
@@ -338,14 +349,14 @@ async function handleDaemonRequest(
   const pidMatch = path_.match(PID_ROUTE);
   if (pidMatch && req.method === "POST") {
     const token = decodeURIComponent(pidMatch[1] as string);
-    const state = sessions.get(token);
+    const state = activeSessions.get(token);
     if (!state) {
       writeAnthropicError(res, 404, "not_found_error", "Unknown session token.");
       return;
     }
     const body = (await readJsonBody(req)) as { pid?: number };
     if (typeof body?.pid === "number") {
-      sessions.updatePid(token, body.pid);
+      activeSessions.updatePid(token, body.pid);
     }
     writeJson(res, 200, { ok: true });
     return;
@@ -353,7 +364,7 @@ async function handleDaemonRequest(
 
   const deleteMatch = path_.match(SESSION_ROUTE);
   if (deleteMatch && req.method === "DELETE") {
-    const removed = sessions.delete(decodeURIComponent(deleteMatch[1] as string));
+    const removed = activeSessions.delete(decodeURIComponent(deleteMatch[1] as string));
     writeJson(res, removed ? 200 : 404, removed ? { ok: true } : { ok: false });
     return;
   }
@@ -364,7 +375,7 @@ async function handleDaemonRequest(
   // misconfiguration; refuse it clearly.
   const sessionRoute = localSessionRoute(req, path_);
   const token = sessionRoute?.token ?? extractToken(req);
-  let session = token !== undefined ? sessions.get(token) : undefined;
+  let session = token !== undefined ? activeSessions.get(token) : undefined;
   if (session === undefined && token !== undefined) {
     session = await restoreAppSession(token);
   }
@@ -428,7 +439,7 @@ async function restoreAppSession(token: string): Promise<SessionState | undefine
     return undefined;
   }
   const state = buildSession(registration);
-  sessions.register(state);
+  activeSessions.register(state);
   return state;
 }
 
@@ -494,7 +505,7 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
     }
   }
   const state = buildSession(body);
-  sessions.register(state);
+  activeSessions.register(state);
   writeJson(res, 200, {
     ok: true,
     session: {

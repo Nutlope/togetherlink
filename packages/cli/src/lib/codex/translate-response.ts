@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type ServerResponse } from "node:http";
-import { writeResponsesSse } from "../sse.js";
+import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty, stringifyUnknown } from "./content-format.js";
 import type {
   ChatResponse,

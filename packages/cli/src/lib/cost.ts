@@ -1,5 +1,5 @@
 import { GLM_5_2, VISION_MODELS, costPerToken, type ModelDefinition } from "@togetherlink/models";
-import { APPROX_CHARS_PER_TOKEN } from "./context-budget.js";
+import { APPROX_CHARS_PER_TOKEN } from "./claude/context-budget.js";
 
 /**
  * Proxy-side cost tracking for the selected Together model.
