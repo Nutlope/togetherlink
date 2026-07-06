@@ -3,6 +3,11 @@ import { type ModelDefinition } from "@togetherlink/models";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { postChatCompletion } from "../together-client.js";
+import {
+  canTrimInputForContextLengthRetry,
+  emitContextTrimAlarm,
+  trimPayloadInputForContextLengthRetry,
+} from "../claude/context-budget.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
 import type {
@@ -241,6 +246,52 @@ export async function fetchTogetherChat(
       return { ok: true, response: retry };
     }
     return { ok: false, status: retry.status, text: await retry.text() };
+  }
+
+  // Context-length input-trim retry: when input alone exceeds the model's
+  // context window (Together's tokenizer counts more tokens than our
+  // estimator predicted — common with Computer Use screenshots and large tool
+  // schemas), trim old conversation context from the messages and retry once.
+  // This is the safety net behind the catalog's truncation_policy margin
+  // (catalog.ts). It uses Together's *actual* token count from the error
+  // message, so it is accurate regardless of tokenizer mismatch. Mirrors the
+  // Claude path (stream.ts / chat-completions.ts).
+  const contextError = {
+    status: first.status,
+    anthropicStatus: 0,
+    anthropicType: "",
+    message: text,
+    retryable: false,
+  };
+  if (canTrimInputForContextLengthRetry(contextError, modelDefinition)) {
+    const trimmedPayload: Record<string, unknown> = {
+      ...payload,
+      messages: cloneMessagesForRetry(payload.messages),
+    };
+    const trimmed = trimPayloadInputForContextLengthRetry(
+      trimmedPayload,
+      contextError,
+      modelDefinition,
+    );
+    if (trimmed) {
+      emitContextTrimAlarm({
+        path: "retry",
+        model: typeof payload.model === "string" ? payload.model : "",
+        trimmedChars: trimmed.trimmedChars,
+        inputTokens: parseTogetherContextLengthInputTokens(text) ?? 0,
+        contextWindow: modelDefinition.limit.context,
+      });
+      debugLog(options, "retrying together request after input context trim", {
+        model: trimmedPayload.model,
+        trimmedChars: trimmed.trimmedChars,
+        originalError: text.slice(0, 1000),
+      });
+      const retry = await postTogetherChat(trimmedPayload, options, signal);
+      if (retry.ok) {
+        return { ok: true, response: retry };
+      }
+      return { ok: false, status: retry.status, text: await retry.text() };
+    }
   }
 
   // Template-error self-healing: if Together's chat template crashed on a

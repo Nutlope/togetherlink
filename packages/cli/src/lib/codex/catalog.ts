@@ -4,6 +4,17 @@ import { CODEX_SUPPORTED_MODELS } from "./defaults.js";
 const CODEX_BASE_INSTRUCTIONS =
   "You are Codex, a coding agent. You and the user share one workspace, and your job is to help them complete their coding task accurately and efficiently.";
 
+// Safety margin: Codex counts tokens with its own tokenizer, which
+// consistently underestimates relative to Together's server-side count (the
+// mismatch is ~1.77× for text+tool-schemas, even higher with vision content).
+// Setting truncation_policy.limit to the full context window means Codex
+// never compacts until it's already too late — Together rejects with
+// context_length_exceeded and the proxy has to trim reactively. Lowering
+// the limit to 80% of the real window gives Codex a head start so the
+// common case never hits the wall. The proxy's reactive input-trim
+// (together-call.ts) remains the backstop for edge cases that slip through.
+const CODEX_TRUNCATION_MARGIN = 0.8;
+
 const CODEX_MODEL_MESSAGES = {
   instructions_template: `${CODEX_BASE_INSTRUCTIONS}\n\n{{ personality }}`,
   instructions_variables: {
@@ -60,7 +71,10 @@ export function toCodexModelCatalogEntry(
     default_verbosity: "low",
     apply_patch_tool_type: "freeform",
     web_search_tool_type: "text_and_image",
-    truncation_policy: { mode: "tokens", limit: model.definition.limit.context },
+    truncation_policy: {
+      mode: "tokens",
+      limit: Math.floor(model.definition.limit.context * CODEX_TRUNCATION_MARGIN),
+    },
     supports_parallel_tool_calls: model.definition.tool_call,
     supports_image_detail_original: model.definition.attachment,
     context_window: model.definition.limit.context,

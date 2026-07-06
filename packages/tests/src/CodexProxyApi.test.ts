@@ -39,7 +39,10 @@ describe("Codex Responses proxy tool compatibility", () => {
     );
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
-    expect(first?.truncation_policy).toEqual({ mode: "tokens", limit: GLM_5_2.limit.context });
+    expect(first?.truncation_policy).toEqual({
+      mode: "tokens",
+      limit: Math.floor(GLM_5_2.limit.context * 0.8),
+    });
     expect(first?.comp_hash).toBeNull();
     expect(first?.use_responses_lite).toBe(false);
   });
@@ -1562,6 +1565,136 @@ describe("Codex Responses proxy tool compatibility", () => {
     // The self-healing retry should produce a completed response, not a failure.
     expect(response).toContain("response.completed");
     expect(response).not.toContain("response.failed");
+  });
+
+  test("emits response.incomplete when upstream finish_reason is length (streaming)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        // Model says "I'll do this and then" — hits max_tokens after a few
+        // tokens. finish_reason "length" means the turn was TRUNCATED, not
+        // completed. The proxy must NOT silently emit status "completed".
+        return sseResponse([
+          { choices: [{ delta: { content: "I'll do this and then" } }] },
+          { choices: [{ finish_reason: "length", delta: {} }] },
+          { usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 } },
+        ]);
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Do a lot." }] },
+      ],
+    });
+
+    // The turn was truncated by max_tokens — Codex must see "incomplete".
+    // Parse the response.completed event JSON and check the top-level status.
+    // (Individual output items have their own item-level "completed" status —
+    // we only care about the response.status field, not string-matching.)
+    const completedLine = response
+      .split("\n")
+      .find((l) => l.startsWith("data: ") && l.includes('"response.completed"'));
+    expect(completedLine).toBeDefined();
+    const completedData = JSON.parse(completedLine!.replace(/^data: /, ""));
+    expect(completedData.response.status).toBe("incomplete");
+    expect(completedData.response.incomplete_details).toEqual({
+      reason: "max_output_tokens",
+    });
+  });
+
+  test("returns status incomplete when upstream finish_reason is length (non-streaming)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return jsonResponse({
+          choices: [{ message: { content: "I'll do this and" }, finish_reason: "length" }],
+          usage: { prompt_tokens: 5, completion_tokens: 6, total_tokens: 11 },
+        });
+      }),
+    );
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Do a lot." }] },
+      ],
+    });
+
+    expect(response.status).toBe("incomplete");
+    expect(response.incomplete_details).toEqual({ reason: "max_output_tokens" });
+  });
+
+  test("trims old context and retries when input alone exceeds the context window", async () => {
+    const requests: Array<{ body: any }> = [];
+    let callCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ body });
+        callCount += 1;
+        if (callCount === 1) {
+          // Together rejects: input alone (325k) exceeds the 262k window.
+          return new Response(
+            JSON.stringify({
+              error: {
+                message:
+                  "This model's maximum context length is 262,144 tokens. (325,611 input tokens, 0 output tokens).",
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        // After trim, succeed.
+        return jsonResponse({
+          choices: [{ message: { content: "Done after trim." }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 200, completion_tokens: 5, total_tokens: 205 },
+        });
+      }),
+    );
+
+    const longText = "x".repeat(200_000);
+    const longReply = "y".repeat(200_000);
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: longText }] },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: longReply }],
+        },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
+      ],
+    });
+
+    // Two upstream calls: first 400, retry after input trim succeeded.
+    expect(callCount).toBe(2);
+    expect(response.status).toBe("completed");
+    expect(response.output[0]).toMatchObject({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Done after trim.", annotations: [] }],
+    });
+    // The retry payload must have trimmed old context (trim marker inserted).
+    const retryMessages = requests[1]?.body?.messages;
+    expect(retryMessages).toBeDefined();
+    const hasTrimMarker = retryMessages.some(
+      (m: any) => typeof m.content === "string" && m.content.includes("[togetherlink trimmed"),
+    );
+    expect(hasTrimMarker).toBe(true);
   });
 });
 

@@ -21,11 +21,16 @@ export function toResponsesResponse(
   toolTranslation: CodexToolTranslation,
 ): Record<string, unknown> {
   const responseId = chatResponse.id ?? `resp_${randomUUID().replaceAll("-", "")}`;
+  // When the model hit max_tokens (finish_reason "length"), the response is
+  // truncated — emit status "incomplete" with incomplete_details so Codex
+  // knows the turn was cut short instead of silently completing.
+  const isLengthTruncated = chatResponse.choices?.[0]?.finish_reason === "length";
   return {
     id: responseId,
     object: "response",
     created_at: Math.floor(Date.now() / 1000),
-    status: "completed",
+    status: isLengthTruncated ? "incomplete" : "completed",
+    ...(isLengthTruncated ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     model: body.model ?? options.modelId,
     output: toResponsesOutput(chatResponse, toolTranslation),
     usage: toResponsesUsage(chatResponse.usage),
