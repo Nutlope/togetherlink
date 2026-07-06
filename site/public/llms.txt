@@ -1,0 +1,236 @@
+# togetherlink
+
+> Use Together AI models in the coding-agent CLIs you already run — OpenCode, Claude Code, Codex CLI, and Pi Code. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
+
+togetherlink is an Apache-2.0 CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tpi`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode and Pi Code it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
+
+This is the LLM-readable documentation file for the project. If you are an AI agent asked to install, configure, or use togetherlink (headless or interactive), read this file first. It covers installation, configuration, every command, the available models, headless/agentic usage patterns, how to keep the tool up to date, and the routing architecture.
+
+- Project: https://github.com/Nutlope/togetherlink
+- Website: https://togetherlink.vercel.app
+- Installer: https://togetherlink.vercel.app/install.sh
+- Version manifest: https://togetherlink.vercel.app/latest.json
+- README: https://github.com/Nutlope/togetherlink#readme
+- This file: https://togetherlink.vercel.app/llms.txt
+
+## Install
+
+One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, and `tpi` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
+
+```
+curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+```
+
+After install, restart your shell (or run the `export PATH=...` line it prints) so the commands are on PATH. The install:
+
+- Downloads the self-contained JS bundle to `~/.togetherlink/bin/togetherlink.js`.
+- Writes shell wrappers (`togetherlink`, `tcodex`, `tclaude`, `topencode`, `tpi`) that run the bundle with `bun`.
+- Links them into a writable directory on your PATH.
+- Does NOT install the underlying agent CLIs. If a tool is missing, togetherlink prints its official install command and exits.
+
+To verify: `togetherlink --version`.
+
+## Configure
+
+Before the first launch you need a Together API key (get one at https://api.together.ai/settings/api-keys):
+
+```
+togetherlink configure
+```
+
+This stores your Together API key in `~/.togetherlink/` and optionally an Exa API key (https://exa.ai) that powers web-search emulation in Claude Code. Web search is optional — without it, searches return a clear "EXA_API_KEY not set" error instead of failing silently.
+
+You can also set the key non-interactively:
+
+```
+export TOGETHER_API_KEY=...
+togetherlink configure        # stores it (skip prompts with the env present)
+```
+
+The API key is required to actually route traffic; the installer lets you skip it (press Enter) and add it later.
+
+## Commands
+
+Running `togetherlink` with no arguments opens an interactive launcher (requires a TTY) that lets you pick a tool. Run a tool directly with a subcommand:
+
+```
+togetherlink configure                      # set API keys
+togetherlink whoami                         # print your anonymous install id
+togetherlink --version | -v                 # print the version
+togetherlink help | --help | -h             # print this usage
+
+togetherlink codex [...]        # alias: tcodex   (Codex CLI)
+togetherlink claude [...]       # alias: tclaude  (Claude Code)
+togetherlink pi [...]           # alias: tpi      (Pi Code)
+togetherlink opencode [...]     # alias: topencode (OpenCode)
+
+togetherlink codex-app [--model <model>] [--restore]   # alpha: Codex Desktop
+
+togetherlink daemon stop                   # stop the background proxy daemon
+```
+
+Any arguments after the harness name are passed straight through to the underlying agent CLI. For example, `tcodex exec "fix the typo"` runs `codex exec` with togetherlink routing.
+
+Recognized togetherlink flags (parsed before the passthrough):
+
+- `--api-key <key>` — use this Together API key for the run.
+- `--main <model>` / `--model <model>` — select the model for this run.
+- `--search <value>` — search setting (harness-specific).
+- `--slot <value>` — session slot selection.
+- `--json` — print machine-readable payloads where supported.
+- `--restore` — restore (used with `codex-app`).
+
+### Codex Desktop App (alpha)
+
+`togetherlink codex-app` persistently patches the Codex Desktop config so the desktop app routes through Together. Unlike the CLI wrappers, this change stays active until you restore it:
+
+```
+togetherlink codex-app                     # configure (patches config)
+togetherlink codex-app --restore           # restore your OpenAI profile
+togetherlink codex-app --model <model>     # use a specific model
+```
+
+Backups of your original config live under `~/.togetherlink/backup/codex-app/`.
+
+## Models
+
+togetherlink routes to a curated set of Together AI models. The default for Codex and Claude Code is GLM 5.2.
+
+### Selecting a model (flag order matters)
+
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.5.13):
+
+```
+togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
+togetherlink --model moonshotai/Kimi-K2.6 claude -p "task"
+togetherlink --main together-kimi-k2-7-code claude -p "task"   # Claude matches alias OR id
+```
+
+Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (GLM 5.2), not the model you asked for. Always use the long form with the flag first.
+
+Selectable models (Together API id):
+
+- `zai-org/GLM-5.2` — GLM 5.2 · default. Text-only, 256K context, reasoning. The default coding model.
+- `moonshotai/Kimi-K2.7-Code` — Kimi K2.7 Code. Vision-capable, also used as the vision subagent.
+- `moonshotai/Kimi-K2.6` — Kimi K2.6. Vision, 256K context, reasoning.
+- `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.
+- `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context.
+- `deepseek-ai/DeepSeek-V4-Pro` — DeepSeek V4 Pro. Text-only, 512K context, long-context reasoning.
+
+Vision-capable models accept image attachments directly; text-only models (GLM 5.2, DeepSeek V4 Pro) route images to a vision subagent automatically.
+
+## Headless & agentic usage
+
+Both Claude Code and Codex CLI run headlessly (no TTY), so you can delegate code changes to an AI agent from scripts, CI, or another orchestrating agent. The patterns below were verified against the installed `tcodex` and `tclaude` (v0.5.13) and apply to both. They differ in the headless subcommand and in how permissions are handled; the stdin, banner, and model-selection behavior is identical.
+
+### The working invocation pattern
+
+Both wrappers spawn the agent pointed at the local Together proxy and pass your flags through to the underlying binary. Always close stdin and capture stderr. To run a non-default model, put `--model <id>` before the harness (see Models above).
+
+Codex CLI — non-interactive `exec` (the `-s workspace-write` sandbox grants write access; `exec` never prompts interactively):
+
+```
+togetherlink codex exec -s workspace-write -C /abs/repo "<tight, single-concern task with explicit files + guardrails>" < /dev/null 2>&1
+```
+
+If the working directory isn't a git repo, codex refuses to start ("Not inside a trusted directory"); add `--skip-git-repo-check`, or run inside a git repo.
+
+Claude Code — print mode `-p` (runs once and exits). Add `--dangerously-skip-permissions` so a headless subagent never blocks on a permission prompt:
+
+```
+togetherlink claude -p "<tight, single-concern task with explicit files + guardrails>" --dangerously-skip-permissions --output-format json < /dev/null 2>&1
+```
+
+Run it in the background, health-check at ~60s, review the diff, run lint, then commit. One file or one concern per task gives the cleanest reviews.
+
+### Always close stdin: `< /dev/null`
+
+This is the single biggest footgun. When launched in the background with an open/inherited stdin and no TTY, the process prints `Reading additional input from stdin...` and blocks forever — it never starts the task and produces no edits.
+
+- **Workaround:** append `< /dev/null` to every invocation. With stdin closed it runs cleanly every time.
+- **Do not** treat the `Reading additional input from stdin...` line as a hang signal on its own — that line also prints on healthy `< /dev/null` runs (it reads EOF immediately and proceeds). The real hang signal is: that line is the **last** line AND the output line count stays frozen. Health checks should watch for a *frozen line count*, not the presence of the stdin message.
+
+### Health-check a launch, don't assume
+
+A hung/failed start and a legitimately-working task both look like "background process still running." Without tailing the log there's no way to tell in the first minute whether it connected. Adopt a scripted ~60s health check:
+
+- process alive, AND
+- the banner line `Routing Codex → Together AI` (or `Routing Claude Code → Together AI`) is present (confirms it connected, not hung pre-connection), AND
+- no `command not found` / startup error in the log, AND
+- output line count is still growing (not frozen).
+
+Kill and relaunch on a failed start.
+
+### One concern per task; keep taste on the orchestrator side
+
+Give explicit file lists and verbatim text for any creative content. Keep taste decisions (copy, design) on the human/orchestrator side and pass the exact text to insert. When told to touch only a named set of files, the agent respects the scope precisely and will flag (not silently fix) a file outside the scope that has the same issue — surface that gap for a human to decide.
+
+### Wait for done before reviewing or linting
+
+Do not lint or review mid-run. The agent rewrites files in passes and a file can be briefly malformed mid-edit (e.g., a stray `*/` mid-comment) that is correct by task end. Reviewing mid-run chases phantom errors. Wait for the done signal, then:
+
+1. Review the diff yourself.
+2. Re-run lint yourself (the agent self-verifies with lint and reports honestly, but the review step has caught real issues — e.g., a `server-only` import that would crash, or a 7th file needing the same fix).
+3. Commit.
+
+### Cost awareness
+
+Per-task cost varies a lot with how verbose the agent is. Mechanical, well-scoped changes are cheap (~$0.10); a single change that triggers verbose JSDoc + defensive guard code can cost ~10–20× more. To keep cost down: scope tasks tightly, and prefer a "match surrounding comment density; don't over-explain" instruction for small mechanical changes.
+
+### Summary of recommendations
+
+1. Always `< /dev/null`.
+2. One concern per task; give an explicit file list and verbatim text for creative content.
+3. 60s health check after launch; kill + relaunch on a failed start (watch for frozen line count).
+4. Never lint/review mid-run; wait for the done signal.
+5. Review the diff + re-run lint yourself before committing.
+6. To select a model, put `--model` (or `--main` for Claude) before the harness subcommand — after the harness it is silently ignored and the default runs.
+7. For Claude `-p`, pass `--dangerously-skip-permissions` so a headless subagent never blocks on a permission prompt. Codex `exec` is non-interactive by design; use `-s workspace-write` for edits and `--skip-git-repo-check` outside a git repo.
+
+## Keeping togetherlink up to date
+
+The installed binary self-updates automatically in the background. The check is throttled and bounded, never throws, and runs before argument parsing — so even `togetherlink help` keeps an install current. The update is pulled from https://togetherlink.vercel.app/latest.json, which contains `version`, `url`, and `publishedAt`.
+
+To force a refresh, re-run the install one-liner:
+
+```
+curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+```
+
+You can check the installed version with `togetherlink --version` and compare it against the published manifest at https://togetherlink.vercel.app/latest.json.
+
+## Architecture (how routing works)
+
+There are two harness families behind the four tools:
+
+- **Proxied harnesses — Claude Code, Codex CLI.** `tclaude` and `tcodex` spawn a shared local daemon and route the agent's `/v1/*` traffic through it. The daemon translates the agent's native wire format (Anthropic Messages for Claude, OpenAI Responses for Codex) to Together's chat-completions API and back. Per run: it resolves the model, ensures the daemon, registers a session with your token, prints a banner, spawns the agent pointed at the local proxy, tracks cost, and deregisters on exit. Nothing is written to your real agent config — close it and your setup is exactly as it was.
+
+- **Spawned harnesses — OpenCode, Pi Code.** `topencode` and `tpi` spawn the agent binary directly. The binary talks to Together itself, using ephemeral config injected only for that launch (OpenCode) or a temporary `models.json` on disk (Pi). No daemon, no proxy.
+
+The daemon is one persistent local process shared by all proxied sessions. If you ever need to stop it manually:
+
+```
+togetherlink daemon stop
+```
+
+`togetherlink codex-app` (alpha) is the exception: it persistently patches Codex Desktop config to route through Together (instead of per-run injection), with backups under `~/.togetherlink/backup/codex-app/`. Restore with `togetherlink codex-app --restore`.
+
+## Troubleshooting
+
+- **"No Together API key found"** — run `togetherlink configure` or set `TOGETHER_API_KEY`.
+- **A tool command is not found** — togetherlink does not install the agent CLIs for you. It prints the official install command (e.g. `npm install -g @openai/codex`) and the docs link when the tool is missing; install it, then re-run.
+- **Web search fails in Claude Code** — set an Exa API key via `togetherlink configure`. Without it, searches return a clear "EXA_API_KEY not set" error.
+- **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
+- **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
+- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Pi Code setup is untouched. For Codex Desktop, run `togetherlink codex-app --restore`.
+
+## Links
+
+- [GitHub](https://github.com/Nutlope/togetherlink): source repository and issues
+- [README](https://github.com/Nutlope/togetherlink#readme): human-readable project overview
+- [Website](https://togetherlink.vercel.app): landing page
+- [Install script](https://togetherlink.vercel.app/install.sh): one-command installer (`curl -fsSL https://togetherlink.vercel.app/install.sh | sh`)
+- [Version manifest](https://togetherlink.vercel.app/latest.json): current published version and release timestamp
+- [This LLM docs file](https://togetherlink.vercel.app/llms.txt): the file you are reading now
+- [Together AI API keys](https://api.together.ai/settings/api-keys): get a key to route traffic
+- [llms.txt specification](https://llmstxt.org): the convention this file follows

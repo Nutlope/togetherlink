@@ -26,6 +26,7 @@ export const Route = createRootRoute({
         type: "image/svg+xml",
       },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      { rel: "llms-txt", href: "/llms.txt" },
     ],
   }),
   component: RootComponent,

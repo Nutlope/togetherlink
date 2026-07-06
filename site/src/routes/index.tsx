@@ -485,6 +485,9 @@ function Home() {
           <a className="transition-colors hover:text-ink" href={`${githubUrl}#readme`}>
             Docs
           </a>
+          <a className="transition-colors hover:text-ink" href="/llms.txt">
+            LLM docs
+          </a>
           <a
             className="transition-colors hover:text-ink"
             href={togetherReferralUrl}

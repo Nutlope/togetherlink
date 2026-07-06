@@ -6,6 +6,10 @@
 
 Use [Together AI](https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app) models from local coding-agent CLIs.
 
+## For AI agents
+
+An LLM-readable documentation file is published at <https://togetherlink.vercel.app/llms.txt>. If you are an AI agent asked to install, configure, or use togetherlink (including headless use), read that file first — it covers install, configure, every command, the available models, headless/agentic usage patterns, and how to keep the tool up to date.
+
 ## Install
 
 One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:

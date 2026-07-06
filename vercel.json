@@ -10,6 +10,10 @@
       "headers": [{ "key": "content-type", "value": "text/x-shellscript; charset=utf-8" }]
     },
     {
+      "source": "/llms.txt",
+      "headers": [{ "key": "content-type", "value": "text/plain; charset=utf-8" }]
+    },
+    {
       "source": "/latest.json",
       "headers": [
         { "key": "content-type", "value": "application/json; charset=utf-8" },
