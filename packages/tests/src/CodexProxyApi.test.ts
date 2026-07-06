@@ -1482,6 +1482,87 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(parsedArgs).toHaveProperty("_items");
     expect(parsedArgs._items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
   });
+
+  test("self-heals template-error 400 by sanitizing dict-method keys and retrying", async () => {
+    const requests: Array<{ body: any }> = [];
+    let togetherCallCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ body });
+        togetherCallCount += 1;
+        if (togetherCallCount === 1) {
+          // Simulate a Together template-error 400 (e.g. a `keys` collision
+          // on a model whose template calls arguments.keys()).
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: {
+                  type: "Bad Request",
+                  code: "process_messages_failed",
+                  message:
+                    "Failed to apply chat template: invalid operation: object is not callable (in chat:85)",
+                },
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        // Retry after sanitization: succeed.
+        return sseResponse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          name: "my_tool",
+          description: "A tool.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Go." }] },
+        {
+          type: "function_call",
+          name: "my_tool",
+          call_id: "call_keys",
+          // `keys` is a dict method the proactive sanitizer does NOT rename
+          // (only `items` is proactively renamed), so it reaches Together
+          // unmodified and triggers the reactive self-healing path.
+          arguments: JSON.stringify({ keys: ["a", "b"], task: "do something" }),
+        },
+        { type: "function_call_output", call_id: "call_keys", output: "done" },
+      ],
+    });
+
+    // Two upstream calls: first failed, retry after sanitization succeeded.
+    expect(togetherCallCount).toBe(2);
+
+    // The retry payload must have `keys` renamed to `_keys`.
+    const retryPayload = requests[1]?.body;
+    const assistantMsg = retryPayload?.messages?.find(
+      (m: any) => m.role === "assistant" && m.tool_calls,
+    );
+    const toolCall = assistantMsg?.tool_calls?.[0];
+    const parsedArgs = JSON.parse(toolCall?.function?.arguments ?? "{}");
+    expect(parsedArgs).not.toHaveProperty("keys");
+    expect(parsedArgs).toHaveProperty("_keys");
+    expect(parsedArgs._keys).toEqual(["a", "b"]);
+    // Non-colliding keys are preserved.
+    expect(parsedArgs.task).toBe("do something");
+
+    // The self-healing retry should produce a completed response, not a failure.
+    expect(response).toContain("response.completed");
+    expect(response).not.toContain("response.failed");
+  });
 });
 
 async function getModels(): Promise<Record<string, any>> {
