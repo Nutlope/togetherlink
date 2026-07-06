@@ -39,12 +39,27 @@ describe("Codex Responses proxy tool compatibility", () => {
     );
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
+    const expectedLimit = Math.floor(GLM_5_2.limit.context / 1.8);
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
-      limit: Math.floor(GLM_5_2.limit.context * 0.8),
+      limit: expectedLimit,
     });
+    expect(first?.auto_compact_token_limit).toBe(expectedLimit);
+    expect(first?.effective_context_window_percent).toBe(56);
     expect(first?.comp_hash).toBeNull();
     expect(first?.use_responses_lite).toBe(false);
+  });
+
+  test("all models compact before Together tokenizer rejects (1.8x mismatch)", async () => {
+    const catalog = await getModels();
+    expect(catalog.models.length).toBeGreaterThan(0);
+    for (const m of catalog.models as Array<Record<string, unknown>>) {
+      const ctx = m.context_window as number;
+      const expectedLimit = Math.floor(ctx / 1.8);
+      expect(m.auto_compact_token_limit).toBe(expectedLimit);
+      expect(m.effective_context_window_percent).toBe(56);
+      expect((m.truncation_policy as { limit: number }).limit).toBe(expectedLimit);
+    }
   });
 
   test("preserves prior reasoning items when translating Codex history", async () => {
