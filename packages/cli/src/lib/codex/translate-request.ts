@@ -61,7 +61,7 @@ export function toChatPayload(
   requestModel: ResolvedCodexRequestModel,
   estimatedInputTokens: number,
 ): Record<string, unknown> {
-  const messages = toChatMessages(body, options, toolTranslation);
+  const messages = toChatMessages(body, options, toolTranslation, requestModel.targetModelId);
   const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
   const messagesWithNativePrompt =
     toolTranslation.nativeTools.length > 0
@@ -122,6 +122,7 @@ function toChatMessages(
   body: ResponsesRequest,
   options: CodexTranslateOptions,
   toolTranslation: CodexToolTranslation,
+  resolvedTargetModelId: string,
 ): ChatMessage[] {
   const messages: ChatMessage[] = [
     {
@@ -169,7 +170,7 @@ function toChatMessages(
         type: "function",
         function: {
           name: toChatHistoryToolName(item, toolTranslation, "function"),
-          arguments: item.arguments ?? "{}",
+          arguments: sanitizeToolCallArguments(item.arguments, resolvedTargetModelId),
         },
       });
       continue;
@@ -421,6 +422,51 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
     })
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * GLM-5.2's chat template renders tool-call arguments with
+ * `arguments.items()` (Python dict-method syntax). In Jinja that resolves to
+ * "look up the `items` key, then call it" -- so any tool call whose arguments
+ * object has a top-level `items` key crashes the template with
+ * `invalid operation: object is not callable (in chat:85)`. The multi-agent
+ * `spawn_agent` tool legitimately puts sub-agent input in an `items` array, so
+ * once such a call enters conversation history it bricks every later GLM turn
+ * (Codex retries the identical payload and hits the identical 400).
+ *
+ * Defensively rename a top-level `items` key to `_items` for GLM-family models
+ * before forwarding. These arguments only appear in conversation history (the
+ * tool already executed against the original arguments Codex captured from the
+ * live response), so renaming what the model sees back is safe and does not
+ * affect tool execution. Gated on the target model id so non-GLM models keep
+ * their exact argument shape.
+ */
+function sanitizeToolCallArguments(
+  argumentsJson: string | undefined,
+  targetModelId: string,
+): string {
+  if (!argumentsJson) {
+    return "{}";
+  }
+  if (!/glm/i.test(targetModelId)) {
+    return argumentsJson;
+  }
+  try {
+    const parsed = JSON.parse(argumentsJson);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Object.prototype.hasOwnProperty.call(parsed, "items")
+    ) {
+      parsed._items = parsed.items;
+      delete parsed.items;
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    // Not valid JSON -- forward the raw string as-is.
+  }
+  return argumentsJson;
 }
 
 function toChatMessageContent(

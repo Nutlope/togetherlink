@@ -1359,6 +1359,128 @@ describe("Codex Responses proxy tool compatibility", () => {
     const upstream = requests[0] as { model?: string };
     expect(upstream.model).toBe(QWEN_3_5_9B.id);
   });
+
+  test("renames top-level `items` key in tool-call arguments for GLM models", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
+      }),
+    );
+
+    await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          name: "spawn_agent",
+          description: "Start a sub-agent.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Go." }] },
+        {
+          type: "function_call",
+          name: "spawn_agent",
+          call_id: "call_items",
+          arguments: JSON.stringify({
+            items: [{ type: "text", text: "analyze the screenshot" }],
+            message: "Analyze the attached screenshot",
+          }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_items",
+          output: "done",
+        },
+      ],
+    });
+
+    const upstream = requests[0] as {
+      messages: Array<{
+        role: string;
+        tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+      }>;
+    };
+    const assistantCall = upstream.messages.find(
+      (m) => m.role === "assistant" && m.tool_calls?.some((c) => c.id === undefined || true),
+    );
+    const toolCall = assistantCall?.tool_calls?.[0];
+    expect(toolCall?.function.name).toBe("spawn_agent");
+    // The dangerous top-level `items` key must be renamed to `_items`.
+    const parsedArgs = JSON.parse(toolCall?.function.arguments ?? "{}");
+    expect(parsedArgs).not.toHaveProperty("items");
+    expect(parsedArgs).toHaveProperty("_items");
+    expect(parsedArgs._items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
+    // Non-colliding keys are preserved untouched.
+    expect(parsedArgs.message).toBe("Analyze the attached screenshot");
+  });
+
+  test("preserves `items` key in tool-call arguments for non-GLM models", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
+      }),
+    );
+
+    await postResponsesText({
+      model: QWEN_3_7_MAX.id,
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          name: "spawn_agent",
+          description: "Start a sub-agent.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Go." }] },
+        {
+          type: "function_call",
+          name: "spawn_agent",
+          call_id: "call_items",
+          arguments: JSON.stringify({
+            items: [{ type: "text", text: "analyze the screenshot" }],
+            message: "Analyze the attached screenshot",
+          }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_items",
+          output: "done",
+        },
+      ],
+    });
+
+    const upstream = requests[0] as {
+      messages: Array<{
+        role: string;
+        tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+      }>;
+    };
+    const assistantCall = upstream.messages.find((m) => m.role === "assistant");
+    const toolCall = assistantCall?.tool_calls?.[0];
+    expect(toolCall?.function.name).toBe("spawn_agent");
+    // Non-GLM models keep the exact argument shape.
+    const parsedArgs = JSON.parse(toolCall?.function.arguments ?? "{}");
+    expect(parsedArgs).toHaveProperty("items");
+    expect(parsedArgs).not.toHaveProperty("_items");
+    expect(parsedArgs.items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
+  });
 });
 
 async function getModels(): Promise<Record<string, any>> {
