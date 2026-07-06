@@ -1360,7 +1360,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(upstream.model).toBe(QWEN_3_5_9B.id);
   });
 
-  test("renames top-level `items` key in tool-call arguments for GLM models", async () => {
+  test("renames top-level `items` key in tool-call arguments for all models", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal(
       "fetch",
@@ -1423,7 +1423,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(parsedArgs.message).toBe("Analyze the attached screenshot");
   });
 
-  test("preserves `items` key in tool-call arguments for non-GLM models", async () => {
+  test("also renames `items` key for non-GLM models (global defense, not per-model)", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal(
       "fetch",
@@ -1475,11 +1475,12 @@ describe("Codex Responses proxy tool compatibility", () => {
     const assistantCall = upstream.messages.find((m) => m.role === "assistant");
     const toolCall = assistantCall?.tool_calls?.[0];
     expect(toolCall?.function.name).toBe("spawn_agent");
-    // Non-GLM models keep the exact argument shape.
+    // Non-GLM models are defended too: the rename is global, not per-model,
+    // so a stale allowlist can never silently leave a model unprotected.
     const parsedArgs = JSON.parse(toolCall?.function.arguments ?? "{}");
-    expect(parsedArgs).toHaveProperty("items");
-    expect(parsedArgs).not.toHaveProperty("_items");
-    expect(parsedArgs.items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
+    expect(parsedArgs).not.toHaveProperty("items");
+    expect(parsedArgs).toHaveProperty("_items");
+    expect(parsedArgs._items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
   });
 });
 
