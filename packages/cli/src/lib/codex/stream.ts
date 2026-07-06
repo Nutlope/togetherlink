@@ -44,6 +44,7 @@ type StreamTurnResult =
       usage?: ChatResponse["usage"];
       reasoningText: string;
       text: string;
+      finishReason?: string | null | undefined;
     }
   | { ok: false; status: number; error: string };
 
@@ -163,6 +164,7 @@ export async function streamResponseFromTogether(
     turn.usage,
     modelDefinition,
     toolTranslation,
+    turn.finishReason,
   );
 }
 
@@ -196,6 +198,7 @@ async function streamTogetherTurn(
   let usage: ChatResponse["usage"] | undefined;
   let reasoningText = "";
   let text = "";
+  let finishReason: string | null | undefined;
   const turnStartedAt = Date.now();
   let lastProgressAt = Date.now();
   const progressTimeoutMs = codexStreamIdleTimeoutMs();
@@ -217,7 +220,11 @@ async function streamTogetherTurn(
       usage = parsed.usage;
       madeProgress = true;
     }
-    const delta = parsed.choices?.[0]?.delta;
+    const choice = parsed.choices?.[0];
+    if (choice?.finish_reason) {
+      finishReason = choice.finish_reason;
+    }
+    const delta = choice?.delta;
     if (!delta) {
       assertStreamProgress(lastProgressAt, progressTimeoutMs);
       continue;
@@ -280,7 +287,7 @@ async function streamTogetherTurn(
     }
   }
 
-  return { ok: true, toolCalls: [...toolCalls.values()], usage, reasoningText, text };
+  return { ok: true, toolCalls: [...toolCalls.values()], usage, reasoningText, text, finishReason };
 }
 
 function assertStreamProgress(lastProgressAt: number, timeoutMs: number): void {
@@ -313,6 +320,7 @@ async function streamResponseWithNativeTools(
   const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
   const nativeToolUses = new Map<string, number>();
   let usage: ChatResponse["usage"] | undefined;
+  let lastFinishReason: string | null | undefined;
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
     let turn: StreamTurnResult;
@@ -338,6 +346,7 @@ async function streamResponseWithNativeTools(
       return failStream(res, responseId, turn.status, turn.error);
     }
     usage = mergeUsage(usage, turn.usage);
+    lastFinishReason = turn.finishReason;
     const nativeToolCalls = turn.toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.name));
     if (nativeToolCalls.length === 0) {
       return completeStreamResponse(
@@ -350,6 +359,7 @@ async function streamResponseWithNativeTools(
         usage,
         modelDefinition,
         toolTranslation,
+        turn.finishReason,
       );
     }
 
@@ -400,6 +410,7 @@ async function streamResponseWithNativeTools(
         usage,
         modelDefinition,
         toolTranslation,
+        turn.finishReason,
       );
     }
 
@@ -435,6 +446,7 @@ async function streamResponseWithNativeTools(
     usage,
     modelDefinition,
     toolTranslation,
+    lastFinishReason,
   );
 }
 
@@ -565,6 +577,7 @@ function completeStreamResponse(
   usage: ChatResponse["usage"],
   modelDefinition: ModelDefinition,
   toolTranslation: CodexToolTranslation,
+  finishReason?: string | null,
 ): StreamProxyResult {
   completeOpenOutputItems(res, outputState);
   let outputIndex = outputState.nextOutputIndex;
@@ -586,13 +599,19 @@ function completeStreamResponse(
   if (usage) {
     recordUsage(usage, options, modelDefinition);
   }
+  // When the model hit max_tokens (finish_reason "length"), the response is
+  // truncated — emit status "incomplete" with incomplete_details so Codex
+  // knows the turn was cut short instead of silently treating it as a
+  // successful completion. This prevents the "model says one sentence then
+  // stops" bug where a truncated turn looked like a finished turn.
+  const isLengthTruncated = finishReason === "length";
   writeResponsesSse(res, "response.completed", {
     type: "response.completed",
     response: {
       id: responseId,
       object: "response",
       created_at: Math.floor(Date.now() / 1000),
-      status: "completed",
+      status: isLengthTruncated ? "incomplete" : "completed",
       model: body.model ?? options.modelId,
       output: [
         ...(outputState.reasoningItemId !== undefined
@@ -606,6 +625,7 @@ function completeStreamResponse(
         ),
       ],
       usage: toResponsesUsage(usage),
+      ...(isLengthTruncated ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     },
   });
   res.end();
