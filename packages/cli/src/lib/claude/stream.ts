@@ -5,13 +5,16 @@ import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
 import { consumeSseLines, writeSse } from "../sse.js";
-import { TOGETHER_BASE_URL } from "../together-core.js";
-import { CostTracker } from "./cost.js";
+import { postChatCompletionStream } from "../together-client.js";
+import { CostTracker } from "../cost.js";
 import {
+  APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
   canTrimInputForContextLengthRetry,
   clampRequestedMaxTokens,
+  emitContextTrimAlarm,
   maxTokensForContextLengthRetry,
+  parseTogetherContextLengthInputTokens,
   trimPayloadInputForContextLengthRetry,
 } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
@@ -41,6 +44,8 @@ type ClaudeStreamOptions = {
   modelDefinition: ModelDefinition;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
+  rawBytes?: number | undefined;
 };
 
 export async function streamAnthropicFromTogether(
@@ -50,45 +55,31 @@ export async function streamAnthropicFromTogether(
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
 ): Promise<StreamProxyResult> {
-  const translated =
-    perf?.spanSync("translate_request", () => {
-      const targetModel = resolveTargetModel(body.model, options);
-      const messages = toOpenAIMessages(body, targetModel.definition);
-      const nativeTools = nativeServerTools(body.tools);
-      const upstreamMessages =
-        nativeTools.length > 0 ? withClaudeNativeToolSystemPrompt(messages, nativeTools) : messages;
-      const tools = toOpenAITools(body.tools, options);
-      const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-      const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
-      return {
-        targetModel,
-        messages,
-        nativeTools,
-        upstreamMessages,
-        tools,
-        reasoningEffort,
-        maxTokens,
-      };
-    }) ??
-    (() => {
-      const targetModel = resolveTargetModel(body.model, options);
-      const messages = toOpenAIMessages(body, targetModel.definition);
-      const nativeTools = nativeServerTools(body.tools);
-      const upstreamMessages =
-        nativeTools.length > 0 ? withClaudeNativeToolSystemPrompt(messages, nativeTools) : messages;
-      const tools = toOpenAITools(body.tools, options);
-      const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-      const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
-      return {
-        targetModel,
-        messages,
-        nativeTools,
-        upstreamMessages,
-        tools,
-        reasoningEffort,
-        maxTokens,
-      };
-    })();
+  // Translate the Anthropic request into the Together/OpenAI chat payload once.
+  // The body is extracted into a single local so the translate step is written
+  // once and run through the perf tracer when present, or directly otherwise —
+  // rather than duplicating the whole translation body across the spanSync and
+  // fallback branches. Behavior is unchanged.
+  const run = () => {
+    const targetModel = resolveTargetModel(body.model, options);
+    const messages = toOpenAIMessages(body, targetModel.definition);
+    const nativeTools = nativeServerTools(body.tools);
+    const upstreamMessages =
+      nativeTools.length > 0 ? withClaudeNativeToolSystemPrompt(messages, nativeTools) : messages;
+    const tools = toOpenAITools(body.tools, options);
+    const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+    const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+    return {
+      targetModel,
+      messages,
+      nativeTools,
+      upstreamMessages,
+      tools,
+      reasoningEffort,
+      maxTokens,
+    };
+  };
+  const translated = perf ? perf.spanSync("translate_request", run) : run();
   const { targetModel, nativeTools, upstreamMessages, tools, reasoningEffort } = translated;
   let { maxTokens } = translated;
 
@@ -107,7 +98,18 @@ export async function streamAnthropicFromTogether(
     // real token counts (without this, some streamed responses omit usage).
     stream_options: { include_usage: true },
   };
-  applyEstimatedContextBudget(payload, targetModel.definition, options, "stream");
+  // Estimate input tokens from the inbound raw byte length via the session's
+  // calibrated estimator (or the rawBytes/4 fallback when there is no
+  // costTracker), instead of re-serializing the translated payload. This makes
+  // the budget check O(1) on the ~95% of turns far from the window.
+  const estimatedInputTokens = estimateInputTokensFromRawBytes(options);
+  applyEstimatedContextBudget(
+    payload,
+    targetModel.definition,
+    options,
+    "stream",
+    estimatedInputTokens,
+  );
   maxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : maxTokens;
 
   debugLog(options, "together stream request", {
@@ -118,9 +120,23 @@ export async function streamAnthropicFromTogether(
     reasoningEffort,
   });
 
+  // Serialize the wire body exactly once for this attempt-set (initial attempt
+  // + retries resend identical bytes). Only the max_tokens clamp and trim retry
+  // paths mutate the payload; those re-stringify into serializedBody before
+  // retrying. The native-tool continuation loop builds a fresh payload per turn
+  // and goes through postTogetherStream's own stringify (no body arg).
+  let serializedBody = JSON.stringify(payload);
   let response: Response;
   try {
-    response = await postTogetherStream(payload, options, signal, perf, "upstream_fetch");
+    response = await postTogetherStream(
+      payload,
+      options,
+      signal,
+      perf,
+      "upstream_fetch",
+      undefined,
+      serializedBody,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeAnthropicError(res, 503, "overloaded_error", message);
@@ -138,6 +154,8 @@ export async function streamAnthropicFromTogether(
         maxTokens,
         originalError: error.message,
       });
+      // Payload mutated (max_tokens reduced): re-serialize the wire body.
+      serializedBody = JSON.stringify(payload);
       try {
         response = await postTogetherStream(
           payload,
@@ -148,6 +166,7 @@ export async function streamAnthropicFromTogether(
           {
             reason: "max_tokens",
           },
+          serializedBody,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -160,11 +179,24 @@ export async function streamAnthropicFromTogether(
     } else if (canTrimInputForContextLengthRetry(error, targetModel.definition)) {
       const trimmed = trimPayloadInputForContextLengthRetry(payload, error, targetModel.definition);
       if (trimmed) {
+        // 1e: a reactive trim firing means our count_tokens / advertised limits
+        // let Claude Code compact too late. Surface it loudly (always-on, not
+        // debug-gated) and emit a fire-and-forget telemetry event. The debug
+        // log below stays too. Trim arithmetic + retry semantics are unchanged.
+        emitContextTrimAlarm({
+          path: "retry",
+          model: typeof payload.model === "string" ? payload.model : "",
+          trimmedChars: trimmed.trimmedChars,
+          inputTokens: parseTogetherContextLengthInputTokens(error.message) ?? 0,
+          contextWindow: targetModel.definition.limit.context,
+        });
         debugLog(options, "retrying together stream with trimmed input context", {
           model: payload.model,
           trimmedChars: trimmed.trimmedChars,
           originalError: error.message,
         });
+        // Payload mutated (input trimmed): re-serialize the wire body.
+        serializedBody = JSON.stringify(payload);
         try {
           response = await postTogetherStream(
             payload,
@@ -175,6 +207,7 @@ export async function streamAnthropicFromTogether(
             {
               reason: "trim_context",
             },
+            serializedBody,
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -511,17 +544,17 @@ async function postTogetherStream(
   perf?: ProxyPerfTracer,
   spanName = "upstream_fetch",
   spanFields?: Record<string, unknown>,
+  /**
+   * Pre-serialized request body. When provided, it is sent verbatim so the
+   * payload is JSON.stringify'd exactly once per attempt-set (initial attempt +
+   * retries resend the identical bytes). Callers re-stringify only after
+   * mutating the payload (max_tokens clamp or trim). When omitted, the payload
+   * is stringified here — used by the native-tool continuation loop, which
+   * builds a genuinely new payload each turn.
+   */
+  body?: string,
 ): Promise<Response> {
-  const request = () =>
-    fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
+  const request = () => postChatCompletionStream(payload, options, signal, body);
   return await (perf?.span(spanName, request, spanFields) ?? request());
 }
 
@@ -847,4 +880,21 @@ function debugLog(
   value: unknown | (() => unknown),
 ): void {
   writeProxyDebugLog("togetherlink proxy", options, label, value);
+}
+
+/**
+ * Estimate input tokens from the inbound request's raw byte length. Uses the
+ * session costTracker's calibrated estimator when present; otherwise falls
+ * back to rawBytes / APPROX_CHARS_PER_TOKEN (4). Returns a positive integer.
+ * O(1) — no payload serialization.
+ */
+function estimateInputTokensFromRawBytes(options: ClaudeStreamOptions): number {
+  const rawBytes = options.rawBytes;
+  if (typeof rawBytes !== "number" || rawBytes <= 0) {
+    return 1;
+  }
+  if (options.costTracker) {
+    return options.costTracker.tokenEstimator.estimate(rawBytes);
+  }
+  return Math.max(1, Math.ceil(rawBytes / APPROX_CHARS_PER_TOKEN));
 }

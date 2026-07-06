@@ -1,10 +1,10 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { type ModelDefinition } from "@togetherlink/models";
-import { CostTracker } from "./cost.js";
+import { CostTracker } from "../cost.js";
 import { createProxyPerfTracer, type ProxyPerfSink } from "../proxy-perf.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
-import { isAuthorized, readJsonBody, requestPath, writeJson } from "../http-util.js";
+import { isAuthorized, readJsonBodyWithSize, requestPath, writeJson } from "../http-util.js";
 import { objectKeys } from "./content-format.js";
 import { nativeServerTools } from "./translate-request.js";
 import {
@@ -105,7 +105,8 @@ export async function handleProxyRequest(
   }
 
   if (req.method === "POST" && path === "/v1/messages/count_tokens") {
-    const body = (await readJsonBody(req)) as Partial<AnthropicCountTokensRequest>;
+    const { body: parsedBody, rawBytes } = await readJsonBodyWithSize(req);
+    const body = parsedBody as Partial<AnthropicCountTokensRequest>;
     if (!body || typeof body !== "object") {
       writeAnthropicError(res, 400, "invalid_request_error", "Request body must be an object.");
       return;
@@ -118,7 +119,16 @@ export async function handleProxyRequest(
       writeAnthropicError(res, 400, "invalid_request_error", "messages must be an array.");
       return;
     }
-    writeJson(res, 200, countTokensResponse(body as AnthropicCountTokensRequest, options));
+    writeJson(
+      res,
+      200,
+      countTokensResponse(
+        body as AnthropicCountTokensRequest,
+        options,
+        rawBytes,
+        options.costTracker?.tokenEstimator,
+      ),
+    );
     return;
   }
 
@@ -132,9 +142,12 @@ export async function handleProxyRequest(
     return;
   }
 
-  const body = (await perf.span("body_read_parse", () =>
-    readJsonBody(req),
-  )) as AnthropicMessagesRequest;
+  // readJsonBodyWithSize captures the raw inbound byte length — the cheap
+  // signal the self-calibrating token estimator keys on (see cost.ts).
+  const { body: parsedBody, rawBytes } = await perf.span("body_read_parse", () =>
+    readJsonBodyWithSize(req),
+  );
+  const body = parsedBody as AnthropicMessagesRequest;
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     upstreamAbort.abort();
@@ -145,6 +158,10 @@ export async function handleProxyRequest(
       markClientDisconnected();
     }
   });
+  // Record the inbound byte length for the estimator, then mark a new request
+  // (beginRequest resets the per-request delta and arms the first-addUsage
+  // calibration). noteRequestBytes must precede beginRequest's first addUsage.
+  options.costTracker?.noteRequestBytes(rawBytes);
   options.costTracker?.beginRequest();
   debugLog(options, "anthropic request", () => ({
     model: body.model,
@@ -169,7 +186,14 @@ export async function handleProxyRequest(
   if (body.stream) {
     await perf.span(
       "stream_response",
-      () => streamAnthropicFromTogether(res, body, options, upstreamAbort.signal, perf),
+      () =>
+        streamAnthropicFromTogether(
+          res,
+          body,
+          { ...options, rawBytes },
+          upstreamAbort.signal,
+          perf,
+        ),
       { nativeToolCount: nativeServerTools(body.tools).length },
     );
     const delta = options.costTracker?.requestDelta;
@@ -189,7 +213,7 @@ export async function handleProxyRequest(
 
   const openAiResponse = await callTogetherChatCompletions(
     body,
-    options,
+    { ...options, rawBytes },
     upstreamAbort.signal,
     perf,
   );

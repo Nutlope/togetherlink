@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { RegisterSessionRequest } from "./state.js";
+import { togetherlinkHome } from "../paths.js";
 
 const REGISTRATION_FILE = "registration.json";
 
@@ -15,13 +16,13 @@ const REGISTRATION_FILE = "registration.json";
  * `togetherlink codex-app`. Persisting the full register body lets the daemon
  * rebuild the session on demand instead.
  */
-export function appRegistrationPath(home = resolveTogetherlinkHome()): string {
+export function appRegistrationPath(home = togetherlinkHome()): string {
   return path.join(home, "codex-app", REGISTRATION_FILE);
 }
 
 export async function writeAppRegistration(
   registration: RegisterSessionRequest,
-  home = resolveTogetherlinkHome(),
+  home = togetherlinkHome(),
 ): Promise<void> {
   const file = appRegistrationPath(home);
   await mkdir(path.dirname(file), { recursive: true });
@@ -34,7 +35,7 @@ export async function writeAppRegistration(
   await rename(tmp, file);
 }
 
-export async function clearAppRegistration(home = resolveTogetherlinkHome()): Promise<void> {
+export async function clearAppRegistration(home = togetherlinkHome()): Promise<void> {
   await rm(appRegistrationPath(home), { force: true });
 }
 
@@ -45,7 +46,7 @@ export async function clearAppRegistration(home = resolveTogetherlinkHome()): Pr
  * next `togetherlink codex-app` run rewrites it.
  */
 export async function readAppRegistration(
-  home = resolveTogetherlinkHome(),
+  home = togetherlinkHome(),
 ): Promise<RegisterSessionRequest | undefined> {
   let raw: string;
   try {
@@ -75,8 +76,4 @@ export async function readAppRegistration(
     // Malformed JSON: treat as absent.
   }
   return undefined;
-}
-
-function resolveTogetherlinkHome(): string {
-  return process.env.TOGETHERLINK_HOME || path.join(os.homedir(), ".togetherlink");
 }

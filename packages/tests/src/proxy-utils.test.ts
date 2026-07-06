@@ -4,8 +4,8 @@ import {
   findSseBoundary,
   sseDataPayload,
   sseEventPayload,
-  writeResponsesSse,
 } from "../../cli/src/lib/sse.js";
+import { writeResponsesSse } from "../../cli/src/lib/codex/sse.js";
 import { backoffMs, parseRetryAfter } from "../../cli/src/lib/together-retry.js";
 import {
   exaSearchBody,

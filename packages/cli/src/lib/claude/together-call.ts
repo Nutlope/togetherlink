@@ -1,8 +1,8 @@
 import { type ServerResponse } from "node:http";
 import { writeJson } from "../http-util.js";
-import { TOGETHER_BASE_URL } from "../together-core.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
-import { backoffMs, parseRetryAfter, sleep } from "../together-retry.js";
+import { parseRetryAfter } from "../together-retry.js";
+import { postChatCompletion } from "../together-client.js";
 import type { OpenAIChatResponse, TogetherApiError, TogetherFetchResult } from "./wire-types.js";
 
 type TogetherCallOptions = {
@@ -16,7 +16,6 @@ type TogetherCallOptions = {
 // malformed request just delays the same failure.
 const RETRYABLE_STATUSES = new Set([429, 503]);
 const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
-const MAX_RETRIES = 3;
 
 /**
  * POST to Together with automatic retry for transient faults (429 / 503 /
@@ -34,68 +33,23 @@ export async function fetchTogether(
   options: TogetherCallOptions,
   signal?: AbortSignal,
 ): Promise<TogetherFetchResult> {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-    let response: Response;
-    try {
-      response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${options.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        ...(signal ? { signal } : {}),
-      });
-    } catch (err) {
-      // Network-level failure (DNS, connection reset, timeout). Treat as
-      // retryable transient — the request never reached Together, so it's
-      // safe to try again. If it keeps failing, surface as overloaded_error.
-      if (attempt < MAX_RETRIES) {
-        await sleep(backoffMs(attempt));
-        continue;
-      }
-      return {
-        ok: false,
-        error: {
-          status: 0,
-          anthropicStatus: 503,
-          anthropicType: "overloaded_error",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: false,
-        },
-      };
-    }
-
-    if (response.ok) {
-      return { ok: true, json: (await response.json()) as OpenAIChatResponse };
-    }
-
-    const error = await mapTogetherError(response);
-    debugLog(options, "together error", {
-      status: error.status,
-      anthropicType: error.anthropicType,
-      code: error.code,
-      retryable: error.retryable,
-      attempt,
-      body: error.message.slice(0, 1000),
-    });
-
-    if (!error.retryable || attempt >= MAX_RETRIES) {
-      return { ok: false, error };
-    }
-    await sleep(error.retryAfterMs ?? backoffMs(attempt));
+  // Delegate the fetch + 429/503 retry loop to the shared Together client
+  // (together-client.ts). The retry contract (serialize-once, Retry-After,
+  // exponential backoff) lives in one place; this harness keeps only the
+  // Anthropic error-shape mapping that's specific to its wire format.
+  const response = await postChatCompletion(payload, options, signal);
+  if (response.ok) {
+    return { ok: true, json: (await response.json()) as OpenAIChatResponse };
   }
-  // Unreachable: loop returns on every path. Satisfies exhaustiveness.
-  return {
-    ok: false,
-    error: {
-      status: 0,
-      anthropicStatus: 500,
-      anthropicType: "api_error",
-      message: "Together request failed after retries.",
-      retryable: false,
-    },
-  };
+  const error = await mapTogetherError(response);
+  debugLog(options, "together error", {
+    status: error.status,
+    anthropicType: error.anthropicType,
+    code: error.code,
+    retryable: error.retryable,
+    body: error.message.slice(0, 1000),
+  });
+  return { ok: false, error };
 }
 
 /**

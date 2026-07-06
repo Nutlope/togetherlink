@@ -44,6 +44,50 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.use_responses_lite).toBe(false);
   });
 
+  test("preserves prior reasoning items when translating Codex history", async () => {
+    const requests: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Start." }] },
+        {
+          type: "reasoning",
+          content: [{ type: "reasoning_text", text: "Remember marker BLUE-CHAIR-8273." }],
+        },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "READY" }],
+        },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
+      ],
+    });
+
+    expect(requests[0]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: "READY",
+          reasoning_content: "Remember marker BLUE-CHAIR-8273.",
+        }),
+      ]),
+    );
+  });
+
   test("maps custom tool calls back to Codex custom_tool_call items", async () => {
     const requests: unknown[] = [];
     vi.stubGlobal(
@@ -1314,6 +1358,210 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     const upstream = requests[0] as { model?: string };
     expect(upstream.model).toBe(QWEN_3_5_9B.id);
+  });
+
+  test("renames top-level `items` key in tool-call arguments for all models", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
+      }),
+    );
+
+    await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          name: "spawn_agent",
+          description: "Start a sub-agent.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Go." }] },
+        {
+          type: "function_call",
+          name: "spawn_agent",
+          call_id: "call_items",
+          arguments: JSON.stringify({
+            items: [{ type: "text", text: "analyze the screenshot" }],
+            message: "Analyze the attached screenshot",
+          }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_items",
+          output: "done",
+        },
+      ],
+    });
+
+    const upstream = requests[0] as {
+      messages: Array<{
+        role: string;
+        tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+      }>;
+    };
+    const assistantCall = upstream.messages.find(
+      (m) => m.role === "assistant" && m.tool_calls?.some((c) => c.id === undefined || true),
+    );
+    const toolCall = assistantCall?.tool_calls?.[0];
+    expect(toolCall?.function.name).toBe("spawn_agent");
+    // The dangerous top-level `items` key must be renamed to `_items`.
+    const parsedArgs = JSON.parse(toolCall?.function.arguments ?? "{}");
+    expect(parsedArgs).not.toHaveProperty("items");
+    expect(parsedArgs).toHaveProperty("_items");
+    expect(parsedArgs._items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
+    // Non-colliding keys are preserved untouched.
+    expect(parsedArgs.message).toBe("Analyze the attached screenshot");
+  });
+
+  test("also renames `items` key for non-GLM models (global defense, not per-model)", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return sseResponse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
+      }),
+    );
+
+    await postResponsesText({
+      model: QWEN_3_7_MAX.id,
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          name: "spawn_agent",
+          description: "Start a sub-agent.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Go." }] },
+        {
+          type: "function_call",
+          name: "spawn_agent",
+          call_id: "call_items",
+          arguments: JSON.stringify({
+            items: [{ type: "text", text: "analyze the screenshot" }],
+            message: "Analyze the attached screenshot",
+          }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_items",
+          output: "done",
+        },
+      ],
+    });
+
+    const upstream = requests[0] as {
+      messages: Array<{
+        role: string;
+        tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+      }>;
+    };
+    const assistantCall = upstream.messages.find((m) => m.role === "assistant");
+    const toolCall = assistantCall?.tool_calls?.[0];
+    expect(toolCall?.function.name).toBe("spawn_agent");
+    // Non-GLM models are defended too: the rename is global, not per-model,
+    // so a stale allowlist can never silently leave a model unprotected.
+    const parsedArgs = JSON.parse(toolCall?.function.arguments ?? "{}");
+    expect(parsedArgs).not.toHaveProperty("items");
+    expect(parsedArgs).toHaveProperty("_items");
+    expect(parsedArgs._items).toEqual([{ type: "text", text: "analyze the screenshot" }]);
+  });
+
+  test("self-heals template-error 400 by sanitizing dict-method keys and retrying", async () => {
+    const requests: Array<{ body: any }> = [];
+    let togetherCallCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        requests.push({ body });
+        togetherCallCount += 1;
+        if (togetherCallCount === 1) {
+          // Simulate a Together template-error 400 (e.g. a `keys` collision
+          // on a model whose template calls arguments.keys()).
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: {
+                  type: "Bad Request",
+                  code: "process_messages_failed",
+                  message:
+                    "Failed to apply chat template: invalid operation: object is not callable (in chat:85)",
+                },
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        // Retry after sanitization: succeed.
+        return sseResponse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]);
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "function",
+          name: "my_tool",
+          description: "A tool.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Go." }] },
+        {
+          type: "function_call",
+          name: "my_tool",
+          call_id: "call_keys",
+          // `keys` is a dict method the proactive sanitizer does NOT rename
+          // (only `items` is proactively renamed), so it reaches Together
+          // unmodified and triggers the reactive self-healing path.
+          arguments: JSON.stringify({ keys: ["a", "b"], task: "do something" }),
+        },
+        { type: "function_call_output", call_id: "call_keys", output: "done" },
+      ],
+    });
+
+    // Two upstream calls: first failed, retry after sanitization succeeded.
+    expect(togetherCallCount).toBe(2);
+
+    // The retry payload must have `keys` renamed to `_keys`.
+    const retryPayload = requests[1]?.body;
+    const assistantMsg = retryPayload?.messages?.find(
+      (m: any) => m.role === "assistant" && m.tool_calls,
+    );
+    const toolCall = assistantMsg?.tool_calls?.[0];
+    const parsedArgs = JSON.parse(toolCall?.function?.arguments ?? "{}");
+    expect(parsedArgs).not.toHaveProperty("keys");
+    expect(parsedArgs).toHaveProperty("_keys");
+    expect(parsedArgs._keys).toEqual(["a", "b"]);
+    // Non-colliding keys are preserved.
+    expect(parsedArgs.task).toBe("do something");
+
+    // The self-healing retry should produce a completed response, not a failure.
+    expect(response).toContain("response.completed");
+    expect(response).not.toContain("response.failed");
   });
 });
 

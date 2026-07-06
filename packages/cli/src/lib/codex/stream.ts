@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { type ServerResponse } from "node:http";
 import { type ModelDefinition } from "@togetherlink/models";
-import type { CostTracker } from "../claude/cost.js";
+import type { CostTracker } from "../cost.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
-import { readSseChunk, sseEventPayload, takeSseEvents, writeResponsesSse } from "../sse.js";
+import { createSseIdleWatchdog, sseEventPayload, takeSseEvents } from "../sse.js";
+import { writeResponsesSse } from "./sse.js";
 import { backoffMs, sleep } from "../together-retry.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
@@ -657,14 +658,18 @@ async function* parseSseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator
   const decoder = new TextDecoder();
   const reader = body.getReader();
   const idleTimeoutMs = codexStreamIdleTimeoutMs();
+  // One persistent idle-watchdog timer for the whole stream, reset on every
+  // chunk read via timer.refresh() instead of allocating a fresh
+  // Promise.race + setTimeout per chunk. Disposed in finally so the timer
+  // never keeps the event loop open after the stream ends.
+  const watchdog = createSseIdleWatchdog(
+    idleTimeoutMs,
+    () => new SseIdleTimeoutError(idleTimeoutMs),
+  );
   let buffer = "";
   try {
     while (true) {
-      const read = await readSseChunk(
-        reader,
-        idleTimeoutMs,
-        () => new SseIdleTimeoutError(idleTimeoutMs),
-      );
+      const read = await watchdog.read(reader);
       if (read.done) {
         break;
       }
@@ -682,6 +687,7 @@ async function* parseSseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator
     }
     throw err;
   } finally {
+    watchdog.dispose();
     reader.releaseLock();
   }
 

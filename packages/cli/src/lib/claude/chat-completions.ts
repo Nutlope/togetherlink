@@ -3,12 +3,15 @@ import { type ModelDefinition } from "@togetherlink/models";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
-import { CostTracker } from "./cost.js";
+import { CostTracker } from "../cost.js";
 import {
+  APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
   canTrimInputForContextLengthRetry,
   clampRequestedMaxTokens,
+  emitContextTrimAlarm,
   maxTokensForContextLengthRetry,
+  parseTogetherContextLengthInputTokens,
   trimPayloadInputForContextLengthRetry,
 } from "./context-budget.js";
 import { parseJsonOrEmpty } from "./content-format.js";
@@ -33,6 +36,8 @@ type ClaudeChatOptions = {
   modelDefinition: ModelDefinition;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
+  rawBytes?: number | undefined;
 };
 
 export async function callTogetherChatCompletions(
@@ -78,7 +83,18 @@ export async function callTogetherChatCompletions(
       chat_template_kwargs: { clear_thinking: false },
       stream: false,
     };
-    applyEstimatedContextBudget(payload, targetModel.definition, options, "request");
+    // Estimate input tokens from the inbound raw byte length via the session's
+    // calibrated estimator (or rawBytes/4 fallback), instead of re-serializing
+    // the translated payload each turn. O(1) far from the window; near the
+    // window the clamp path re-stringifies for an exact recount.
+    const estimatedInputTokens = estimateInputTokensFromRawBytes(options);
+    applyEstimatedContextBudget(
+      payload,
+      targetModel.definition,
+      options,
+      "request",
+      estimatedInputTokens,
+    );
     maxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : maxTokens;
     debugLog(options, "together request", {
       model: payload.model,
@@ -122,6 +138,17 @@ export async function callTogetherChatCompletions(
           targetModel.definition,
         );
         if (trimmed) {
+          // 1e: a reactive trim firing means our count_tokens / advertised
+          // limits let Claude Code compact too late. Surface it loudly
+          // (always-on, not debug-gated) and emit a fire-and-forget telemetry
+          // event. The debug log below stays too; retry semantics unchanged.
+          emitContextTrimAlarm({
+            path: "retry",
+            model: typeof payload.model === "string" ? payload.model : "",
+            trimmedChars: trimmed.trimmedChars,
+            inputTokens: parseTogetherContextLengthInputTokens(initialError.message) ?? 0,
+            contextWindow: targetModel.definition.limit.context,
+          });
           debugLog(options, "retrying together request with trimmed input context", {
             model: payload.model,
             trimmedChars: trimmed.trimmedChars,
@@ -235,4 +262,21 @@ function debugLog(
   value: unknown | (() => unknown),
 ): void {
   writeProxyDebugLog("togetherlink proxy", options, label, value);
+}
+
+/**
+ * Estimate input tokens from the inbound request's raw byte length. Uses the
+ * session costTracker's calibrated estimator when present; otherwise falls
+ * back to rawBytes / APPROX_CHARS_PER_TOKEN (4). Returns a positive integer.
+ * O(1) — no payload serialization.
+ */
+function estimateInputTokensFromRawBytes(options: ClaudeChatOptions): number {
+  const rawBytes = options.rawBytes;
+  if (typeof rawBytes !== "number" || rawBytes <= 0) {
+    return 1;
+  }
+  if (options.costTracker) {
+    return options.costTracker.tokenEstimator.estimate(rawBytes);
+  }
+  return Math.max(1, Math.ceil(rawBytes / APPROX_CHARS_PER_TOKEN));
 }

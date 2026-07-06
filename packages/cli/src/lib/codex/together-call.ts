@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type ModelDefinition } from "@togetherlink/models";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
-import { TOGETHER_BASE_URL } from "../together-core.js";
-import { backoffMs, parseRetryAfter, sleep } from "../together-retry.js";
+import { postChatCompletion } from "../together-client.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
 import type {
@@ -12,9 +11,6 @@ import type {
   CodexToolTranslation,
   TogetherChatResult,
 } from "./wire-types.js";
-
-const RETRYABLE_CHAT_STATUSES = new Set([429, 503]);
-const MAX_TOGETHER_RETRIES = 3;
 
 type CodexTogetherOptions = {
   apiKey: string;
@@ -144,6 +140,83 @@ export async function callTogetherWithNativeTools(
   };
 }
 
+// Python dict methods whose names could collide with a key in tool-call
+// arguments when a Together chat template calls `arguments.<method>()`.
+// Only `items` has been confirmed to collide (GLM-5.2, MiniMax-M3), but the
+// reactive retry sanitizes all of them so an unknown future collision
+// self-heals without a code change.
+const TEMPLATE_ERROR_DICT_METHODS = new Set([
+  "items",
+  "keys",
+  "values",
+  "get",
+  "pop",
+  "popitem",
+  "setdefault",
+  "update",
+  "clear",
+  "copy",
+  "fromkeys",
+]);
+
+function isTogetherTemplateError(text: string): boolean {
+  return /process_messages_failed|not callable|apply chat template|invalid operation/i.test(text);
+}
+
+/** Deep-clone just enough of the payload to safely mutate tool-call arguments. */
+function cloneMessagesForRetry(messages: unknown): ChatMessage[] {
+  const arr = Array.isArray(messages) ? (messages as ChatMessage[]) : [];
+  return arr.map((msg) => ({
+    ...msg,
+    ...(msg.tool_calls
+      ? {
+          tool_calls: msg.tool_calls.map((tc) => ({
+            ...tc,
+            function: { ...tc.function },
+          })),
+        }
+      : {}),
+  }));
+}
+
+/**
+ * Rename every top-level dict-method-named key in every tool-call's arguments
+ * to `_<name>`. Returns true if anything changed (i.e. a retry is warranted).
+ * More aggressive than the proactive `items`-only rename because this only
+ * runs after a real upstream failure, so there is no happy-path cost.
+ */
+function sanitizePayloadForTemplateRetry(payload: Record<string, unknown>): boolean {
+  const messages = cloneMessagesForRetry(payload.messages);
+  let changed = false;
+  for (const message of messages) {
+    if (!message.tool_calls) continue;
+    for (const toolCall of message.tool_calls) {
+      try {
+        const parsed = JSON.parse(toolCall.function.arguments);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+        let modified = false;
+        for (const key of Object.keys(parsed)) {
+          if (TEMPLATE_ERROR_DICT_METHODS.has(key)) {
+            parsed[`_${key}`] = parsed[key];
+            delete parsed[key];
+            modified = true;
+          }
+        }
+        if (modified) {
+          toolCall.function.arguments = JSON.stringify(parsed);
+          changed = true;
+        }
+      } catch {
+        // Not valid JSON -- skip this tool call.
+      }
+    }
+  }
+  if (changed) {
+    payload.messages = messages;
+  }
+  return changed;
+}
+
 export async function fetchTogetherChat(
   payload: Record<string, unknown>,
   options: CodexTogetherOptions,
@@ -156,20 +229,41 @@ export async function fetchTogetherChat(
   }
   const text = await first.text();
   const retryMaxTokens = maxTokensForContextLengthRetry(text, modelDefinition, payload.max_tokens);
-  if (retryMaxTokens === undefined) {
-    return { ok: false, status: first.status, text };
+  if (retryMaxTokens !== undefined) {
+    const retryPayload: Record<string, unknown> = { ...payload, max_tokens: retryMaxTokens };
+    debugLog(options, "retrying together request with reduced max_tokens", {
+      model: retryPayload.model,
+      maxTokens: retryMaxTokens,
+      originalError: text.slice(0, 1000),
+    });
+    const retry = await postTogetherChat(retryPayload, options, signal);
+    if (retry.ok) {
+      return { ok: true, response: retry };
+    }
+    return { ok: false, status: retry.status, text: await retry.text() };
   }
-  const retryPayload: Record<string, unknown> = { ...payload, max_tokens: retryMaxTokens };
-  debugLog(options, "retrying together request with reduced max_tokens", {
-    model: retryPayload.model,
-    maxTokens: retryMaxTokens,
-    originalError: text.slice(0, 1000),
-  });
-  const retry = await postTogetherChat(retryPayload, options, signal);
-  if (retry.ok) {
-    return { ok: true, response: retry };
+
+  // Template-error self-healing: if Together's chat template crashed on a
+  // dict-method-named key in tool-call arguments (e.g. `items`), sanitize all
+  // such keys and retry once. This is the reactive backstop behind the
+  // proactive `items`-only rename in translate-request.ts -- it catches any
+  // future unknown collision without a code change.
+  if (isTogetherTemplateError(text)) {
+    const sanitized: Record<string, unknown> = { ...payload };
+    if (sanitizePayloadForTemplateRetry(sanitized)) {
+      debugLog(options, "retrying together request after template-error sanitization", {
+        model: sanitized.model,
+        originalError: text.slice(0, 1000),
+      });
+      const retry = await postTogetherChat(sanitized, options, signal);
+      if (retry.ok) {
+        return { ok: true, response: retry };
+      }
+      return { ok: false, status: retry.status, text: await retry.text() };
+    }
   }
-  return { ok: false, status: retry.status, text: await retry.text() };
+
+  return { ok: false, status: first.status, text };
 }
 
 async function postTogetherChat(
@@ -177,38 +271,11 @@ async function postTogetherChat(
   options: CodexTogetherOptions,
   signal?: AbortSignal,
 ): Promise<Response> {
-  for (let attempt = 0; attempt <= MAX_TOGETHER_RETRIES; attempt += 1) {
-    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
-    });
-    if (
-      response.ok ||
-      !RETRYABLE_CHAT_STATUSES.has(response.status) ||
-      attempt >= MAX_TOGETHER_RETRIES
-    ) {
-      return response;
-    }
-    debugLog(options, "retrying together request after transient error", {
-      status: response.status,
-      attempt,
-      model: payload.model,
-    });
-    await response.arrayBuffer().catch(() => undefined);
-    await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoffMs(attempt));
-  }
-  return new Response(
-    JSON.stringify({ error: { message: "Together request failed after retries." } }),
-    {
-      status: 503,
-      headers: { "content-type": "application/json" },
-    },
-  );
+  // Delegate the fetch + 429/503 retry loop to the shared Together client
+  // (together-client.ts). The retry contract (serialize-once, Retry-After,
+  // exponential backoff) lives in one place; this harness keeps only the
+  // Codex-specific debug logging and error mapping on top.
+  return postChatCompletion(payload, options, signal);
 }
 
 function maxTokensForContextLengthRetry(

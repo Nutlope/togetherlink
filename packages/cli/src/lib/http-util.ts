@@ -5,13 +5,33 @@ export function requestPath(req: IncomingMessage): string {
   return new URL(req.url ?? "/", "http://127.0.0.1").pathname;
 }
 
-export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+/**
+ * Read the full request body as JSON, returning both the parsed value and the
+ * raw byte length of the inbound body. The byte length is the cheap signal the
+ * proxy's self-calibrating token estimator keys on (see cost.ts): the
+ * Anthropic-JSON size tracks the translated OpenAI-JSON size within a few
+ * percent, so it lets us estimate input tokens without serializing the payload
+ * a second time.
+ */
+export async function readJsonBodyWithSize(
+  req: IncomingMessage,
+): Promise<{ body: unknown; rawBytes: number }> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  const raw = Buffer.concat(chunks);
+  const text = raw.toString("utf8");
+  const body = text ? JSON.parse(text) : {};
+  return { body, rawBytes: raw.length };
+}
+
+/**
+ * Backwards-compatible thin wrapper around readJsonBodyWithSize that discards
+ * the byte length. Existing callers (codex proxy, daemon server) are unaffected.
+ */
+export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return (await readJsonBodyWithSize(req)).body;
 }
 
 export function writeJson(res: ServerResponse, status: number, value: unknown): void {

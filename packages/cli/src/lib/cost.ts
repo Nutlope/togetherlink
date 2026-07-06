@@ -1,4 +1,5 @@
 import { GLM_5_2, VISION_MODELS, costPerToken, type ModelDefinition } from "@togetherlink/models";
+import { APPROX_CHARS_PER_TOKEN } from "./claude/context-budget.js";
 
 /**
  * Proxy-side cost tracking for the selected Together model.
@@ -48,6 +49,19 @@ export type TokenUsage = {
 
 export type ModelTokenUsage = TokenUsage & { model: string };
 
+export type TokenEstimator = { estimate(bytes: number): number };
+
+// Calibration guards. The bytes-per-token ratio is only meaningful when the
+// prompt is large enough that tokenizer overhead (system/special tokens) is
+// negligible; tiny samples are skipped. The ratio is clamped to a sane range:
+// ~1 byte/token (extremely token-dense) up to 16 bytes/token (e.g. CJK UTF-8
+// or image/base64-heavy bodies that Together counts far more cheaply than the
+// raw byte size suggests). Anything outside this range is a degenerate sample
+// (vision expansion, mostly-binary content) — clamp rather than trust it.
+const MIN_CALIBRATION_PROMPT_TOKENS = 64;
+const MIN_BYTES_PER_TOKEN = 1;
+const MAX_BYTES_PER_TOKEN = 16;
+
 export class CostTracker {
   private readonly defaultMainModel: ModelDefinition;
   private promptTokens = 0;
@@ -73,6 +87,22 @@ export class CostTracker {
   private requestStartPrompt = 0;
   private requestStartCached = 0;
   private requestStartCompletion = 0;
+  // Self-calibrating token-estimator state. `lastRequestRawBytes` is the inbound
+  // body byte length recorded at request start (noteRequestBytes); `bytesPerToken`
+  // is the calibrated ratio from the previous turn's real prompt_tokens. We only
+  // calibrate on the FIRST addUsage of a request — tool loops make several Together
+  // calls per inbound request, and only the first call's prompt_tokens corresponds
+  // 1:1 to the inbound body. `pendingCalibration` is reset by beginRequest() so the
+  // first addUsage of each request gets exactly one calibration shot.
+  private lastRequestRawBytes: number | undefined;
+  private bytesPerToken: number | undefined;
+  private pendingCalibration = false;
+  private readonly estimator: TokenEstimator = {
+    estimate: (bytes: number): number => {
+      const ratio = this.bytesPerToken ?? APPROX_CHARS_PER_TOKEN;
+      return Math.max(1, Math.ceil(bytes / ratio));
+    },
+  };
 
   constructor(mainModel: ModelDefinition = GLM_5_2) {
     this.defaultMainModel = mainModel;
@@ -88,6 +118,29 @@ export class CostTracker {
     this.requestStartPrompt = this.promptTokens;
     this.requestStartCached = this.cachedTokens;
     this.requestStartCompletion = this.completionTokens;
+    // A new inbound request is starting: the next addUsage is the first call
+    // for this request and is eligible to calibrate the estimator.
+    this.pendingCalibration = true;
+  }
+
+  /**
+   * Record the raw byte length of the inbound request body, captured at request
+   * start by the proxy (via readJsonBodyWithSize). Used together with the first
+   * addUsage's real prompt_tokens to self-calibrate the bytes-per-token ratio.
+   */
+  noteRequestBytes(rawBytes: number): void {
+    this.lastRequestRawBytes = rawBytes > 0 ? rawBytes : undefined;
+  }
+
+  /**
+   * Self-calibrating token estimator. estimate(bytes) returns an approximate
+   * token count from a raw byte length, using the calibrated bytes-per-token
+   * ratio when at least one turn of ground truth exists, else falling back to
+   * APPROX_CHARS_PER_TOKEN (4). Lets the proxy estimate input tokens without
+   * re-serializing the payload every turn.
+   */
+  get tokenEstimator(): TokenEstimator {
+    return this.estimator;
   }
 
   /**
@@ -102,6 +155,20 @@ export class CostTracker {
     completionTokens: number,
     model: ModelDefinition = this.defaultMainModel,
   ): number {
+    // Calibrate the estimator on the first Together call of this inbound
+    // request only. The first call's prompt_tokens corresponds 1:1 to the
+    // inbound body we measured with noteRequestBytes; later tool-loop calls
+    // see an accumulated (different) prompt and must not recalibrate. Vision
+    // sub-calls go through addVisionUsage and never reach here.
+    if (this.pendingCalibration) {
+      this.pendingCalibration = false;
+      if (this.lastRequestRawBytes !== undefined && promptTokens >= MIN_CALIBRATION_PROMPT_TOKENS) {
+        const ratio = this.lastRequestRawBytes / promptTokens;
+        if (Number.isFinite(ratio) && ratio > 0) {
+          this.bytesPerToken = Math.min(MAX_BYTES_PER_TOKEN, Math.max(MIN_BYTES_PER_TOKEN, ratio));
+        }
+      }
+    }
     const pricing = pricingFor(model);
     const cached = Math.max(0, Math.min(cachedTokens, promptTokens));
     const nonCachedInput = Math.max(0, promptTokens - cached);

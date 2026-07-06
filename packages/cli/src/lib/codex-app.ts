@@ -1,8 +1,6 @@
-import { execFile, spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
 import { codexModelCatalogJson } from "./codex/catalog.js";
 import { applyCodexGenericUserDefaults } from "./codex/user-config.js";
@@ -18,13 +16,35 @@ import type { RegisterSessionRequest } from "./daemon/state.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
+import { isProcessAlive } from "./paths.js";
+import {
+  removeManagedBlock as tomlRemoveManagedBlock,
+  removeTomlSections,
+  splitTomlPreamble,
+  upsertTopLevelTomlKeys,
+  removeTopLevelTomlKeys,
+  tomlString,
+} from "./codex-app/toml.js";
+import {
+  type CodexAppSessionLock,
+  appSessionLockPath,
+  readAppSessionLock,
+  writeAppSessionLock,
+  assertNoLiveCodexAppSession,
+  isManagedCodexAppConfig,
+} from "./codex-app/session-lock.js";
+import {
+  type CodexAppLaunchResult,
+  type CodexAppLaunchReason,
+  launchCodexApp,
+  codexAppLaunchMessage,
+} from "./codex-app/process.js";
 
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
 const CODEX_APP_CONFIG_MARKER_START = "# >>> togetherlink codex-app alpha >>>";
 const CODEX_APP_CONFIG_MARKER_END = "# <<< togetherlink codex-app alpha <<<";
 const CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND = true;
 const BACKUP_MANIFEST = "latest.json";
-const execFileAsync = promisify(execFile);
 
 type BackupEntry = {
   path: string;
@@ -35,14 +55,6 @@ type BackupEntry = {
 type BackupManifest = {
   createdAt: string;
   files: BackupEntry[];
-};
-
-type CodexAppSessionLock = {
-  pid: number;
-  startedAt: string;
-  sessionToken: string;
-  configPath: string;
-  catalogPath: string;
 };
 
 export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessResult> {
@@ -97,7 +109,6 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     baseUrl: `${agentProxyUrl}/v1`,
     bearerToken: authToken,
     catalogPath,
-    contextWindow: selectedModel.definition.limit.context,
   });
   await writeTextAtomic(configPath, next);
   // Codex caches remote model metadata in models_cache.json. If a previous
@@ -158,10 +169,13 @@ export function buildCodexAppConfig(
     baseUrl: string;
     bearerToken: string;
     catalogPath: string;
-    contextWindow?: number;
   },
 ): string {
-  const withoutManagedBlock = removeManagedBlock(rawConfig);
+  const withoutManagedBlock = tomlRemoveManagedBlock(
+    rawConfig,
+    CODEX_APP_CONFIG_MARKER_START,
+    CODEX_APP_CONFIG_MARKER_END,
+  );
   const withoutLegacyTables = removeTomlSections(withoutManagedBlock, [
     `profiles.${options.providerId}`,
     `profiles."${options.providerId}"`,
@@ -171,20 +185,25 @@ export function buildCodexAppConfig(
   const withGenericDefaults = applyCodexGenericUserDefaults(withoutLegacyTables);
   const [preamble, rest] = splitTomlPreamble(withGenericDefaults);
   const managedPreamble = upsertTopLevelTomlKeys(preamble, {
+    // Per-model context windows live in the generated model catalog; do not
+    // emit global `model_context_window`/`model_auto_compact_token_limit`
+    // overrides here. A global override is tied to whichever model was
+    // selected when this config was written, so switching models inside
+    // Codex Desktop leaves the override stale and clamps the displayed
+    // context length (e.g. every 262k model gets stuck at ~249k).
     model: tomlString(options.modelId),
     model_provider: tomlString(options.providerId),
     model_catalog_json: tomlString(options.catalogPath),
-    ...(options.contextWindow
-      ? {
-          model_context_window: String(options.contextWindow),
-          model_auto_compact_token_limit: String(Math.floor(options.contextWindow * 0.7)),
-        }
-      : {}),
   });
   const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, [
     "model_reasoning_effort",
     "openai_base_url",
     "profile",
+    // Strip legacy global context-window overrides that were emitted by early
+    // versions of the togetherlink managed config. They become stale the
+    // moment the user switches models inside Codex Desktop.
+    "model_context_window",
+    "model_auto_compact_token_limit",
   ]);
   const providerBlock = [
     CODEX_APP_CONFIG_MARKER_START,
@@ -279,7 +298,14 @@ async function backupFiles(home: string, files: string[]): Promise<string> {
 
 async function backupCodexAppConfig(home: string, configPath: string): Promise<string> {
   const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
-  if (await isManagedCodexAppConfig(home)) {
+  if (
+    await isManagedCodexAppConfig(
+      home,
+      codexConfigPath(home),
+      CODEX_APP_CONFIG_MARKER_START,
+      modelCatalogPath(home),
+    )
+  ) {
     const existing = await readTextIfExists(manifestPath);
     if (existing) {
       try {
@@ -314,156 +340,6 @@ function codexAppModelCatalogCount(): number {
   } catch {
     return 0;
   }
-}
-
-type CodexAppLaunchResult = {
-  launched: boolean;
-  launchAttempted: boolean;
-  wasRunning: boolean;
-  restarted: boolean;
-  restartDeclined: boolean;
-  restartUnsupported: boolean;
-};
-
-type CodexAppLaunchReason = "configured" | "restored";
-
-async function launchCodexApp(options: {
-  reason: CodexAppLaunchReason;
-  openIfClosed: boolean;
-}): Promise<CodexAppLaunchResult> {
-  const wasRunning = await isCodexAppRunning();
-  let restarted = false;
-  let restartDeclined = false;
-  let restartUnsupported = false;
-
-  if (wasRunning) {
-    if (await shouldRestartCodexApp(options.reason)) {
-      restarted = await quitCodexApp();
-      restartUnsupported = !restarted;
-    } else {
-      restartDeclined = true;
-    }
-  }
-
-  const launchAttempted = !(restartDeclined || restartUnsupported || !options.openIfClosed);
-  const launched = launchAttempted ? await openCodexApp() : false;
-  return { launched, launchAttempted, wasRunning, restarted, restartDeclined, restartUnsupported };
-}
-
-function codexAppLaunchMessage(result: CodexAppLaunchResult): string {
-  if (result.wasRunning && result.restarted && result.launched) {
-    return "Codex App was already open; restart approved and relaunch requested.";
-  }
-  if (result.wasRunning && result.restartDeclined) {
-    return "Codex App is already open. Restart it when you are ready so it reloads this profile.";
-  }
-  if (result.wasRunning && result.restartUnsupported) {
-    return "Codex App is already open, but togetherlink could not restart it. Quit and reopen Codex App when you are ready.";
-  }
-  if (!result.wasRunning && !result.launchAttempted) {
-    return "Codex App was not running.";
-  }
-  return result.launched
-    ? "Codex App launch requested."
-    : "Config written, but Codex App could not be launched automatically. Open Codex App manually.";
-}
-
-async function shouldRestartCodexApp(reason: CodexAppLaunchReason): Promise<boolean> {
-  if (!isInteractive()) {
-    return false;
-  }
-  const clack = await import("@clack/prompts");
-  const action =
-    reason === "restored"
-      ? "reload your restored Codex profile"
-      : "reload the Togetherlink profile";
-  const restart = await clack.confirm({
-    message: `Codex App is already open. Restart it now to ${action}?`,
-    initialValue: false,
-  });
-  return restart === true;
-}
-
-async function openCodexApp(): Promise<boolean> {
-  const launchedViaCodex = await spawnDetached("codex", ["app", process.cwd()]);
-  if (launchedViaCodex) {
-    return true;
-  }
-  if (process.platform === "darwin") {
-    return spawnDetached("open", ["-a", "Codex", process.cwd()]);
-  }
-  if (process.platform === "win32") {
-    return spawnDetached("cmd", ["/c", "start", "", "Codex"]);
-  }
-  return false;
-}
-
-async function isCodexAppRunning(): Promise<boolean> {
-  if (process.platform === "darwin") {
-    try {
-      const { stdout } = await execFileAsync("/usr/bin/osascript", [
-        "-e",
-        'application "Codex" is running',
-      ]);
-      return stdout.trim() === "true";
-    } catch {
-      return false;
-    }
-  }
-  if (process.platform === "win32") {
-    try {
-      const { stdout } = await execFileAsync("tasklist", ["/FI", "IMAGENAME eq Codex.exe"]);
-      return /\bCodex\.exe\b/i.test(stdout);
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
-async function quitCodexApp(): Promise<boolean> {
-  if (process.platform === "darwin") {
-    try {
-      await execFileAsync("/usr/bin/osascript", ["-e", 'tell application "Codex" to quit']);
-      return waitForCodexAppExit();
-    } catch {
-      return false;
-    }
-  }
-  if (process.platform === "win32") {
-    try {
-      await execFileAsync("taskkill", ["/IM", "Codex.exe"]);
-      return waitForCodexAppExit();
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
-async function waitForCodexAppExit(): Promise<boolean> {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (!(await isCodexAppRunning())) {
-      return true;
-    }
-    await sleep(200);
-  }
-  return false;
-}
-
-async function spawnDetached(command: string, args: string[]): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.once("error", () => resolve(false));
-    child.once("spawn", () => {
-      child.unref();
-      resolve(true);
-    });
-  });
 }
 
 function codexConfigPath(home: string): string {
@@ -506,10 +382,6 @@ async function bustStaleModelsCache(home: string): Promise<void> {
   } catch {
     // Best-effort: a missing or locked file is fine; Codex will re-evaluate.
   }
-}
-
-function appSessionLockPath(home: string): string {
-  return path.join(togetherlinkHomeDir(home), "codex-app", "session.json");
 }
 
 function togetherlinkHomeDir(home: string): string {
@@ -557,42 +429,20 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
-async function readAppSessionLock(home: string): Promise<CodexAppSessionLock | undefined> {
-  const raw = await readTextIfExists(appSessionLockPath(home));
-  if (!raw) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(raw) as CodexAppSessionLock;
-    if (typeof parsed.pid === "number" && typeof parsed.sessionToken === "string") {
-      return parsed;
-    }
-  } catch {
-    // Invalid lock files are treated as stale and overwritten by the next session.
-  }
-  return undefined;
-}
-
-async function writeAppSessionLock(home: string, lock: CodexAppSessionLock): Promise<void> {
-  await writeTextAtomic(appSessionLockPath(home), `${JSON.stringify(lock, null, 2)}\n`);
-}
-
-async function assertNoLiveCodexAppSession(home: string): Promise<void> {
-  const lock = await readAppSessionLock(home);
-  if (!lock || lock.pid === process.pid || !isProcessAlive(lock.pid)) {
-    return;
-  }
-  throw new Error(
-    `Another togetherlink codex-app session appears to be running (pid ${lock.pid}). Stop it with Ctrl+C, or run \`togetherlink codex-app --restore\` after it exits.`,
-  );
-}
-
 async function recoverInterruptedCodexApp(home: string): Promise<boolean> {
   const lock = await readAppSessionLock(home);
   if (lock && lock.pid !== process.pid && isProcessAlive(lock.pid)) {
     return false;
   }
-  if (!lock && !(await isManagedCodexAppConfig(home))) {
+  if (
+    !lock &&
+    !(await isManagedCodexAppConfig(
+      home,
+      codexConfigPath(home),
+      CODEX_APP_CONFIG_MARKER_START,
+      modelCatalogPath(home),
+    ))
+  ) {
     return false;
   }
   try {
@@ -601,115 +451,6 @@ async function recoverInterruptedCodexApp(home: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function isManagedCodexAppConfig(home: string): Promise<boolean> {
-  const raw = await readTextIfExists(codexConfigPath(home));
-  if (!raw) {
-    return false;
-  }
-  if (raw.includes(CODEX_APP_CONFIG_MARKER_START)) {
-    return true;
-  }
-  return (
-    raw.includes('model_provider = "openai"') &&
-    raw.includes('openai_base_url = "http://127.0.0.1:') &&
-    raw.includes(modelCatalogPath(home))
-  );
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-function removeManagedBlock(raw: string): string {
-  const start = raw.indexOf(CODEX_APP_CONFIG_MARKER_START);
-  if (start < 0) {
-    return raw;
-  }
-  const end = raw.indexOf(CODEX_APP_CONFIG_MARKER_END, start);
-  if (end < 0) {
-    return raw;
-  }
-  const afterEnd = end + CODEX_APP_CONFIG_MARKER_END.length;
-  return `${raw.slice(0, start).trimEnd()}\n${raw.slice(afterEnd).replace(/^\s*\n/, "")}`;
-}
-
-function removeTomlSections(raw: string, sectionNames: string[]): string {
-  if (sectionNames.length === 0 || raw.trim() === "") {
-    return raw;
-  }
-  const remove = new Set(sectionNames.map((section) => `[${section}]`));
-  const lines = raw.split("\n");
-  const kept: string[] = [];
-  let skipping = false;
-
-  for (const line of lines) {
-    if (/^\s*\[/.test(line)) {
-      skipping = remove.has(line.trim());
-    }
-    if (!skipping) {
-      kept.push(line);
-    }
-  }
-
-  return kept.join("\n").replace(/\n{3,}/g, "\n\n");
-}
-
-function splitTomlPreamble(raw: string): [string, string] {
-  const match = raw.match(/(?:^|\n)\s*\[/);
-  if (!match || match.index === undefined) {
-    return [raw, ""];
-  }
-  const tableStart = match[0].startsWith("\n") ? match.index + 1 : match.index;
-  return [raw.slice(0, tableStart), raw.slice(tableStart)];
-}
-
-function upsertTopLevelTomlKeys(preamble: string, values: Record<string, string>): string {
-  const seen = new Set<string>();
-  const lines = preamble.split(/\n/);
-  const next = lines.map((line) => {
-    const match = /^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$/.exec(line);
-    if (!match) {
-      return line;
-    }
-    const key = match[2];
-    if (!key) {
-      return line;
-    }
-    const value = values[key];
-    if (value === undefined) {
-      return line;
-    }
-    seen.add(key);
-    return `${match[1] ?? ""}${key}${match[3] ?? " = "}${value}`;
-  });
-  const insertion = Object.entries(values)
-    .filter(([key]) => !seen.has(key))
-    .map(([key, value]) => `${key} = ${value}`);
-  const compact = next.join("\n").trimEnd();
-  const prefix = compact ? `${compact}\n` : "";
-  return `${prefix}${insertion.join("\n")}${insertion.length > 0 ? "\n" : ""}`;
-}
-
-function removeTopLevelTomlKeys(preamble: string, keys: string[]): string {
-  const remove = new Set(keys);
-  return preamble
-    .split(/\n/)
-    .filter((line) => {
-      const match = /^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$/.exec(line);
-      return !match || !remove.has(match[2] ?? "");
-    })
-    .join("\n");
-}
-
-function tomlString(value: string): string {
-  return JSON.stringify(value);
 }
 
 function isNodeError(err: unknown): err is NodeJS.ErrnoException {

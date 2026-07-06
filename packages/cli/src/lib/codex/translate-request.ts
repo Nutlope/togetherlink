@@ -27,7 +27,6 @@ const CODEX_IDENTITY_PROMPT =
 const CODEX_MEMORY_MODEL_ENV = "TOGETHERLINK_CODEX_MEMORY_MODEL";
 const CODEX_MEMORY_REQUESTED_MODELS = new Set(["gpt-5.4-mini"]);
 const CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
-const CODEX_APPROX_CHARS_PER_TOKEN = 4;
 
 export const EMPTY_CODEX_TOOL_TRANSLATION: CodexToolTranslation = {
   tools: [],
@@ -60,6 +59,7 @@ export function toChatPayload(
   stream: boolean,
   toolTranslation: CodexToolTranslation,
   requestModel: ResolvedCodexRequestModel,
+  estimatedInputTokens: number,
 ): Record<string, unknown> {
   const messages = toChatMessages(body, options, toolTranslation);
   const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
@@ -72,7 +72,7 @@ export function toChatPayload(
     messages: messagesWithNativePrompt,
     max_tokens:
       body.max_output_tokens ??
-      defaultMaxOutputTokens(requestModel.definition, messagesWithNativePrompt, toolTranslation),
+      defaultMaxOutputTokens(requestModel.definition, estimatedInputTokens),
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
     tool_choice: toChatToolChoice(body.tool_choice, toolTranslation),
@@ -137,24 +137,39 @@ function toChatMessages(
     return messages;
   }
   const pendingToolCalls: NonNullable<ChatMessage["tool_calls"]> = [];
+  const pendingReasoningParts: string[] = [];
+  const takePendingReasoning = () => {
+    const reasoning = pendingReasoningParts.join("\n");
+    pendingReasoningParts.length = 0;
+    return reasoning;
+  };
   const flushPendingToolCalls = () => {
     if (pendingToolCalls.length === 0) {
       return;
     }
+    const reasoning = takePendingReasoning();
     messages.push({
       role: "assistant",
       content: null,
       tool_calls: pendingToolCalls.splice(0),
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
     });
   };
   for (const item of body.input ?? []) {
+    if (item.type === "reasoning") {
+      const reasoning = stringifyResponsesContent(item.content);
+      if (reasoning) {
+        pendingReasoningParts.push(reasoning);
+      }
+      continue;
+    }
     if (item.type === "function_call") {
       pendingToolCalls.push({
         id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
         type: "function",
         function: {
           name: toChatHistoryToolName(item, toolTranslation, "function"),
-          arguments: item.arguments ?? "{}",
+          arguments: sanitizeToolCallArguments(item.arguments),
         },
       });
       continue;
@@ -181,7 +196,12 @@ function toChatMessages(
     }
     if (item.type === "message" || item.role) {
       const role = toChatRole(item.role);
-      messages.push({ role, content: toChatMessageContent(item.content) });
+      const reasoning = role === "assistant" ? takePendingReasoning() : "";
+      messages.push({
+        role,
+        content: toChatMessageContent(item.content),
+        ...(reasoning ? { reasoning_content: reasoning } : {}),
+      });
     }
   }
   flushPendingToolCalls();
@@ -389,13 +409,63 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
   }
   return (content ?? [])
     .map((part) => {
-      if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+      if (
+        part.type === "input_text" ||
+        part.type === "output_text" ||
+        part.type === "text" ||
+        part.type === "reasoning_text"
+      ) {
         return part.text ?? "";
       }
       return "";
     })
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Several Together chat templates render tool-call arguments with
+ * `arguments.items()` (Python dict-method syntax). In their Jinja environment
+ * key lookup on the parsed-JSON object takes precedence over attribute access,
+ * so when `arguments` has a top-level `items` key the expression resolves to
+ * the *value* of that key instead of the dict method, then `()` tries to call
+ * it -- crashing the template with `invalid operation: object is not callable`
+ * and a `process_messages_failed` HTTP 400. Confirmed on GLM-5.2
+ * (`in chat:85`) and MiniMax-M3 (`in chat:226`); other models may share it.
+ *
+ * The multi-agent `spawn_agent` tool legitimately puts sub-agent input in an
+ * `items` array, so once such a call enters conversation history it bricks
+ * every later turn on an affected model (Codex retries the identical payload
+ * and hits the identical non-retryable 400).
+ *
+ * Defensively rename a top-level `items` key to `_items` for ALL models before
+ * forwarding. These arguments only appear in conversation history -- the tool
+ * already executed against the original arguments Codex captured from the live
+ * response -- so renaming what the model sees back is safe and does not affect
+ * tool execution. Applied universally (not per-model) because the template bug
+ * is upstream and we cannot predict which models carry it; a stale allowlist
+ * silently left MiniMax-M3 unprotected until a live probe caught it.
+ */
+function sanitizeToolCallArguments(argumentsJson: string | undefined): string {
+  if (!argumentsJson) {
+    return "{}";
+  }
+  try {
+    const parsed = JSON.parse(argumentsJson);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Object.prototype.hasOwnProperty.call(parsed, "items")
+    ) {
+      parsed._items = parsed.items;
+      delete parsed.items;
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    // Not valid JSON -- forward the raw string as-is.
+  }
+  return argumentsJson;
 }
 
 function toChatMessageContent(
@@ -505,13 +575,26 @@ function reasoningEffort(body: ResponsesRequest, model: ModelDefinition): string
 
 function defaultMaxOutputTokens(
   modelDefinition: ModelDefinition,
-  messages: ChatMessage[],
-  toolTranslation: CodexToolTranslation,
+  estimatedInputTokens: number,
 ): number {
-  const estimatedInputTokens = Math.ceil(
-    Buffer.byteLength(JSON.stringify({ messages, tools: toolTranslation.tools }), "utf8") /
-      CODEX_APPROX_CHARS_PER_TOKEN,
-  );
+  // Fast path: when the estimate says we are comfortably inside the window,
+  // skip the clamp arithmetic and return the full output budget directly. The
+  // 1.15 factor is the headroom that accounts for estimation error (the
+  // calibrated ratio is good but not exact). This is the ~95% of turns where
+  // the session is nowhere near the context window — the budget check is now
+  // two comparisons, no payload serialization.
+  if (
+    estimatedInputTokens * 1.15 +
+      modelDefinition.limit.output +
+      CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS <
+    modelDefinition.limit.context
+  ) {
+    return modelDefinition.limit.output;
+  }
+  // Near the window: clamp max_tokens down so input + max_tokens stays inside
+  // the context window, with a safety margin. The reactive 400-retry path in
+  // together-call.ts (maxTokensForContextLengthRetry) remains the accuracy
+  // backstop — it parses Together's exact token counts from the error.
   const availableOutputTokens = Math.floor(
     modelDefinition.limit.context - estimatedInputTokens - CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS,
   );

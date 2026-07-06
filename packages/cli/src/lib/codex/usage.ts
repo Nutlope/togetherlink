@@ -1,5 +1,5 @@
 import { type ModelDefinition } from "@togetherlink/models";
-import type { CostTracker } from "../claude/cost.js";
+import type { CostTracker } from "../cost.js";
 import type { ChatResponse } from "./wire-types.js";
 
 type CodexUsageOptions = {

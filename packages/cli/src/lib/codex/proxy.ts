@@ -1,9 +1,9 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { type ModelDefinition } from "@togetherlink/models";
 import { codexModelCatalog } from "./catalog.js";
-import type { CostTracker } from "../claude/cost.js";
+import type { CostTracker } from "../cost.js";
 import { createProxyPerfTracer, type ProxyPerfSink } from "../proxy-perf.js";
-import { readJsonBody, requestPath, writeJson } from "../http-util.js";
+import { readJsonBodyWithSize, requestPath, writeJson } from "../http-util.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { objectKeys } from "./content-format.js";
 import {
@@ -67,7 +67,24 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  const body = (await perf.span("body_read_parse", () => readJsonBody(req))) as ResponsesRequest;
+  // readJsonBodyWithSize captures the raw inbound byte length — the cheap
+  // signal the self-calibrating token estimator keys on (see cost.ts).
+  const { body: parsedBody, rawBytes } = await perf.span("body_read_parse", () =>
+    readJsonBodyWithSize(req),
+  );
+  const body = parsedBody as ResponsesRequest;
+  // Record the inbound byte length for the estimator, then mark a new request
+  // (beginRequest resets the per-request delta and arms the first-addUsage
+  // calibration). noteRequestBytes must precede beginRequest's first addUsage.
+  options.costTracker?.noteRequestBytes(rawBytes);
+  options.costTracker?.beginRequest();
+  // Estimate input tokens from the raw byte length via the calibrated estimator
+  // (or rawBytes/4 fallback when there is no calibration history). O(1) — this
+  // replaces the per-turn full-payload JSON.stringify the old defaultMaxOutputTokens
+  // performed. Threading it here lets toChatPayload clamp max_tokens near the
+  // window without re-serializing messages + tools.
+  const estimatedInputTokens =
+    options.costTracker?.tokenEstimator.estimate(rawBytes) ?? Math.ceil(rawBytes / 4);
   const translated = perf.spanSync("translate_request", () => {
     const toolTranslation =
       body.tools && body.tools.length > 0
@@ -81,6 +98,7 @@ export async function handleCodexProxyRequest(
       Boolean(body.stream),
       toolTranslation,
       requestModel,
+      estimatedInputTokens,
     );
     return { nativeToolCount, toolTranslation, requestModel, translatedPayload };
   });
@@ -95,7 +113,6 @@ export async function handleCodexProxyRequest(
       markClientDisconnected();
     }
   });
-  options.costTracker?.beginRequest();
   debugLog(options, "responses request", () => ({
     model: body.model,
     targetModel: requestModel.targetModelId,
@@ -161,7 +178,7 @@ function summarizeResponsesTools(
   }));
 }
 
-function writeOpenAIError(
+export function writeOpenAIError(
   res: ServerResponse,
   status: number,
   type: string,
