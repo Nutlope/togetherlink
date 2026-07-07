@@ -7,12 +7,7 @@ import { CostTracker } from "../cost.js";
 import {
   APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
-  canTrimInputForContextLengthRetry,
   clampRequestedMaxTokens,
-  emitContextTrimAlarm,
-  maxTokensForContextLengthRetry,
-  parseTogetherContextLengthInputTokens,
-  trimPayloadInputForContextLengthRetry,
 } from "./context-budget.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import {
@@ -67,7 +62,7 @@ export async function callTogetherChatCompletions(
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-    let maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+    const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
     const payload = {
       model: targetModel.definition.id,
       messages:
@@ -95,7 +90,6 @@ export async function callTogetherChatCompletions(
       "request",
       estimatedInputTokens,
     );
-    maxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : maxTokens;
     debugLog(options, "together request", {
       model: payload.model,
       messageCount: payload.messages.length,
@@ -105,64 +99,14 @@ export async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    let response = await (perf?.span(
+    // The Together client owns transient (429/503) and reactive context-fit
+    // retries (max_tokens → strip old images → trim text → drop oldest turns),
+    // so a context-length rejection is self-healed before fetchTogether returns.
+    const response = await (perf?.span(
       "upstream_fetch",
-      () => fetchTogether(payload, options, signal),
+      () => fetchTogether(payload, options, targetModel.definition, signal),
       { turn },
-    ) ?? fetchTogether(payload, options, signal));
-    if (!response.ok) {
-      const initialError = response.error;
-      const retryMaxTokens = maxTokensForContextLengthRetry(
-        initialError,
-        targetModel.definition,
-        maxTokens,
-      );
-      if (retryMaxTokens !== undefined) {
-        maxTokens = retryMaxTokens;
-        payload.max_tokens = maxTokens;
-        debugLog(options, "retrying together request with reduced max_tokens", {
-          model: payload.model,
-          maxTokens,
-          originalError: initialError.message,
-          turn,
-        });
-        response = await (perf?.span(
-          "upstream_fetch_retry",
-          () => fetchTogether(payload, options, signal),
-          { turn, reason: "max_tokens" },
-        ) ?? fetchTogether(payload, options, signal));
-      } else if (canTrimInputForContextLengthRetry(initialError, targetModel.definition)) {
-        const trimmed = trimPayloadInputForContextLengthRetry(
-          payload,
-          initialError,
-          targetModel.definition,
-        );
-        if (trimmed) {
-          // 1e: a reactive trim firing means our count_tokens / advertised
-          // limits let Claude Code compact too late. Surface it loudly
-          // (always-on, not debug-gated) and emit a fire-and-forget telemetry
-          // event. The debug log below stays too; retry semantics unchanged.
-          emitContextTrimAlarm({
-            path: "retry",
-            model: typeof payload.model === "string" ? payload.model : "",
-            trimmedChars: trimmed.trimmedChars,
-            inputTokens: parseTogetherContextLengthInputTokens(initialError.message) ?? 0,
-            contextWindow: targetModel.definition.limit.context,
-          });
-          debugLog(options, "retrying together request with trimmed input context", {
-            model: payload.model,
-            trimmedChars: trimmed.trimmedChars,
-            originalError: initialError.message,
-            turn,
-          });
-          response = await (perf?.span(
-            "upstream_fetch_retry",
-            () => fetchTogether(payload, options, signal),
-            { turn, reason: "trim_context" },
-          ) ?? fetchTogether(payload, options, signal));
-        }
-      }
-    }
+    ) ?? fetchTogether(payload, options, targetModel.definition, signal));
 
     if (!response.ok) {
       // Surfaced via fetchTogether as a TogetherApiError after exhausting retries

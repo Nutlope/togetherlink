@@ -1,4 +1,5 @@
 import { type ServerResponse } from "node:http";
+import { type ModelDefinition } from "@togetherlink/models";
 import { writeJson } from "../http-util.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { parseRetryAfter } from "../together-retry.js";
@@ -31,13 +32,17 @@ const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 export async function fetchTogether(
   payload: Record<string, unknown>,
   options: TogetherCallOptions,
+  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<TogetherFetchResult> {
-  // Delegate the fetch + 429/503 retry loop to the shared Together client
-  // (together-client.ts). The retry contract (serialize-once, Retry-After,
-  // exponential backoff) lives in one place; this harness keeps only the
+  // Delegate the fetch + 429/503 retry loop AND the reactive context-fit retry
+  // to the shared Together client (together-client.ts). Passing the model
+  // definition enables the context-fit repair; this harness keeps only the
   // Anthropic error-shape mapping that's specific to its wire format.
-  const response = await postChatCompletion(payload, options, signal);
+  const response = await postChatCompletion(payload, options, signal, {
+    modelDefinition,
+    debug: options.debug,
+  });
   if (response.ok) {
     return { ok: true, json: (await response.json()) as OpenAIChatResponse };
   }

@@ -77,9 +77,7 @@ export async function assertCodexContextLimitRetry(context: TestContext): Promis
     );
     assert(!looksLikeContextError(text), "context-length error leaked to the client");
     assert(
-      daemon
-        .stderr()
-        .includes("[togetherlink codex proxy] retrying together request with reduced max_tokens"),
+      daemon.stderr().includes("[togetherlink proxy] context-fit retry"),
       "daemon did not log Codex context-limit retry",
     );
     assert(

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   emitContextTrimAlarm,
   parseTogetherContextLengthInputTokens,
-} from "../../cli/src/lib/claude/context-budget.js";
+} from "../../cli/src/lib/context-fit.js";
 import { sendTelemetryEvent } from "../../cli/src/lib/telemetry.js";
 
 describe("telemetry", () => {

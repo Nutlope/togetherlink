@@ -3,10 +3,12 @@ import { afterEach, beforeEach, vi } from "vitest";
 import type { ModelDefinition } from "../../models/src/index.js";
 import {
   applyEstimatedContextBudget,
-  parseTogetherContextLengthInputTokens,
-  parseTogetherContextLengthMaxTokens,
   trimPayloadInputByApproxTokens,
 } from "../../cli/src/lib/claude/context-budget.js";
+import {
+  parseTogetherContextLengthInputTokens,
+  parseTogetherContextLengthMaxTokens,
+} from "../../cli/src/lib/context-fit.js";
 
 const model: ModelDefinition = {
   id: "test/context-model",

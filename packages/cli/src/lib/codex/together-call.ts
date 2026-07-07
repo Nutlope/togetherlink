@@ -3,11 +3,6 @@ import { type ModelDefinition } from "@togetherlink/models";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { postChatCompletion } from "../together-client.js";
-import {
-  canTrimInputForContextLengthRetry,
-  emitContextTrimAlarm,
-  trimPayloadInputForContextLengthRetry,
-} from "../claude/context-budget.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
 import type {
@@ -228,71 +223,14 @@ export async function fetchTogetherChat(
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<TogetherChatResult> {
-  const first = await postTogetherChat(payload, options, signal);
+  const first = await postTogetherChat(payload, options, modelDefinition, signal);
   if (first.ok) {
     return { ok: true, response: first };
   }
+  // The shared Together client already self-healed any context-length overflow
+  // (max_tokens → strip old images → trim text → drop oldest turns) before
+  // returning, so anything non-OK here is either terminal or a template crash.
   const text = await first.text();
-  const retryMaxTokens = maxTokensForContextLengthRetry(text, modelDefinition, payload.max_tokens);
-  if (retryMaxTokens !== undefined) {
-    const retryPayload: Record<string, unknown> = { ...payload, max_tokens: retryMaxTokens };
-    debugLog(options, "retrying together request with reduced max_tokens", {
-      model: retryPayload.model,
-      maxTokens: retryMaxTokens,
-      originalError: text.slice(0, 1000),
-    });
-    const retry = await postTogetherChat(retryPayload, options, signal);
-    if (retry.ok) {
-      return { ok: true, response: retry };
-    }
-    return { ok: false, status: retry.status, text: await retry.text() };
-  }
-
-  // Context-length input-trim retry: when input alone exceeds the model's
-  // context window (Together's tokenizer counts more tokens than our
-  // estimator predicted — common with Computer Use screenshots and large tool
-  // schemas), trim old conversation context from the messages and retry once.
-  // This is the safety net behind the catalog's truncation_policy margin
-  // (catalog.ts). It uses Together's *actual* token count from the error
-  // message, so it is accurate regardless of tokenizer mismatch. Mirrors the
-  // Claude path (stream.ts / chat-completions.ts).
-  const contextError = {
-    status: first.status,
-    anthropicStatus: 0,
-    anthropicType: "",
-    message: text,
-    retryable: false,
-  };
-  if (canTrimInputForContextLengthRetry(contextError, modelDefinition)) {
-    const trimmedPayload: Record<string, unknown> = {
-      ...payload,
-      messages: cloneMessagesForRetry(payload.messages),
-    };
-    const trimmed = trimPayloadInputForContextLengthRetry(
-      trimmedPayload,
-      contextError,
-      modelDefinition,
-    );
-    if (trimmed) {
-      emitContextTrimAlarm({
-        path: "retry",
-        model: typeof payload.model === "string" ? payload.model : "",
-        trimmedChars: trimmed.trimmedChars,
-        inputTokens: parseTogetherContextLengthInputTokens(text) ?? 0,
-        contextWindow: modelDefinition.limit.context,
-      });
-      debugLog(options, "retrying together request after input context trim", {
-        model: trimmedPayload.model,
-        trimmedChars: trimmed.trimmedChars,
-        originalError: text.slice(0, 1000),
-      });
-      const retry = await postTogetherChat(trimmedPayload, options, signal);
-      if (retry.ok) {
-        return { ok: true, response: retry };
-      }
-      return { ok: false, status: retry.status, text: await retry.text() };
-    }
-  }
 
   // Template-error self-healing: if Together's chat template crashed on a
   // dict-method-named key in tool-call arguments (e.g. `items`), sanitize all
@@ -306,7 +244,7 @@ export async function fetchTogetherChat(
         model: sanitized.model,
         originalError: text.slice(0, 1000),
       });
-      const retry = await postTogetherChat(sanitized, options, signal);
+      const retry = await postTogetherChat(sanitized, options, modelDefinition, signal);
       if (retry.ok) {
         return { ok: true, response: retry };
       }
@@ -320,55 +258,14 @@ export async function fetchTogetherChat(
 async function postTogetherChat(
   payload: Record<string, unknown>,
   options: CodexTogetherOptions,
+  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<Response> {
-  // Delegate the fetch + 429/503 retry loop to the shared Together client
-  // (together-client.ts). The retry contract (serialize-once, Retry-After,
-  // exponential backoff) lives in one place; this harness keeps only the
-  // Codex-specific debug logging and error mapping on top.
-  return postChatCompletion(payload, options, signal);
-}
-
-function maxTokensForContextLengthRetry(
-  message: string,
-  modelDefinition: ModelDefinition,
-  currentMaxTokens: unknown,
-): number | undefined {
-  const inputTokens = parseTogetherContextLengthInputTokens(message);
-  if (inputTokens === undefined) {
-    return undefined;
-  }
-  const availableOutputTokens = Math.min(
-    modelDefinition.limit.context - inputTokens,
-    modelDefinition.limit.output,
-  );
-  if (availableOutputTokens < 1) {
-    return undefined;
-  }
-  const retryMaxTokens = Math.floor(availableOutputTokens);
-  if (typeof currentMaxTokens === "number" && retryMaxTokens >= currentMaxTokens) {
-    return undefined;
-  }
-  return retryMaxTokens;
-}
-
-function parseTogetherContextLengthInputTokens(message: string): number | undefined {
-  const parentheticalMatch = message.match(
-    /maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is,
-  );
-  if (parentheticalMatch) {
-    return parseTokenCount(parentheticalMatch[1]);
-  }
-  const resolvedInputMatch = message.match(/request resolved to\s+([\d,_]+)\s+input tokens\b/is);
-  return parseTokenCount(resolvedInputMatch?.[1]);
-}
-
-function parseTokenCount(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(value.replaceAll(/[,_]/g, ""), 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  // Delegate the fetch + 429/503 retry loop AND the reactive context-fit retry
+  // to the shared Together client (together-client.ts). Passing the model
+  // definition enables the context-fit repair; this harness keeps only the
+  // Codex-specific debug logging and template-error handling on top.
+  return postChatCompletion(payload, options, signal, { modelDefinition, debug: options.debug });
 }
 
 function debugLog(

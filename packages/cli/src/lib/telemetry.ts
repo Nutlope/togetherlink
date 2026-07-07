@@ -34,6 +34,14 @@ export type ContextTrimTelemetryInfo = {
   inputTokens: number;
   /** Model context window in tokens. */
   contextWindow: number;
+  /** Which fit rung the reactive orchestrator applied, when known. */
+  action?: "max_tokens" | "strip_images" | "trim_text" | "drop_turns" | undefined;
+  /**
+   * True when the cumulative drop for this request exceeded the hard-warn
+   * threshold (a large fraction of the conversation had to be discarded to
+   * fit). Signals compaction timing is badly off, not just marginally.
+   */
+  hard?: boolean;
 };
 
 export type TelemetryUsage = {

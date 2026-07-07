@@ -10,12 +10,7 @@ import { CostTracker } from "../cost.js";
 import {
   APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
-  canTrimInputForContextLengthRetry,
   clampRequestedMaxTokens,
-  emitContextTrimAlarm,
-  maxTokensForContextLengthRetry,
-  parseTogetherContextLengthInputTokens,
-  trimPayloadInputForContextLengthRetry,
 } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
 import {
@@ -81,7 +76,7 @@ export async function streamAnthropicFromTogether(
   };
   const translated = perf ? perf.spanSync("translate_request", run) : run();
   const { targetModel, nativeTools, upstreamMessages, tools, reasoningEffort } = translated;
-  let { maxTokens } = translated;
+  const { maxTokens } = translated;
 
   const payload = {
     model: targetModel.definition.id,
@@ -110,7 +105,6 @@ export async function streamAnthropicFromTogether(
     "stream",
     estimatedInputTokens,
   );
-  maxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : maxTokens;
 
   debugLog(options, "together stream request", {
     model: payload.model,
@@ -120,23 +114,13 @@ export async function streamAnthropicFromTogether(
     reasoningEffort,
   });
 
-  // Serialize the wire body exactly once for this attempt-set (initial attempt
-  // + retries resend identical bytes). Only the max_tokens clamp and trim retry
-  // paths mutate the payload; those re-stringify into serializedBody before
-  // retrying. The native-tool continuation loop builds a fresh payload per turn
-  // and goes through postTogetherStream's own stringify (no body arg).
-  let serializedBody = JSON.stringify(payload);
+  // The Together client owns both transient (429/503) and reactive context-fit
+  // retries now, so this path just posts once and maps whatever comes back. A
+  // context-length rejection is self-healed inside the client (max_tokens →
+  // strip old images → trim text → drop oldest turns) before it ever surfaces.
   let response: Response;
   try {
-    response = await postTogetherStream(
-      payload,
-      options,
-      signal,
-      perf,
-      "upstream_fetch",
-      undefined,
-      serializedBody,
-    );
+    response = await postTogetherStream(payload, options, signal, perf);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeAnthropicError(res, 503, "overloaded_error", message);
@@ -144,91 +128,15 @@ export async function streamAnthropicFromTogether(
   }
 
   if (!response.ok) {
-    let error = await mapTogetherError(response);
-    const retryMaxTokens = maxTokensForContextLengthRetry(error, targetModel.definition, maxTokens);
-    if (retryMaxTokens !== undefined) {
-      maxTokens = retryMaxTokens;
-      payload.max_tokens = maxTokens;
-      debugLog(options, "retrying together stream with reduced max_tokens", {
-        model: payload.model,
-        maxTokens,
-        originalError: error.message,
-      });
-      // Payload mutated (max_tokens reduced): re-serialize the wire body.
-      serializedBody = JSON.stringify(payload);
-      try {
-        response = await postTogetherStream(
-          payload,
-          options,
-          signal,
-          perf,
-          "upstream_fetch_retry",
-          {
-            reason: "max_tokens",
-          },
-          serializedBody,
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        writeAnthropicError(res, 503, "overloaded_error", message);
-        return { ok: false, status: 503, error: message };
-      }
-      if (!response.ok) {
-        error = await mapTogetherError(response);
-      }
-    } else if (canTrimInputForContextLengthRetry(error, targetModel.definition)) {
-      const trimmed = trimPayloadInputForContextLengthRetry(payload, error, targetModel.definition);
-      if (trimmed) {
-        // 1e: a reactive trim firing means our count_tokens / advertised limits
-        // let Claude Code compact too late. Surface it loudly (always-on, not
-        // debug-gated) and emit a fire-and-forget telemetry event. The debug
-        // log below stays too. Trim arithmetic + retry semantics are unchanged.
-        emitContextTrimAlarm({
-          path: "retry",
-          model: typeof payload.model === "string" ? payload.model : "",
-          trimmedChars: trimmed.trimmedChars,
-          inputTokens: parseTogetherContextLengthInputTokens(error.message) ?? 0,
-          contextWindow: targetModel.definition.limit.context,
-        });
-        debugLog(options, "retrying together stream with trimmed input context", {
-          model: payload.model,
-          trimmedChars: trimmed.trimmedChars,
-          originalError: error.message,
-        });
-        // Payload mutated (input trimmed): re-serialize the wire body.
-        serializedBody = JSON.stringify(payload);
-        try {
-          response = await postTogetherStream(
-            payload,
-            options,
-            signal,
-            perf,
-            "upstream_fetch_retry",
-            {
-              reason: "trim_context",
-            },
-            serializedBody,
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          writeAnthropicError(res, 503, "overloaded_error", message);
-          return { ok: false, status: 503, error: message };
-        }
-        if (!response.ok) {
-          error = await mapTogetherError(response);
-        }
-      }
-    }
-    if (!response.ok) {
-      debugLog(options, "together stream error", {
-        status: error.status,
-        anthropicType: error.anthropicType,
-        code: error.code,
-        body: error.message.slice(0, 1000),
-      });
-      writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
-      return { ok: false, status: error.anthropicStatus, error: error.message };
-    }
+    const error = await mapTogetherError(response);
+    debugLog(options, "together stream error", {
+      status: error.status,
+      anthropicType: error.anthropicType,
+      code: error.code,
+      body: error.message.slice(0, 1000),
+    });
+    writeAnthropicError(res, error.anthropicStatus, error.anthropicType, error.message);
+    return { ok: false, status: error.anthropicStatus, error: error.message };
   }
   if (!response.body) {
     const message = "Together returned no stream body.";
@@ -544,17 +452,15 @@ async function postTogetherStream(
   perf?: ProxyPerfTracer,
   spanName = "upstream_fetch",
   spanFields?: Record<string, unknown>,
-  /**
-   * Pre-serialized request body. When provided, it is sent verbatim so the
-   * payload is JSON.stringify'd exactly once per attempt-set (initial attempt +
-   * retries resend the identical bytes). Callers re-stringify only after
-   * mutating the payload (max_tokens clamp or trim). When omitted, the payload
-   * is stringified here — used by the native-tool continuation loop, which
-   * builds a genuinely new payload each turn.
-   */
-  body?: string,
 ): Promise<Response> {
-  const request = () => postChatCompletionStream(payload, options, signal, body);
+  // The client serializes the payload and, on a context-length rejection,
+  // repairs it in place and re-posts (see together-client.ts). Passing the
+  // model definition enables that reactive context-fit retry.
+  const request = () =>
+    postChatCompletionStream(payload, options, signal, undefined, {
+      modelDefinition: options.modelDefinition,
+      debug: options.debug,
+    });
   return await (perf?.span(spanName, request, spanFields) ?? request());
 }
 
