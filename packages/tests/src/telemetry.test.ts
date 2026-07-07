@@ -39,6 +39,7 @@ describe("telemetry", () => {
   test("context_trim telemetry event is POSTed with the structured trim payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("GITHUB_ACTIONS", "false");
 
     await sendTelemetryEvent(
       {
@@ -87,6 +88,7 @@ describe("context trim alarm (telemetry + stderr)", () => {
   test("writes an always-on stderr warning and fires a context_trim telemetry event", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("GITHUB_ACTIONS", "false");
 
     emitContextTrimAlarm({
       path: "retry",
