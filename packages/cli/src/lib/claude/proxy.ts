@@ -193,6 +193,13 @@ export async function handleProxyRequest(
   } else {
     perf.mark("vision_image_resolution_skipped", { imageBlockCount: 0 });
   }
+  const budgetRawBytes = imageBlocks.length > 0 ? undefined : rawBytes;
+  if (imageBlocks.length > 0) {
+    debugLog(options, "ignored raw byte estimator after image resolution", {
+      rawBytes,
+      imageBlockCount: imageBlocks.length,
+    });
+  }
   if (body.stream) {
     await perf.span(
       "stream_response",
@@ -200,7 +207,7 @@ export async function handleProxyRequest(
         streamAnthropicFromTogether(
           res,
           body,
-          { ...options, rawBytes },
+          { ...options, rawBytes: budgetRawBytes },
           upstreamAbort.signal,
           perf,
         ),
@@ -223,7 +230,7 @@ export async function handleProxyRequest(
 
   const openAiResponse = await callTogetherChatCompletions(
     body,
-    { ...options, rawBytes },
+    { ...options, rawBytes: budgetRawBytes },
     upstreamAbort.signal,
     perf,
   );

@@ -45,6 +45,10 @@ type ClaudeStreamOptions = {
   rawBytes?: number | undefined;
 };
 
+const CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
+const CLAUDE_RESPONSE_OUTPUT_HEADROOM_TOKENS = 2_048;
+const CLAUDE_THINKING_OUTPUT_MAX_TOKENS = 8_000;
+
 export async function streamAnthropicFromTogether(
   res: ServerResponse,
   body: AnthropicMessagesRequest,
@@ -187,7 +191,7 @@ export async function streamAnthropicFromTogether(
     });
   }
 
-  const blockManager = new StreamBlockManager(res);
+  const blockManager = new StreamBlockManager(res, new StreamOutputBudget(options));
   let stopReason = "end_turn";
   let inputTokens = 0;
   let outputTokens = 0;
@@ -260,6 +264,7 @@ export async function streamAnthropicFromTogether(
     stopReason,
     usage: { inputTokens, outputTokens, cachedTokens },
     blocks: blockManager.summary(),
+    outputBudget: blockManager.outputSummary(),
   });
 
   writeSse(res, "message_delta", {
@@ -309,7 +314,7 @@ async function streamAnthropicNativeToolLoop({
   options: ClaudeStreamOptions;
   signal?: AbortSignal;
 }): Promise<StreamProxyResult> {
-  const blockManager = new StreamBlockManager(res);
+  const blockManager = new StreamBlockManager(res, new StreamOutputBudget(options));
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
   const messages = initialMessages.slice();
@@ -436,6 +441,7 @@ async function streamAnthropicNativeToolLoop({
     stopReason,
     usage: { inputTokens, outputTokens, cachedTokens },
     blocks: blockManager.summary(),
+    outputBudget: blockManager.outputSummary(),
   });
   writeSse(res, "message_delta", {
     type: "message_delta",
@@ -646,9 +652,16 @@ class StreamBlockManager {
     | null = null;
   private blockCount = 0;
 
-  constructor(private readonly res: ServerResponse) {}
+  constructor(
+    private readonly res: ServerResponse,
+    private readonly outputBudget: StreamOutputBudget,
+  ) {}
 
   emitThinking(reasoning: string): void {
+    const emittedReasoning = this.outputBudget.takeThinking(reasoning);
+    if (!emittedReasoning) {
+      return;
+    }
     if (!this.openBlock || this.openBlock.type !== "thinking") {
       this.closeOpenBlock();
       this.openBlock = { type: "thinking", index: this.nextIndex, reasoning: "" };
@@ -659,15 +672,19 @@ class StreamBlockManager {
       });
       this.blockCount += 1;
     }
-    this.openBlock.reasoning += reasoning;
+    this.openBlock.reasoning += emittedReasoning;
     writeSse(this.res, "content_block_delta", {
       type: "content_block_delta",
       index: this.openBlock.index,
-      delta: { type: "thinking_delta", thinking: reasoning },
+      delta: { type: "thinking_delta", thinking: emittedReasoning },
     });
   }
 
   emitText(text: string): void {
+    const emittedText = this.outputBudget.takeText(text);
+    if (!emittedText) {
+      return;
+    }
     if (!this.openBlock || this.openBlock.type !== "text") {
       this.closeOpenBlock();
       this.openBlock = { type: "text", index: this.nextIndex };
@@ -681,7 +698,7 @@ class StreamBlockManager {
     writeSse(this.res, "content_block_delta", {
       type: "content_block_delta",
       index: this.openBlock.index,
-      delta: { type: "text_delta", text },
+      delta: { type: "text_delta", text: emittedText },
     });
   }
 
@@ -697,7 +714,7 @@ class StreamBlockManager {
     // the index doesn't match the open tool_use block, start a new one.
     const tcIndex = typeof toolCall.index === "number" ? toolCall.index : 0;
     const name = toolCall.function?.name;
-    const argsFragment = toolCall.function?.arguments ?? "";
+    const argsFragment = this.outputBudget.takeToolJson(toolCall.function?.arguments ?? "");
     // A tool_use block is open and matches this delta when the open block is a
     // tool_use AND its upstream tool-call index equals this delta's index. A new
     // index means a new tool call → start a fresh block. Check the open block's
@@ -780,6 +797,94 @@ class StreamBlockManager {
   summary(): string {
     return `${this.blockCount} block(s)`;
   }
+
+  outputSummary(): Record<string, unknown> {
+    return this.outputBudget.summary();
+  }
+}
+
+class StreamOutputBudget {
+  private readonly maxContentChars: number;
+  private readonly maxThinkingChars: number;
+  private contentChars = 0;
+  private thinkingChars = 0;
+  private droppedThinkingChars = 0;
+  private droppedContentChars = 0;
+
+  constructor(options: ClaudeStreamOptions) {
+    const claudeMaxTokens =
+      finitePositiveInteger(options.claudeCodeMaxOutputTokens) ??
+      CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS;
+    const safeContentTokens = Math.max(1, claudeMaxTokens - CLAUDE_RESPONSE_OUTPUT_HEADROOM_TOKENS);
+    this.maxContentChars = safeContentTokens * APPROX_CHARS_PER_TOKEN;
+    this.maxThinkingChars =
+      Math.min(safeContentTokens, CLAUDE_THINKING_OUTPUT_MAX_TOKENS) * APPROX_CHARS_PER_TOKEN;
+  }
+
+  takeThinking(value: string): string {
+    return this.take(value, true);
+  }
+
+  takeText(value: string): string {
+    return this.take(value, false);
+  }
+
+  takeToolJson(value: string): string {
+    return this.take(value, false);
+  }
+
+  summary(): Record<string, unknown> {
+    return {
+      contentChars: this.contentChars,
+      thinkingChars: this.thinkingChars,
+      droppedContentChars: this.droppedContentChars,
+      droppedThinkingChars: this.droppedThinkingChars,
+      maxContentChars: this.maxContentChars,
+      maxThinkingChars: this.maxThinkingChars,
+    };
+  }
+
+  private take(value: string, thinking: boolean): string {
+    if (!value) {
+      return "";
+    }
+    const remainingContentChars = this.maxContentChars - this.contentChars;
+    const remainingThinkingChars = thinking ? this.maxThinkingChars - this.thinkingChars : Infinity;
+    const remaining = Math.max(0, Math.min(remainingContentChars, remainingThinkingChars));
+    if (remaining <= 0) {
+      this.drop(value.length, thinking);
+      return "";
+    }
+    if (value.length <= remaining) {
+      this.contentChars += value.length;
+      if (thinking) {
+        this.thinkingChars += value.length;
+      }
+      return value;
+    }
+    const emitted = value.slice(0, remaining);
+    this.contentChars += emitted.length;
+    if (thinking) {
+      this.thinkingChars += emitted.length;
+    }
+    this.drop(value.length - emitted.length, thinking);
+    return emitted;
+  }
+
+  private drop(chars: number, thinking: boolean): void {
+    if (thinking) {
+      this.droppedThinkingChars += chars;
+    } else {
+      this.droppedContentChars += chars;
+    }
+  }
+}
+
+function finitePositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 function debugLog(

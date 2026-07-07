@@ -43,11 +43,6 @@ export function togetherReasoningEffort(
     return explicitEffort;
   }
 
-  const budgetTokens = body.thinking?.budget_tokens;
-  if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens) && budgetTokens >= 32_000) {
-    return "max";
-  }
-
   return undefined;
 }
 

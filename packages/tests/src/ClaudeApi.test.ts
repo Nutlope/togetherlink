@@ -151,6 +151,75 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies[0]?.max_tokens).toBeGreaterThanOrEqual(16_000);
   });
 
+  test("does not clamp output to one token after resolving large image history", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (body.model !== GLM_5_2.id) {
+          return new Response(
+            JSON.stringify({
+              id: "chatcmpl_vision",
+              choices: [
+                {
+                  message: { content: "Resolved screenshot: compact terminal description." },
+                  finish_reason: "stop",
+                },
+              ],
+              usage: { prompt_tokens: 100, completion_tokens: 12, total_tokens: 112 },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        upstreamBodies.push(body);
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "IMAGE_BUDGET_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 160_000, completion_tokens: 4, total_tokens: 160_004 },
+          },
+        ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        stream: true,
+        max_tokens: 32_000,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Continue after this screenshot." },
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "A".repeat(1_100_000),
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("IMAGE_BUDGET_OK");
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]?.max_tokens).toBe(28_000);
+    expect(String(firstUserContent(upstreamBodies[0]))).toContain(
+      "Resolved screenshot: compact terminal description.",
+    );
+  });
+
   test("tunes Claude Code compaction output before forwarding to Together", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
@@ -488,7 +557,7 @@ describe("Claude proxy compatibility API", () => {
     });
   });
 
-  test("keeps normal Claude requests on the selected GLM reasoning profile within Claude Code's output guard", async () => {
+  test("does not escalate Claude Code thinking budget into max GLM reasoning", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
@@ -526,8 +595,49 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies[0]).toMatchObject({
       model: GLM_5_2.id,
       max_tokens: 28_000,
-      reasoning_effort: "max",
       chat_template_kwargs: { clear_thinking: false },
+      stream: false,
+    });
+    expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
+  });
+
+  test("keeps explicit GLM reasoning effort requests", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_explicit_reasoning",
+            choices: [{ message: { content: "EXPLICIT_REASONING_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 32_000,
+        effort: "xhigh",
+        messages: [{ role: "user", content: "Use explicit high reasoning." }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toMatchObject({
+      model: GLM_5_2.id,
+      max_tokens: 28_000,
+      reasoning_effort: "max",
       stream: false,
     });
   });
@@ -566,9 +676,48 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies[0]).toMatchObject({
       model: GLM_5_2.id,
       max_tokens: 28_000,
-      reasoning_effort: "max",
       stream: true,
     });
+    expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
+  });
+
+  test("caps streamed reasoning before it can exceed Claude Code's response guard", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    const hugeReasoning = `${"R".repeat(120_000)}TAIL_SHOULD_NOT_STREAM`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return sseResponse([
+          {
+            choices: [{ delta: { reasoning_content: hugeReasoning }, finish_reason: null }],
+          },
+          {
+            choices: [{ delta: { content: "VISIBLE_AFTER_REASONING" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 32_000, total_tokens: 32_010 },
+          },
+        ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        stream: true,
+        max_tokens: 32_000,
+        thinking: { type: "enabled", budget_tokens: 32_000 },
+        messages: [{ role: "user", content: "Think, then answer." }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("VISIBLE_AFTER_REASONING");
+    expect(response.body).not.toContain("TAIL_SHOULD_NOT_STREAM");
+    expect(response.body.length).toBeLessThan(80_000);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]?.max_tokens).toBe(28_000);
   });
 
   test("honors user-configured Claude Code max output tokens on normal turns", async () => {
