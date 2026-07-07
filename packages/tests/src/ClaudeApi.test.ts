@@ -29,6 +29,33 @@ describe("Claude proxy compatibility API", () => {
   });
 
   test("configures Claude Code's Haiku tier to a lightweight Together model", () => {
+    const previous = process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+    delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+    try {
+      const env = buildClaudeEnv({
+        apiKey: "test-together-key",
+        modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+        modelName: GLM_5_2.name,
+        proxyUrl: "http://127.0.0.1:7878/session/test",
+        authToken: "local-token",
+      });
+
+      expect(env.ANTHROPIC_MODEL).toBe(GLM_5_2.anthropicAlias);
+      expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(EXPECTED_HAIKU_MODEL_ID);
+      expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).not.toBe(GLM_5_2.anthropicAlias);
+      expect(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBeUndefined();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+      } else {
+        process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = previous;
+      }
+    }
+  });
+
+  test("preserves a user-provided Claude Code max output token setting", () => {
+    vi.stubEnv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "24000");
+
     const env = buildClaudeEnv({
       apiKey: "test-together-key",
       modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
@@ -37,9 +64,7 @@ describe("Claude proxy compatibility API", () => {
       authToken: "local-token",
     });
 
-    expect(env.ANTHROPIC_MODEL).toBe(GLM_5_2.anthropicAlias);
-    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(EXPECTED_HAIKU_MODEL_ID);
-    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).not.toBe(GLM_5_2.anthropicAlias);
+    expect(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("24000");
   });
 
   test("counts tokens without calling the upstream model", async () => {
@@ -123,6 +148,90 @@ describe("Claude proxy compatibility API", () => {
     );
     expect(upstreamContent.length).toBeLessThan(nearFullContext.length);
     expect(upstreamBodies[0]?.max_tokens).toBeGreaterThanOrEqual(16_000);
+  });
+
+  test("tunes Claude Code compaction output before forwarding to Together", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_compact",
+            choices: [
+              { message: { content: "<summary>COMPACT_OK</summary>" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 32_000,
+        messages: [{ role: "user", content: claudeCompactionPrompt("prior turn") }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]?.max_tokens).toBe(16_000);
+    expect(String(firstUserContent(upstreamBodies[0]))).toContain(
+      "Togetherlink compaction compatibility instruction",
+    );
+  });
+
+  test("honors user-configured Claude Code max output tokens during compaction", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_compact_user_budget",
+            choices: [
+              { message: { content: "<summary>USER_BUDGET_OK</summary>" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 24_000,
+        messages: [{ role: "user", content: claudeCompactionPrompt("prior turn") }],
+      }),
+      options: {
+        claudeCodeMaxOutputTokens: 24_000,
+        claudeCodeMaxOutputTokensUserSet: true,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]?.max_tokens).toBe(24_000);
+    expect(String(firstUserContent(upstreamBodies[0]))).toContain(
+      "The user configured CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+    );
   });
 
   test("uses compact thinking signatures instead of echoing full reasoning", async () => {
@@ -864,6 +973,18 @@ describe("Claude proxy compatibility API", () => {
   });
 });
 
+function claudeCompactionPrompt(prefix: string): string {
+  return `${prefix}
+
+CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+
+- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
+- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+
+Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
+`;
+}
+
 function firstUserContent(body: Record<string, unknown> | undefined): unknown {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const userMessage = messages.find((message) => {
@@ -912,10 +1033,12 @@ async function callClaudeProxy({
   method,
   url,
   body,
+  options,
 }: {
   method: string;
   url: string;
   body?: string;
+  options?: Partial<ClaudeProxyOptions>;
 }): Promise<{ status: number; body: Record<string, unknown> }> {
   const req = Readable.from(body ? [body] : []) as IncomingMessage;
   req.method = method;
@@ -923,7 +1046,7 @@ async function callClaudeProxy({
   req.headers = { authorization: "Bearer local-token" };
   const res = new MemoryResponse() as unknown as ServerResponse;
 
-  await handleProxyRequest(req, res, proxyOptions());
+  await handleProxyRequest(req, res, proxyOptions(options));
 
   const memoryRes = res as unknown as MemoryResponse;
   return {
@@ -1001,7 +1124,7 @@ function sseResponse(events: unknown[]): Response {
   );
 }
 
-function proxyOptions(): ClaudeProxyOptions {
+function proxyOptions(overrides: Partial<ClaudeProxyOptions> = {}): ClaudeProxyOptions {
   return {
     apiKey: "test-together-key",
     modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
@@ -1009,5 +1132,6 @@ function proxyOptions(): ClaudeProxyOptions {
     modelName: GLM_5_2.name,
     modelDefinition: GLM_5_2 as ModelDefinition,
     authToken: "local-token",
+    ...overrides,
   };
 }

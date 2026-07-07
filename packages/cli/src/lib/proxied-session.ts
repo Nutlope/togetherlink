@@ -59,6 +59,11 @@ export type ProxiedSessionSpec = {
   modelDefinition: ModelDefinition;
   /** Extra registration-only model id (Claude uses an alias; Codex uses the same id). */
   registrationModelId?: string;
+  /** Agent-specific registration metadata that should be visible to the daemon proxy. */
+  extraRegistration?: Pick<
+    RegisterSessionRequest,
+    "claudeCodeMaxOutputTokens" | "claudeCodeMaxOutputTokensUserSet"
+  >;
   args?: string[];
   /** Optional pre-spawn hook (Codex uses it to write the model catalog);
    * its return value is threaded into the buildArgs/buildEnv context. */
@@ -109,6 +114,7 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
     modelName: spec.modelName,
     modelDefinition: spec.modelDefinition,
     ...(debug ? { debug: true } : {}),
+    ...spec.extraRegistration,
   };
   try {
     await registerDaemonSession(proxyUrl, registration);

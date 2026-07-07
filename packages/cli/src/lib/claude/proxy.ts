@@ -17,6 +17,7 @@ import { writeAnthropicError } from "./together-call.js";
 import { streamAnthropicFromTogether } from "./stream.js";
 import { extractImageBlocks, resolveImageBlocks } from "./vision-resolver.js";
 import { callTogetherChatCompletions } from "./chat-completions.js";
+import { tuneClaudeCompactionRequest } from "./compaction.js";
 
 import type {
   AnthropicCountTokensRequest,
@@ -34,6 +35,8 @@ export type ClaudeProxyOptions = {
   modelName: string;
   modelDefinition: ModelDefinition;
   authToken: string;
+  claudeCodeMaxOutputTokens?: number | undefined;
+  claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   perfSink?: ProxyPerfSink | undefined;
@@ -170,6 +173,13 @@ export async function handleProxyRequest(
     toolCount: body.tools?.length ?? 0,
     tools: summarizeAnthropicTools(body.tools),
   }));
+  const compactionTuning = tuneClaudeCompactionRequest(body, {
+    claudeCodeMaxOutputTokens: options.claudeCodeMaxOutputTokens,
+    userConfiguredClaudeMaxOutputTokens: options.claudeCodeMaxOutputTokensUserSet,
+  });
+  if (compactionTuning.detected) {
+    debugLog(options, "claude compaction request tuned", compactionTuning);
+  }
   const imageBlocks = extractImageBlocks(body);
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);

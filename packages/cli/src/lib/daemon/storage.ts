@@ -239,10 +239,11 @@ class SqliteSessionStore implements SessionStore {
       .prepare(`
         INSERT INTO sessions (
           token, agent, pid, started_at, last_seen_at, ended_at, model_label, api_key, auth_token,
-          model_id, target_model_id, model_name, model_definition_json, debug,
+          model_id, target_model_id, model_name, model_definition_json,
+          claude_code_max_output_tokens, claude_code_max_output_tokens_user_set, debug,
           prompt_tokens, cached_tokens, completion_tokens, cost_usd, cost_summary,
           external_summary, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
           agent = excluded.agent,
           pid = excluded.pid,
@@ -256,6 +257,8 @@ class SqliteSessionStore implements SessionStore {
           target_model_id = excluded.target_model_id,
           model_name = excluded.model_name,
           model_definition_json = excluded.model_definition_json,
+          claude_code_max_output_tokens = excluded.claude_code_max_output_tokens,
+          claude_code_max_output_tokens_user_set = excluded.claude_code_max_output_tokens_user_set,
           debug = excluded.debug,
           prompt_tokens = excluded.prompt_tokens,
           cached_tokens = excluded.cached_tokens,
@@ -353,6 +356,8 @@ class SqliteSessionStore implements SessionStore {
         target_model_id TEXT,
         model_name TEXT,
         model_definition_json TEXT NOT NULL,
+        claude_code_max_output_tokens INTEGER,
+        claude_code_max_output_tokens_user_set INTEGER,
         debug INTEGER,
         prompt_tokens INTEGER NOT NULL DEFAULT 0,
         cached_tokens INTEGER NOT NULL DEFAULT 0,
@@ -366,6 +371,8 @@ class SqliteSessionStore implements SessionStore {
       CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions(ended_at DESC);
     `);
     this.addColumnIfMissing("sessions", "last_seen_at", "INTEGER");
+    this.addColumnIfMissing("sessions", "claude_code_max_output_tokens", "INTEGER");
+    this.addColumnIfMissing("sessions", "claude_code_max_output_tokens_user_set", "INTEGER");
   }
 
   private addColumnIfMissing(table: string, column: string, type: string): void {
@@ -424,6 +431,12 @@ function sessionParams(session: SessionPersistInput, updatedAt: number): unknown
     session.targetModelId ?? null,
     session.modelName ?? null,
     JSON.stringify(session.modelDefinition),
+    session.claudeCodeMaxOutputTokens ?? null,
+    session.claudeCodeMaxOutputTokensUserSet === undefined
+      ? null
+      : session.claudeCodeMaxOutputTokensUserSet
+        ? 1
+        : 0,
     session.debug === undefined ? null : session.debug ? 1 : 0,
     session.costTotals.promptTokens,
     session.costTotals.cachedTokens,
@@ -449,6 +462,8 @@ type SessionRow = {
   target_model_id: string | null;
   model_name: string | null;
   model_definition_json: string;
+  claude_code_max_output_tokens: number | null;
+  claude_code_max_output_tokens_user_set: number | null;
   debug: number | null;
   prompt_tokens: number;
   cached_tokens: number;
@@ -470,6 +485,12 @@ function rowToSessionBase(row: SessionRow): StoredSession {
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.target_model_id ? { targetModelId: row.target_model_id } : {}),
     ...(row.model_name ? { modelName: row.model_name } : {}),
+    ...(typeof row.claude_code_max_output_tokens === "number"
+      ? { claudeCodeMaxOutputTokens: row.claude_code_max_output_tokens }
+      : {}),
+    ...(row.claude_code_max_output_tokens_user_set !== null
+      ? { claudeCodeMaxOutputTokensUserSet: row.claude_code_max_output_tokens_user_set === 1 }
+      : {}),
     ...(row.debug !== null ? { debug: row.debug === 1 } : {}),
     startedAt: row.started_at,
     ...(typeof row.last_seen_at === "number" ? { lastSeenAt: row.last_seen_at } : {}),

@@ -28,6 +28,8 @@ const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
 ] as const;
 
+const DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS = 32_000;
+
 export type ClaudeLaunchOptions = {
   apiKey: string;
   modelId?: string;
@@ -131,6 +133,12 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
+    extraRegistration: {
+      claudeCodeMaxOutputTokens: claudeCodeMaxOutputTokensFromEnv(
+        process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+      ),
+      claudeCodeMaxOutputTokensUserSet: process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS !== undefined,
+    },
     args: options.args ?? [],
     binary: "claude",
     keepaliveLabel: "Claude session",
@@ -145,6 +153,14 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     ],
   });
   return result;
+}
+
+function claudeCodeMaxOutputTokensFromEnv(value: string | undefined): number {
+  if (value === undefined || value.trim() === "") {
+    return DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS;
 }
 
 function claudeArgsWithoutModelOverrides(args: string[]): string[] {

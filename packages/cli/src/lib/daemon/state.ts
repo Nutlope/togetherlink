@@ -131,6 +131,10 @@ export type RegisterSessionRequest = {
   targetModelId?: string;
   /** Included for proxy options. Defaults to modelLabel. */
   modelName?: string;
+  /** Claude Code's output-token guard observed from user env, or its default. */
+  claudeCodeMaxOutputTokens?: number;
+  /** True when the user had CLAUDE_CODE_MAX_OUTPUT_TOKENS set before launch. */
+  claudeCodeMaxOutputTokensUserSet?: boolean;
   debug?: boolean;
 };
 
@@ -379,6 +383,12 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       modelName: req.modelName ?? req.modelLabel,
       modelDefinition: req.modelDefinition,
       authToken: req.authToken ?? req.token,
+      ...(req.claudeCodeMaxOutputTokens !== undefined
+        ? { claudeCodeMaxOutputTokens: req.claudeCodeMaxOutputTokens }
+        : {}),
+      ...(req.claudeCodeMaxOutputTokensUserSet !== undefined
+        ? { claudeCodeMaxOutputTokensUserSet: req.claudeCodeMaxOutputTokensUserSet }
+        : {}),
       ...(req.debug !== undefined ? { debug: req.debug } : {}),
       costTracker,
       ...(process.env.TOGETHERLINK_PERF === "1"
@@ -461,6 +471,15 @@ function toPersistedSession(state: SessionState): PersistedSession {
     base.modelId = state.options.modelId;
     base.targetModelId = state.options.targetModelId;
     base.modelName = state.options.modelName;
+    if (state.agent === "claude") {
+      const claudeOptions = state.options as ClaudeProxyOptions;
+      if (claudeOptions.claudeCodeMaxOutputTokens !== undefined) {
+        base.claudeCodeMaxOutputTokens = claudeOptions.claudeCodeMaxOutputTokens;
+      }
+      if (claudeOptions.claudeCodeMaxOutputTokensUserSet !== undefined) {
+        base.claudeCodeMaxOutputTokensUserSet = claudeOptions.claudeCodeMaxOutputTokensUserSet;
+      }
+    }
   }
   return base;
 }
