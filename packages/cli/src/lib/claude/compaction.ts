@@ -1,13 +1,15 @@
 import type { AnthropicContentBlock, AnthropicMessagesRequest } from "./wire-types.js";
 
 const CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
-const DEFAULT_COMPACTION_MAX_OUTPUT_TOKENS = 16_000;
+const DEFAULT_COMPACTION_MAX_OUTPUT_TOKENS = 8_000;
 
 const COMPACTION_SIGNATURES = [
   "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.",
   "Your entire response must be plain text: an <analysis> block followed by a <summary> block.",
   "Your task is to create a detailed summary of the conversation so far",
 ] as const;
+
+const COMPACTION_INSTRUCTION_START = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.";
 
 export type ClaudeCompactionTuningResult = {
   detected: boolean;
@@ -38,7 +40,7 @@ export function tuneClaudeCompactionRequest(
 
   if (maxTokens !== undefined) {
     body.max_tokens = maxTokens;
-    appendCompactionBudgetInstruction(body, maxTokens, userConfiguredClaudeMaxOutputTokens);
+    rewriteCompactionInstruction(body, maxTokens, userConfiguredClaudeMaxOutputTokens);
   }
 
   return {
@@ -54,7 +56,7 @@ export function isClaudeCompactionRequest(body: AnthropicMessagesRequest): boole
   return COMPACTION_SIGNATURES.every((signature) => lastUserText.includes(signature));
 }
 
-function appendCompactionBudgetInstruction(
+function rewriteCompactionInstruction(
   body: AnthropicMessagesRequest,
   maxTokens: number,
   userConfiguredClaudeMaxOutputTokens: boolean,
@@ -64,34 +66,56 @@ function appendCompactionBudgetInstruction(
     return;
   }
 
-  const instruction =
-    "\n\nTogetherlink compaction compatibility instruction: finish the complete " +
-    `<analysis> and <summary> response under ${maxTokens} output tokens. ` +
-    "Keep <analysis> brief, put durable handoff details in <summary>, summarize large tool " +
-    "outputs and code blocks unless they are essential, and finish cleanly instead of exhausting " +
-    "the token limit." +
-    (userConfiguredClaudeMaxOutputTokens
-      ? " The user configured CLAUDE_CODE_MAX_OUTPUT_TOKENS, so honor that configured budget."
-      : "");
+  const instruction = boundedCompactionInstruction(maxTokens, userConfiguredClaudeMaxOutputTokens);
 
   if (typeof lastUser.content === "string") {
-    if (!lastUser.content.includes("Togetherlink compaction compatibility instruction:")) {
-      lastUser.content += instruction;
-    }
+    lastUser.content = replaceUnboundedCompactionPrompt(lastUser.content, instruction);
     return;
   }
 
   if (Array.isArray(lastUser.content)) {
-    const hasInstruction = lastUser.content.some(
-      (block) =>
-        block.type === "text" &&
-        typeof block.text === "string" &&
-        block.text.includes("Togetherlink compaction compatibility instruction:"),
-    );
-    if (!hasInstruction) {
-      lastUser.content.push({ type: "text", text: instruction });
+    for (const block of lastUser.content) {
+      if (block.type === "text" && typeof block.text === "string") {
+        block.text = replaceUnboundedCompactionPrompt(block.text, instruction);
+      }
     }
   }
+}
+
+function replaceUnboundedCompactionPrompt(text: string, instruction: string): string {
+  const index = text.indexOf(COMPACTION_INSTRUCTION_START);
+  if (index === -1) {
+    return `${text.trimEnd()}\n\n${instruction}`;
+  }
+  const prefix = text.slice(0, index).trimEnd();
+  return prefix ? `${prefix}\n\n${instruction}` : instruction;
+}
+
+function boundedCompactionInstruction(
+  maxTokens: number,
+  userConfiguredClaudeMaxOutputTokens: boolean,
+): string {
+  return `Togetherlink bounded compaction request:
+
+Respond with plain text only: a short <analysis> block followed by a <summary> block.
+
+Hard budget:
+- Finish the entire response under ${maxTokens} output tokens.
+- Keep <analysis> under 150 words.
+- Close both XML-ish tags. Do not continue until the token limit.
+
+Write a durable handoff summary for continuing the coding task, but keep it bounded:
+1. Primary request and current objective.
+2. Important technical facts, decisions, and constraints.
+3. Files touched/read and why they matter, using paths and concise descriptions.
+4. Errors encountered and fixes or current hypotheses.
+5. Current work and next concrete step.
+
+Do not list every user message verbatim. Group repeated feedback.
+Do not include full tool outputs, full diffs, or full code snippets unless a short snippet is essential.
+Prefer precise file paths, commands, test results, and line-level facts over transcript prose.
+Preserve security-relevant user constraints verbatim if any exist.
+${userConfiguredClaudeMaxOutputTokens ? "The user configured CLAUDE_CODE_MAX_OUTPUT_TOKENS; honor that configured budget while staying concise." : ""}`;
 }
 
 function lastUserMessageText(body: AnthropicMessagesRequest): string {

@@ -184,10 +184,11 @@ describe("Claude proxy compatibility API", () => {
 
     expect(response.status).toBe(200);
     expect(upstreamBodies).toHaveLength(1);
-    expect(upstreamBodies[0]?.max_tokens).toBe(16_000);
-    expect(String(firstUserContent(upstreamBodies[0]))).toContain(
-      "Togetherlink compaction compatibility instruction",
-    );
+    expect(upstreamBodies[0]?.max_tokens).toBe(8_000);
+    const upstreamContent = String(firstUserContent(upstreamBodies[0]));
+    expect(upstreamContent).toContain("Togetherlink bounded compaction request");
+    expect(upstreamContent).not.toContain("include full code snippets");
+    expect(upstreamContent).not.toContain("List ALL user messages");
   });
 
   test("honors user-configured Claude Code max output tokens during compaction", async () => {
@@ -982,6 +983,13 @@ CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 - Your entire response must be plain text: an <analysis> block followed by a <summary> block.
 
 Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
+
+Your summary should include the following sections:
+
+3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.
+
+6. All user messages:
+    - List ALL user messages that are not tool results. These are critical for understanding the users' feedback and changing intent.
 `;
 }
 
