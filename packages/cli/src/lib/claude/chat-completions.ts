@@ -7,7 +7,7 @@ import { CostTracker } from "../cost.js";
 import {
   APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
-  clampRequestedMaxTokens,
+  clampClaudeClientMaxTokens,
 } from "./context-budget.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import {
@@ -30,6 +30,8 @@ type ClaudeChatOptions = {
   targetModelId: string;
   modelDefinition: ModelDefinition;
   debug?: boolean | undefined;
+  claudeCodeMaxOutputTokens?: number | undefined;
+  claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
   rawBytes?: number | undefined;
@@ -62,7 +64,7 @@ export async function callTogetherChatCompletions(
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-    const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+    const maxTokens = clampClaudeClientMaxTokens(body.max_tokens, targetModel.definition, options);
     const payload = {
       model: targetModel.definition.id,
       messages:

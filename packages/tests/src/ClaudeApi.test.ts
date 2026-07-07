@@ -147,6 +147,7 @@ describe("Claude proxy compatibility API", () => {
       "[togetherlink trimmed older context to fit the model window]",
     );
     expect(upstreamContent.length).toBeLessThan(nearFullContext.length);
+    expect(upstreamBodies[0]?.max_tokens).toBeLessThanOrEqual(28_000);
     expect(upstreamBodies[0]?.max_tokens).toBeGreaterThanOrEqual(16_000);
   });
 
@@ -437,7 +438,7 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies).toHaveLength(1);
     expect(upstreamBodies[0]).toMatchObject({
       model: CLAUDE_HAIKU_MODEL.id,
-      max_tokens: Math.min(64_000, CLAUDE_HAIKU_MODEL.limit.output),
+      max_tokens: Math.min(64_000, CLAUDE_HAIKU_MODEL.limit.output, 28_000),
       chat_template_kwargs: { clear_thinking: false },
       stream: true,
     });
@@ -487,7 +488,7 @@ describe("Claude proxy compatibility API", () => {
     });
   });
 
-  test("keeps normal Claude requests on the selected GLM reasoning profile", async () => {
+  test("keeps normal Claude requests on the selected GLM reasoning profile within Claude Code's output guard", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
@@ -524,11 +525,89 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies).toHaveLength(1);
     expect(upstreamBodies[0]).toMatchObject({
       model: GLM_5_2.id,
-      max_tokens: 64_000,
+      max_tokens: 28_000,
       reasoning_effort: "max",
       chat_template_kwargs: { clear_thinking: false },
       stream: false,
     });
+  });
+
+  test("caps streamed normal Claude requests before forwarding to Together", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "STREAM_BUDGET_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 },
+          },
+        ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        stream: true,
+        max_tokens: 32_000,
+        thinking: { type: "enabled", budget_tokens: 32_000 },
+        messages: [{ role: "user", content: "Continue the task." }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("STREAM_BUDGET_OK");
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toMatchObject({
+      model: GLM_5_2.id,
+      max_tokens: 28_000,
+      reasoning_effort: "max",
+      stream: true,
+    });
+  });
+
+  test("honors user-configured Claude Code max output tokens on normal turns", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_user_normal_budget",
+            choices: [{ message: { content: "USER_NORMAL_BUDGET_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 32_000,
+        messages: [{ role: "user", content: "Use the configured budget." }],
+      }),
+      options: {
+        claudeCodeMaxOutputTokens: 16_000,
+        claudeCodeMaxOutputTokensUserSet: true,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]?.max_tokens).toBe(16_000);
   });
 
   test("does not treat a custom tool named web_search as native server search", async () => {

@@ -10,7 +10,7 @@ import { CostTracker } from "../cost.js";
 import {
   APPROX_CHARS_PER_TOKEN,
   applyEstimatedContextBudget,
-  clampRequestedMaxTokens,
+  clampClaudeClientMaxTokens,
 } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
 import {
@@ -38,6 +38,8 @@ type ClaudeStreamOptions = {
   targetModelId: string;
   modelDefinition: ModelDefinition;
   debug?: boolean | undefined;
+  claudeCodeMaxOutputTokens?: number | undefined;
+  claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
   rawBytes?: number | undefined;
@@ -63,7 +65,7 @@ export async function streamAnthropicFromTogether(
       nativeTools.length > 0 ? withClaudeNativeToolSystemPrompt(messages, nativeTools) : messages;
     const tools = toOpenAITools(body.tools, options);
     const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
-    const maxTokens = clampRequestedMaxTokens(body.max_tokens, targetModel.definition);
+    const maxTokens = clampClaudeClientMaxTokens(body.max_tokens, targetModel.definition, options);
     return {
       targetModel,
       messages,
