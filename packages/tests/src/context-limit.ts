@@ -39,7 +39,10 @@ export async function assertClaudeContextLimitRetry(context: TestContext): Promi
     assert(
       stderr.includes("retrying together request with reduced max_tokens") ||
         stderr.includes("clamped request max_tokens to estimated context budget") ||
-        stderr.includes("trimmed request input to reserve requested output"),
+        stderr.includes("trimmed request input to reserve requested output") ||
+        (stderr.includes("togetherlink: trimmed") && stderr.includes("(retry path")) ||
+        (stderr.includes("togetherlink: DROPPED A LARGE PORTION") &&
+          stderr.includes("(retry path")),
       "daemon did not log context-limit prevention",
     );
     assert(/CONTEXT_RETRY_OK/i.test(text), "retry response did not include expected final answer");
