@@ -12,11 +12,19 @@ export async function runCommand(
 ): Promise<CommandResult> {
   const cwd = options.cwd ?? context.repoRoot;
   const timeoutMs = options.timeoutMs ?? 120_000;
+  const isolatedEnv =
+    context.togetherlinkHome && context.daemonPort
+      ? {
+          TOGETHERLINK_HOME: context.togetherlinkHome,
+          TOGETHERLINK_PORT: String(context.daemonPort),
+        }
+      : {};
   const child = spawn(command, args, {
     cwd,
     detached: process.platform !== "win32",
     env: {
       ...process.env,
+      ...isolatedEnv,
       ...options.env,
       TOGETHERLINK_DEBUG: "1",
       CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",

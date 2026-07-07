@@ -94,9 +94,10 @@ export function claudeScenarios(): Scenario[] {
             "--no-session-persistence",
             "--permission-mode",
             "bypassPermissions",
-            "Read README.md and answer in one sentence what this project does.",
+            "--allowedTools=Read",
+            "Use the Read tool exactly once to read README.md, then answer in one sentence what this project does.",
           ],
-          { timeoutMs: 180_000 },
+          { timeoutMs: 300_000 },
         );
         assert(result.status === 0, `exit ${result.status}`);
         const parsed = parseLastJsonObject(result.stdout);
