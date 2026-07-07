@@ -24,6 +24,7 @@ const CONTEXT_RETRY_TRIM_EXTRA_TOKENS = 512;
 const TRIM_PRESERVED_PREFIX_CHARS = 4096;
 /** Minimum output room worth preserving before we start trimming input. */
 const MIN_USEFUL_OUTPUT_TOKENS = 512;
+const MIN_PREFERRED_OUTPUT_TOKENS = 8000;
 /** Fraction of the original conversation whose loss triggers the loud alarm. */
 const HARD_WARN_DROPPED_FRACTION = 0.5;
 /** Upper bound on fit retries per request; the ladder converges well under this. */
@@ -301,7 +302,11 @@ export function dropOldestTurns(
 // Orchestrator
 // --------------------------------------------------------------------------
 
-export type ContextFitState = { originalChars: number; freedChars: number };
+export type ContextFitState = {
+  originalChars: number;
+  freedChars: number;
+  originalMaxTokens?: number;
+};
 
 export type ContextFitOutcome = {
   mutated: boolean;
@@ -313,7 +318,15 @@ export type ContextFitOutcome = {
 };
 
 export function newContextFitState(payload: Record<string, unknown>): ContextFitState {
-  return { originalChars: jsonByteLength(payload.messages ?? []), freedChars: 0 };
+  const originalMaxTokens =
+    typeof payload.max_tokens === "number" && Number.isFinite(payload.max_tokens)
+      ? Math.max(CONTEXT_LENGTH_RETRY_FLOOR, Math.floor(payload.max_tokens))
+      : undefined;
+  return {
+    originalChars: jsonByteLength(payload.messages ?? []),
+    freedChars: 0,
+    ...(originalMaxTokens !== undefined ? { originalMaxTokens } : {}),
+  };
 }
 
 /**
@@ -349,7 +362,12 @@ export function applyContextFit(
   // requested output. Clamp max_tokens and keep every token of context.
   const availableOutput = contextTokens - inputTokens - CONTEXT_OUTPUT_SAFETY_TOKENS;
   const currentMaxTokens = typeof payload.max_tokens === "number" ? payload.max_tokens : undefined;
-  if (availableOutput >= MIN_USEFUL_OUTPUT_TOKENS) {
+  const desiredMaxTokens = Math.min(
+    state.originalMaxTokens ?? currentMaxTokens ?? model.limit.output,
+    model.limit.output,
+  );
+  const minPreferredOutput = Math.min(desiredMaxTokens, MIN_PREFERRED_OUTPUT_TOKENS);
+  if (availableOutput >= minPreferredOutput) {
     const nextMaxTokens = Math.max(CONTEXT_LENGTH_RETRY_FLOOR, Math.floor(availableOutput));
     if (currentMaxTokens === undefined || nextMaxTokens < currentMaxTokens) {
       payload.max_tokens = nextMaxTokens;
@@ -357,11 +375,12 @@ export function applyContextFit(
     }
   }
 
-  // Input itself is too big: reserve minimal output and free the excess input.
-  if (currentMaxTokens === undefined || currentMaxTokens > MIN_USEFUL_OUTPUT_TOKENS) {
-    payload.max_tokens = MIN_USEFUL_OUTPUT_TOKENS;
+  // Keep enough output room for agent turns; repeated 512-token retries can make
+  // Claude Code report a false "max output tokens" API error.
+  if (currentMaxTokens !== desiredMaxTokens) {
+    payload.max_tokens = desiredMaxTokens;
   }
-  const targetInputTokens = contextTokens - MIN_USEFUL_OUTPUT_TOKENS - CONTEXT_OUTPUT_SAFETY_TOKENS;
+  const targetInputTokens = contextTokens - desiredMaxTokens - CONTEXT_OUTPUT_SAFETY_TOKENS;
   const tokensToFree =
     Math.max(1, inputTokens - targetInputTokens) + CONTEXT_RETRY_TRIM_EXTRA_TOKENS;
   const payloadBytes = jsonByteLength({

@@ -124,12 +124,39 @@ export function parseJsonOrEmpty(value: string | undefined): unknown {
   }
 }
 
-export function mapStopReason(reason: string | null | undefined): string {
+export function mapStopReason(
+  reason: string | null | undefined,
+  usage?: { outputTokens?: number | undefined; requestedMaxTokens?: number | undefined },
+): string {
   if (reason === "tool_calls") {
     return "tool_use";
   }
   if (reason === "length") {
+    if (usage && isShortLengthStop(usage.outputTokens, usage.requestedMaxTokens)) {
+      return "end_turn";
+    }
     return "max_tokens";
   }
   return "end_turn";
+}
+
+function isShortLengthStop(
+  outputTokens: number | undefined,
+  requestedMaxTokens: number | undefined,
+): boolean {
+  if (
+    typeof outputTokens !== "number" ||
+    !Number.isFinite(outputTokens) ||
+    typeof requestedMaxTokens !== "number" ||
+    !Number.isFinite(requestedMaxTokens)
+  ) {
+    return false;
+  }
+  const output = Math.max(0, Math.floor(outputTokens));
+  const requested = Math.max(1, Math.floor(requestedMaxTokens));
+  if (output >= requested) {
+    return false;
+  }
+  const nearRequested = output >= Math.floor(requested * 0.9) || requested - output <= 1024;
+  return !nearRequested;
 }

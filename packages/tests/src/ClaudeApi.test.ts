@@ -681,6 +681,44 @@ describe("Claude proxy compatibility API", () => {
     expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
   });
 
+  test("does not report short Together length stops as Claude Code max_tokens overflow", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return sseResponse([
+          {
+            choices: [
+              {
+                delta: { reasoning_content: "Useful partial reasoning before a tool decision." },
+                finish_reason: "length",
+              },
+            ],
+            usage: { prompt_tokens: 179_000, completion_tokens: 512, total_tokens: 179_512 },
+          },
+        ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        stream: true,
+        max_tokens: 32_000,
+        thinking: { type: "enabled", budget_tokens: 32_000 },
+        messages: [{ role: "user", content: "Continue the task." }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies[0]?.max_tokens).toBe(28_000);
+    expect(response.body).toContain('"stop_reason":"end_turn"');
+    expect(response.body).not.toContain('"stop_reason":"max_tokens"');
+  });
+
   test("caps streamed reasoning before it can exceed Claude Code's response guard", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     const hugeReasoning = `${"R".repeat(120_000)}TAIL_SHOULD_NOT_STREAM`;

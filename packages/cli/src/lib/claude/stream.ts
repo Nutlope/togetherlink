@@ -193,6 +193,7 @@ export async function streamAnthropicFromTogether(
 
   const blockManager = new StreamBlockManager(res, new StreamOutputBudget(options));
   let stopReason = "end_turn";
+  let upstreamFinishReason: string | null = null;
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedTokens = 0;
@@ -243,7 +244,7 @@ export async function streamAnthropicFromTogether(
             cachedTokens;
         }
         if (event.finish_reason) {
-          stopReason = mapStopReason(event.finish_reason);
+          upstreamFinishReason = event.finish_reason;
         }
       });
     }
@@ -256,6 +257,16 @@ export async function streamAnthropicFromTogether(
     // error event in a way Anthropic SSE expects after content has started.
   }
 
+  stopReason = mapStopReason(upstreamFinishReason, {
+    outputTokens,
+    requestedMaxTokens: payload.max_tokens as number | undefined,
+  });
+  if (upstreamFinishReason === "length" && stopReason !== "max_tokens") {
+    debugLog(options, "downgraded short Together length stop", {
+      outputTokens,
+      requestedMaxTokens: payload.max_tokens,
+    });
+  }
   blockManager.close();
   if (inputTokens > 0 || outputTokens > 0) {
     options.costTracker?.addUsage(inputTokens, cachedTokens, outputTokens, targetModel.definition);
@@ -325,7 +336,11 @@ async function streamAnthropicNativeToolLoop({
   let cachedTokens = 0;
 
   for (let turn = 0; turn < 5; turn += 1) {
-    const collected = await collectTogetherStreamTurn(response, options);
+    const collected = await collectTogetherStreamTurn(
+      response,
+      options,
+      initialPayload.max_tokens as number | undefined,
+    );
     inputTokens += collected.inputTokens;
     outputTokens += collected.outputTokens;
     cachedTokens += collected.cachedTokens;
@@ -475,8 +490,10 @@ async function postTogetherStream(
 async function collectTogetherStreamTurn(
   response: Response,
   options: ClaudeStreamOptions,
+  requestedMaxTokens?: number | undefined,
 ): Promise<CollectedStreamTurn> {
   const toolCalls = new Map<number, CollectedStreamToolCall>();
+  let upstreamFinishReason: string | null = null;
   const turn: CollectedStreamTurn = {
     reasoning: "",
     text: "",
@@ -542,13 +559,23 @@ async function collectTogetherStreamTurn(
             turn.cachedTokens;
         }
         if (event.finish_reason) {
-          turn.stopReason = mapStopReason(event.finish_reason);
+          upstreamFinishReason = event.finish_reason;
         }
       });
     }
   } catch (err) {
     debugLog(options, "together native stream read error", {
       error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  turn.stopReason = mapStopReason(upstreamFinishReason, {
+    outputTokens: turn.outputTokens,
+    requestedMaxTokens,
+  });
+  if (upstreamFinishReason === "length" && turn.stopReason !== "max_tokens") {
+    debugLog(options, "downgraded short Together native length stop", {
+      outputTokens: turn.outputTokens,
+      requestedMaxTokens,
     });
   }
   turn.toolCalls = [...toolCalls.values()].sort((a, b) => a.index - b.index);

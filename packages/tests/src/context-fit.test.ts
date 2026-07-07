@@ -139,6 +139,27 @@ describe("applyContextFit ladder", () => {
     expect(payload.max_tokens).toBeLessThan(30000);
   });
 
+  test("trims context instead of starving agent turns to a 512-token output cap", () => {
+    const payload: Record<string, unknown> = {
+      model: model.id,
+      max_tokens: 28000,
+      messages: [
+        { role: "user", content: longText(50000) },
+        { role: "user", content: "continue" },
+      ],
+    };
+    const outcome = applyContextFit(
+      payload,
+      overflowMessage(261900),
+      model,
+      newContextFitState(payload),
+    );
+    expect(outcome.action).toBe("trim_text");
+    expect(payload.max_tokens).toBe(28000);
+    const retriedFirstUser = (payload.messages as Array<{ content: string }>)[0]?.content;
+    expect(retriedFirstUser).toContain(TRIM_MARKER);
+  });
+
   test("rung 2: strips old images when input exceeds the window", () => {
     const payload: Record<string, unknown> = {
       model: model.id,

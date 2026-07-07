@@ -19,6 +19,10 @@ type ClaudeModelOptions = {
   modelDefinition: ModelDefinition;
 };
 
+type OpenAIChatResponseWithTogetherlinkMeta = OpenAIChatResponse & {
+  _togetherlinkRequestedMaxTokens?: number;
+};
+
 export function thinkingSignature(reasoning: string): string {
   return `togetherlink:${stableHash(reasoning)}`;
 }
@@ -108,6 +112,8 @@ export function toAnthropicMessage(
 ): Record<string, unknown> {
   const choice = response.choices?.[0];
   const message = choice?.message ?? {};
+  const requestedMaxTokens = (response as OpenAIChatResponseWithTogetherlinkMeta)
+    ._togetherlinkRequestedMaxTokens;
   const content: Array<Record<string, unknown>> = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
@@ -135,7 +141,12 @@ export function toAnthropicMessage(
     role: "assistant",
     model,
     content,
-    stop_reason: message.tool_calls?.length ? "tool_use" : mapStopReason(choice?.finish_reason),
+    stop_reason: message.tool_calls?.length
+      ? "tool_use"
+      : mapStopReason(choice?.finish_reason, {
+          outputTokens: response.usage?.completion_tokens,
+          requestedMaxTokens,
+        }),
     stop_sequence: null,
     usage: {
       input_tokens: response.usage?.prompt_tokens ?? 0,

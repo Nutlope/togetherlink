@@ -117,6 +117,11 @@ export async function callTogetherChatCompletions(
       throw response.error;
     }
     const json = response.json;
+    if (typeof payload.max_tokens === "number") {
+      (
+        json as OpenAIChatResponse & { _togetherlinkRequestedMaxTokens?: number }
+      )._togetherlinkRequestedMaxTokens = payload.max_tokens;
+    }
     const usage = json.usage;
     const promptTokens = usage?.prompt_tokens ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
