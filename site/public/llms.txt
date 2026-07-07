@@ -127,6 +127,16 @@ Both Claude Code and Codex CLI run headlessly (no TTY), so you can delegate code
 
 Both wrappers spawn the agent pointed at the local Together proxy and pass your flags through to the underlying binary. Always close stdin and capture stderr. To run a non-default model, put `--model <id>` before the harness (see Models above).
 
+### Prefer native subagents for delegated togetherlink runs
+
+If you are an orchestrating agent running inside Claude Code, Codex, or another CLI that has its own native subagent/delegation tool, prefer this pattern for non-trivial togetherlink work:
+
+1. Spawn a native subagent first.
+2. Tell that subagent to run the needed `togetherlink` command itself (`tcodex`, `tclaude`, `topencode`, or `tpi`) with a tight task, explicit files, `< /dev/null`, and the guardrails below.
+3. Have the subagent wait for the delegated togetherlink run, inspect its result/diff, and report only the useful summary back to you.
+
+Do this instead of having the main orchestrating agent call `tcodex`/`tclaude` directly for every delegated edit. It keeps the main agent's context and inference budget focused on coordination/review, lets the native subagent own the details of launching and monitoring togetherlink, and works especially well when Claude Code delegates to a subagent that then uses Codex through `tcodex`.
+
 Codex CLI — non-interactive `exec` (the `-s workspace-write` sandbox grants write access; `exec` never prompts interactively):
 
 ```
@@ -186,6 +196,7 @@ Per-task cost varies a lot with how verbose the agent is. Mechanical, well-scope
 5. Review the diff + re-run lint yourself before committing.
 6. To select a model, put `--model` (or `--main` for Claude) before the harness subcommand — after the harness it is silently ignored and the default runs.
 7. For Claude `-p`, pass `--dangerously-skip-permissions` so a headless subagent never blocks on a permission prompt. Codex `exec` is non-interactive by design; use `-s workspace-write` for edits and `--skip-git-repo-check` outside a git repo.
+8. If your current CLI has native subagents, delegate togetherlink launches to one of those subagents and let it return the result, instead of spending the main orchestrator's context on the full `tcodex`/`tclaude` run.
 
 ## Keeping togetherlink up to date
 
