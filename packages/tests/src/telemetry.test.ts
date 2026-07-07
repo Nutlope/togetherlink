@@ -100,7 +100,7 @@ describe("context trim alarm (telemetry + stderr)", () => {
     });
 
     // The stderr warning is always-on (not debug-gated) and single-line.
-    const written = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    const written = stderrWrite.mock.calls.map((c: unknown[]) => String(c[0])).join("");
     expect(written).toContain("togetherlink: trimmed 9001 chars");
     expect(written).toContain("moonshotai/Kimi-K2.7-Code");
     expect(written).toContain("(retry path)");

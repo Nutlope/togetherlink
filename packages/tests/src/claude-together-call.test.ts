@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { GLM_5_2 } from "@togetherlink/models";
 import { fetchTogether } from "@togetherlink/cli/dist/lib/claude/together-call.js";
 
 /**
@@ -28,7 +29,7 @@ describe("claude/together-call.ts fetchTogether retry contract (#1 characterizat
   test("200 OK returns the JSON body, no retry", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { id: "chatcmpl-1", choices: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await fetchTogether({ model: "x" }, { apiKey: "k" });
+    const result = await fetchTogether({ model: "x" }, { apiKey: "k" }, GLM_5_2);
     expect(result.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -40,7 +41,7 @@ describe("claude/together-call.ts fetchTogether retry contract (#1 characterizat
     ];
     let i = 0;
     vi.stubGlobal("fetch", async () => seq[i++] ?? seq[seq.length - 1]);
-    const result = await fetchTogether({ model: "x" }, { apiKey: "k" });
+    const result = await fetchTogether({ model: "x" }, { apiKey: "k" }, GLM_5_2);
     expect(result.ok).toBe(true);
     expect(i).toBe(2); // one 429, then one 200
   });
@@ -48,7 +49,7 @@ describe("claude/together-call.ts fetchTogether retry contract (#1 characterizat
   test("401 does NOT retry — non-retryable surfaces immediately", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(401, { error: { message: "bad key" } }));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await fetchTogether({ model: "x" }, { apiKey: "bad" });
+    const result = await fetchTogether({ model: "x" }, { apiKey: "bad" }, GLM_5_2);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.status).toBe(401);
@@ -65,7 +66,7 @@ describe("claude/together-call.ts fetchTogether retry contract (#1 characterizat
     ];
     let i = 0;
     vi.stubGlobal("fetch", async () => seq[i++] ?? seq[seq.length - 1]);
-    const result = await fetchTogether({ model: "x" }, { apiKey: "k" });
+    const result = await fetchTogether({ model: "x" }, { apiKey: "k" }, GLM_5_2);
     expect(result.ok).toBe(true);
     expect(i).toBe(2);
   });
@@ -75,7 +76,7 @@ describe("claude/together-call.ts fetchTogether retry contract (#1 characterizat
       throw new Error("ECONNRESET");
     });
     vi.stubGlobal("fetch", fetchMock);
-    const result = await fetchTogether({ model: "x" }, { apiKey: "k" });
+    const result = await fetchTogether({ model: "x" }, { apiKey: "k" }, GLM_5_2);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.anthropicType).toBe("overloaded_error");

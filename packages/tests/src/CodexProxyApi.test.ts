@@ -1424,7 +1424,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     const upstream = requests[0] as {
       messages: Array<{
         role: string;
-        tool_calls?: Array<{ function: { name: string; arguments: string } }>;
+        tool_calls?: Array<{ id?: string; function: { name: string; arguments: string } }>;
       }>;
     };
     const assistantCall = upstream.messages.find(

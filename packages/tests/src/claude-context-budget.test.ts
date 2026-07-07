@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { afterEach, beforeEach, vi } from "vitest";
 import type { ModelDefinition } from "../../models/src/index.js";
+import type { ContextTrimTelemetryInfo } from "../../cli/src/lib/telemetry.js";
 import {
   applyEstimatedContextBudget,
   trimPayloadInputByApproxTokens,
@@ -46,7 +47,13 @@ describe("Claude context budget utilities", () => {
     // over the model's 1000-token window so the clamp path runs.
     // Inject a no-op alarm so the (now always-on) trim warning + telemetry do
     // not perform real stderr/network I/O during this unit test (TURN.md 1e).
-    applyEstimatedContextBudget(payload, model, { emitContextTrimAlarm: vi.fn() }, "test", 1600);
+    applyEstimatedContextBudget(
+      payload,
+      model,
+      { emitContextTrimAlarm: vi.fn() as (info: ContextTrimTelemetryInfo) => void },
+      "test",
+      1600,
+    );
 
     expect(payload.max_tokens).toBeLessThan(700);
     expect(payload.max_tokens).toBeGreaterThanOrEqual(1);
@@ -78,7 +85,7 @@ describe("context trim alarm (TURN.md 1e)", () => {
   let stderrWrite: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    alarm = vi.fn();
+    alarm = vi.fn<(info: ContextTrimTelemetryInfo) => void>();
     // The real alarm writes to stderr + fires telemetry; the injected spy
     // replaces both, so assert no real network/stderr side effects leak.
     stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -96,7 +103,13 @@ describe("context trim alarm (TURN.md 1e)", () => {
       messages: [{ role: "user", content: "context pressure ".repeat(400) }],
     };
 
-    applyEstimatedContextBudget(payload, model, { emitContextTrimAlarm: alarm }, "test", 1600);
+    applyEstimatedContextBudget(
+      payload,
+      model,
+      { emitContextTrimAlarm: alarm as (info: ContextTrimTelemetryInfo) => void },
+      "test",
+      1600,
+    );
 
     expect(alarm).toHaveBeenCalledTimes(1);
     expect(alarm).toHaveBeenCalledWith({
@@ -118,7 +131,13 @@ describe("context trim alarm (TURN.md 1e)", () => {
       messages: [{ role: "user", content: "hi" }],
     };
     // estimate 10 tokens: 10*1.15 + 100 + 512 = 623.5 < 1000 → early-exit gate.
-    applyEstimatedContextBudget(payload, model, { emitContextTrimAlarm: alarm }, "test", 10);
+    applyEstimatedContextBudget(
+      payload,
+      model,
+      { emitContextTrimAlarm: alarm as (info: ContextTrimTelemetryInfo) => void },
+      "test",
+      10,
+    );
 
     expect(payload.max_tokens).toBe(100); // unchanged
     expect(alarm).not.toHaveBeenCalled();

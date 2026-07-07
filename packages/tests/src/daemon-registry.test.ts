@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
+import type { ModelDefinition } from "@togetherlink/models";
 import {
   SessionRegistry,
   buildSession,
+  type AgentId,
   type RegisterSessionRequest,
 } from "@togetherlink/cli/dist/lib/daemon/state.js";
 
@@ -12,9 +14,10 @@ import {
  * + injectable) rather than reachable only through the singleton.
  */
 
-const MODEL_DEF = {
+const MODEL_DEF: ModelDefinition = {
   id: "zai-org/GLM-5.2",
   name: "GLM 5.2",
+  anthropicAlias: "together-glm-5-2",
   cost: { input: 1.4, output: 4.4, cache_read: 0.26 },
   limit: { context: 262144, output: 164000 },
   attachment: false,
@@ -24,7 +27,7 @@ const MODEL_DEF = {
   modalities: { input: ["text"], output: ["text"] },
 };
 
-function makeRequest(token: string, agent = "claude"): RegisterSessionRequest {
+function makeRequest(token: string, agent: AgentId = "claude"): RegisterSessionRequest {
   return {
     token,
     authToken: `auth-${token}`,
