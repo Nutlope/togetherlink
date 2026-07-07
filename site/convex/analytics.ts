@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -16,6 +16,7 @@ type UsageTotals = {
 
 type InstallSummary = UsageTotals & {
   installId: string;
+  nickname?: string;
   eventCount: number;
   sessionStarts: number;
   sessionEnds: number;
@@ -31,6 +32,7 @@ type InstallSummary = UsageTotals & {
 type SessionSummary = UsageTotals & {
   sessionId: string;
   installId: string;
+  installNickname?: string;
   agent: string;
   model: string;
   startedAt?: number;
@@ -76,6 +78,9 @@ export const getDashboardSummary = query({
       .withIndex("by_receivedAt", (q) => q.gte("receivedAt", since))
       .collect();
 
+    const nicknameRows = await ctx.db.query("installNicknames").collect();
+    const nicknames = new Map(nicknameRows.map((row) => [row.installId, row.nickname]));
+
     const installsByDay = new Map<string, Set<string>>();
     const activeInstallsByDay = new Map<string, Set<string>>();
     const sessionsStartedByDay = new Map<string, number>();
@@ -101,6 +106,7 @@ export const getDashboardSummary = query({
       const day = dayKey(event.receivedAt);
       const install = installs.get(event.installId) ?? {
         installId: event.installId,
+        nickname: nicknames.get(event.installId),
         ...emptyUsage(),
         eventCount: 0,
         sessionStarts: 0,
@@ -164,6 +170,7 @@ export const getDashboardSummary = query({
         const session = sessions.get(event.sessionId) ?? {
           sessionId: event.sessionId,
           installId: event.installId,
+          installNickname: nicknames.get(event.installId),
           ...emptyUsage(),
           agent: event.agent ?? "unknown",
           model: modelLabel(event),
@@ -289,5 +296,45 @@ export const getDashboardSummary = query({
       failedSessionRate: totalEndedSessions > 0 ? failedSessions / totalEndedSessions : 0,
       totalEvents: events.length,
     };
+  },
+});
+
+export const setInstallNickname = mutation({
+  args: {
+    installId: v.string(),
+    nickname: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const installId = args.installId.trim();
+    const nickname = args.nickname.trim();
+    if (!installId) {
+      throw new Error("Install ID is required");
+    }
+
+    const existing = await ctx.db
+      .query("installNicknames")
+      .withIndex("by_installId", (q) => q.eq("installId", installId))
+      .collect();
+
+    if (!nickname) {
+      await Promise.all(existing.map((row) => ctx.db.delete(row._id)));
+      return { ok: true };
+    }
+
+    const now = Date.now();
+    const [first, ...duplicates] = existing;
+    if (first) {
+      await ctx.db.patch(first._id, { nickname, updatedAt: now });
+      await Promise.all(duplicates.map((row) => ctx.db.delete(row._id)));
+    } else {
+      await ctx.db.insert("installNicknames", {
+        installId,
+        nickname,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    return { ok: true };
   },
 });

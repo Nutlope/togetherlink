@@ -2,6 +2,13 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  installNicknames: defineTable({
+    installId: v.string(),
+    nickname: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_installId", ["installId"]),
+
   telemetryEvents: defineTable({
     installId: v.string(),
     sessionId: v.optional(v.string()),

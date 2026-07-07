@@ -61,6 +61,23 @@ const getDashboardData = createServerFn({ method: "GET" }).handler(async () => {
   return fetchSummary();
 });
 
+const saveInstallNickname = createServerFn({ method: "POST" })
+  .validator((payload: { installId: string; nickname: string }) => payload)
+  .handler(async ({ data: payload }) => {
+    const session = await dashboardSession();
+    if (!session.data.authed) {
+      throw new Error("Not authorized");
+    }
+
+    const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
+    if (!url) {
+      throw new Error("Convex URL is not configured");
+    }
+
+    const client = new ConvexHttpClient(url);
+    return client.mutation(api.analytics.setInstallNickname, payload);
+  });
+
 export const Route = createFileRoute("/dashboard")({
   loader: async () => checkDashboardAuth(),
   component: DashboardRoute,
@@ -185,14 +202,15 @@ function DashboardRoute() {
             installs={data.installSummaries}
             selectedInstallId={selectedInstallId}
             onSelectedInstallIdChange={setSelectedInstallId}
+            onNicknameSave={async (installId, nickname) => {
+              await saveInstallNickname({ data: { installId, nickname } });
+              await loadData(false);
+            }}
           />
 
           {selectedInstall && (
             <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
-              <FocusMetric
-                label="Selected install"
-                value={shortInstallId(selectedInstall.installId)}
-              />
+              <FocusMetric label="Selected install" value={installDisplayName(selectedInstall)} />
               <FocusMetric label="Sessions ended" value={String(selectedInstall.sessionEnds)} />
               <FocusMetric label="30d cost" value={`$${selectedInstall.costUsd.toFixed(4)}`} />
               <StatCard
@@ -215,7 +233,7 @@ function DashboardRoute() {
           <RecentSessionsTable
             title={
               selectedInstall
-                ? `Recent sessions for ${shortInstallId(selectedInstall.installId)}`
+                ? `Recent sessions for ${installDisplayName(selectedInstall)}`
                 : "Recent sessions"
             }
             sessions={focusedSessions}
@@ -319,10 +337,12 @@ function InstallPicker({
   installs,
   selectedInstallId,
   onSelectedInstallIdChange,
+  onNicknameSave,
 }: {
   installs: InstallSummary[];
   selectedInstallId: string;
   onSelectedInstallIdChange: (installId: string) => void;
+  onNicknameSave: (installId: string, nickname: string) => Promise<void>;
 }) {
   return (
     <section className="md:col-span-2 rounded-lg border border-line-strong p-4">
@@ -342,7 +362,7 @@ function InstallPicker({
           <option value="all">All installs</option>
           {installs.map((install) => (
             <option key={install.installId} value={install.installId}>
-              {shortInstallId(install.installId)} · {install.sessionEnds} sessions ·{" "}
+              {installDisplayName(install)} · {install.sessionEnds} sessions ·{" "}
               {formatDateTime(install.lastSeenAt)}
             </option>
           ))}
@@ -353,6 +373,7 @@ function InstallPicker({
         <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
           <thead>
             <tr className="text-xs uppercase text-faint">
+              <th className="border-b border-line py-2 font-medium">Name</th>
               <th className="border-b border-line py-2 font-medium">Install</th>
               <th className="border-b border-line py-2 font-medium">Last seen</th>
               <th className="border-b border-line py-2 font-medium">Sessions</th>
@@ -368,6 +389,9 @@ function InstallPicker({
                 key={install.installId}
                 className={selectedInstallId === install.installId ? "bg-code" : undefined}
               >
+                <td className="border-b border-line py-2 pr-4">
+                  <NicknameField install={install} onSave={onNicknameSave} />
+                </td>
                 <td className="border-b border-line py-2 pr-4">
                   <button
                     type="button"
@@ -402,6 +426,59 @@ function InstallPicker({
   );
 }
 
+function NicknameField({
+  install,
+  onSave,
+}: {
+  install: InstallSummary;
+  onSave: (installId: string, nickname: string) => Promise<void>;
+}) {
+  const [nickname, setNickname] = useState(install.nickname ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNickname(install.nickname ?? "");
+  }, [install.installId, install.nickname]);
+
+  const hasChanges = nickname.trim() !== (install.nickname ?? "");
+
+  return (
+    <form
+      className="flex min-w-64 items-center gap-2"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setSaving(true);
+        setError(null);
+        try {
+          await onSave(install.installId, nickname);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setSaving(false);
+        }
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <input
+          value={nickname}
+          onChange={(event) => setNickname(event.target.value)}
+          placeholder="Add name"
+          className="w-full rounded-md border border-line-strong bg-white px-2 py-1 font-mono text-sm text-ink outline-none focus:border-ink"
+        />
+        {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
+      </div>
+      <button
+        type="submit"
+        disabled={saving || !hasChanges}
+        className="rounded-md border border-line-strong px-2 py-1 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {saving ? "Saving" : "Save"}
+      </button>
+    </form>
+  );
+}
+
 function RecentSessionsTable({ title, sessions }: { title: string; sessions: RecentSession[] }) {
   return (
     <section className="md:col-span-2 rounded-lg border border-line-strong p-4">
@@ -430,7 +507,7 @@ function RecentSessionsTable({ title, sessions }: { title: string; sessions: Rec
                   {formatDateTime(session.endedAt ?? session.startedAt ?? session.lastEventAt)}
                 </td>
                 <td className="border-b border-line py-2 pr-4 font-mono text-ink">
-                  {shortInstallId(session.installId)}
+                  {session.installNickname ?? shortInstallId(session.installId)}
                 </td>
                 <td className="border-b border-line py-2 pr-4 text-muted">{session.agent}</td>
                 <td className="max-w-[220px] truncate border-b border-line py-2 pr-4 font-mono text-muted">
@@ -586,6 +663,12 @@ function formatDuration(durationMs?: number): string {
 
 function shortInstallId(installId: string): string {
   return installId.length <= 12 ? installId : `${installId.slice(0, 8)}...${installId.slice(-4)}`;
+}
+
+function installDisplayName(install: Pick<InstallSummary, "installId" | "nickname">): string {
+  return install.nickname
+    ? `${install.nickname} (${shortInstallId(install.installId)})`
+    : shortInstallId(install.installId);
 }
 
 // Renders an ISO 3166-1 alpha-2 country code as its flag emoji via regional
