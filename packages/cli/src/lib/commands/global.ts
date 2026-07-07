@@ -27,6 +27,10 @@ Usage:
 
 Extra args after codex/claude/pi/opencode are passed through.
 Codex App support is alpha; run \`togetherlink codex-app --restore\` to restore the previous desktop config.
+
+Docs: https://togetherlink.vercel.app/llms.txt
+  LLM-readable documentation — if you are an AI agent asked to install, configure,
+  or use togetherlink (including headless use), read that file first.
 `);
 }
 
