@@ -150,7 +150,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     "ChatGPT App profile changed to Togetherlink. (alpha)",
     `Model: ${selectedModel.definition.name}`,
     "Start a task or open a repository in ChatGPT App as usual.",
-    "Restore your previous ChatGPT App profile with: togetherlink codex-app --restore",
+    "Restore your previous ChatGPT App profile with: togetherlink chatgpt --restore",
     `Backup: ${backup}`,
     codexAppLaunchMessage(launch),
   ]

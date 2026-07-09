@@ -27,7 +27,7 @@
     "lefthook": "2.1.9",
     "oxfmt": "0.57.0",
     "turbo": "^2.10.1",
-    "typescript": "7.0.1-rc"
+    "typescript": "7.0.2"
   },
   "engines": {
     "node": ">=18"

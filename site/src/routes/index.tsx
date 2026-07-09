@@ -96,13 +96,13 @@ const explicitCommands = [
 
 const codexAppCommands = [
   {
-    command: "togetherlink codex-app",
+    command: "togetherlink chatgpt",
     label: "Configure",
     description:
       "Patches ChatGPT Desktop config to route through Together. The change stays active until you restore.",
   },
   {
-    command: "togetherlink codex-app --restore",
+    command: "togetherlink chatgpt --restore",
     label: "Restore",
     description:
       "Brings back your OpenAI / ChatGPT subscription profile and removes the togetherlink config.",
@@ -440,9 +440,9 @@ function Home() {
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, or <code>tcodex</code>, or{" "}
-          <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink codex-app</code>{" "}
-          (alpha), and restore it with <code>togetherlink codex-app --restore</code>. On first
-          launch it asks once for your Together API key - press Enter to skip and add it later.
+          <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink chatgpt</code>{" "}
+          (alpha), and restore it with <code>togetherlink chatgpt --restore</code>. On first launch
+          it asks once for your Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change

@@ -56,7 +56,7 @@ export async function assertNoLiveCodexAppSession(home: string): Promise<void> {
     return;
   }
   throw new Error(
-    `Another togetherlink codex-app session appears to be running (pid ${lock.pid}). Stop it with Ctrl+C, or run \`togetherlink codex-app --restore\` after it exits.`,
+    `Another togetherlink chatgpt session appears to be running (pid ${lock.pid}). Stop it with Ctrl+C, or run \`togetherlink chatgpt --restore\` after it exits.`,
   );
 }
 
