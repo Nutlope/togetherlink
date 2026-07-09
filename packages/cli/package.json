@@ -1,6 +1,6 @@
 {
   "name": "@togetherlink/cli",
-  "version": "0.5.24",
+  "version": "0.5.25",
   "description": "CLI for routing Claude Code, OpenCode, Codex, and Pi Code through Together AI",
   "license": "Apache-2.0",
   "bin": {

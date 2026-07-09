@@ -1,6 +1,6 @@
 {
   "name": "togetherlink",
-  "version": "0.5.24",
+  "version": "0.5.25",
   "private": true,
   "description": "Use Together AI models in Claude Code, OpenCode, Codex, and Pi Code",
   "license": "Apache-2.0",
@@ -10,6 +10,7 @@
     "build:bundle": "bash scripts/build-bundle.sh",
     "build:site": "pnpm build:bundle && pnpm --dir site exec convex codegen --typecheck disable && pnpm --filter @togetherlink/site build",
     "build:site:preview": "pnpm build:bundle && pnpm --filter @togetherlink/site build",
+    "bump-version": "bash scripts/bump-version.sh",
     "dev": "pnpm -F @togetherlink/cli dev",
     "dev:site": "pnpm --filter @togetherlink/site dev",
     "format": "oxfmt --write .",
