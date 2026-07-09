@@ -86,7 +86,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     authToken,
     agent: "codex-app",
     apiKey,
-    modelLabel: `${selectedModel.definition.name} (Codex App alpha)`,
+    modelLabel: `${selectedModel.definition.name} (ChatGPT App alpha)`,
     modelId: selectedModel.definition.id,
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,
@@ -147,10 +147,10 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     },
   });
   const intro = [
-    "Codex App profile changed to Togetherlink. (alpha)",
+    "ChatGPT App profile changed to Togetherlink. (alpha)",
     `Model: ${selectedModel.definition.name}`,
-    "Start a task or open a repository in Codex App as usual.",
-    "Restore your previous Codex App profile with: togetherlink codex-app --restore",
+    "Start a task or open a repository in ChatGPT App as usual.",
+    "Restore your previous ChatGPT App profile with: togetherlink codex-app --restore",
     `Backup: ${backup}`,
     codexAppLaunchMessage(launch),
   ]
@@ -189,7 +189,7 @@ export function buildCodexAppConfig(
     // emit global `model_context_window`/`model_auto_compact_token_limit`
     // overrides here. A global override is tied to whichever model was
     // selected when this config was written, so switching models inside
-    // Codex Desktop leaves the override stale and clamps the displayed
+    // ChatGPT Desktop leaves the override stale and clamps the displayed
     // context length (e.g. every 262k model gets stuck at ~249k).
     model: tomlString(options.modelId),
     model_provider: tomlString(options.providerId),
@@ -201,18 +201,18 @@ export function buildCodexAppConfig(
     "profile",
     // Strip legacy global context-window overrides that were emitted by early
     // versions of the togetherlink managed config. They become stale the
-    // moment the user switches models inside Codex Desktop.
+    // moment the user switches models inside ChatGPT Desktop.
     "model_context_window",
     "model_auto_compact_token_limit",
   ]);
   const providerBlock = [
     CODEX_APP_CONFIG_MARKER_START,
-    "# togetherlink codex-app configures a dedicated alpha provider for Codex Desktop.",
+    "# togetherlink codex-app configures a dedicated alpha provider for ChatGPT Desktop.",
     `[model_providers.${options.providerId}]`,
     `name = ${tomlString(options.providerName)}`,
     `base_url = ${tomlString(options.baseUrl)}`,
     'wire_api = "responses"',
-    "# Codex Desktop currently gates its model picker on provider auth state.",
+    "# ChatGPT Desktop currently gates its model picker on provider auth state.",
     "# Setting this true is a Desktop workaround for custom providers; the",
     "# actual model requests still go to the local Togetherlink base_url above.",
     "# See https://github.com/openai/codex/issues/10867",
@@ -229,7 +229,7 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
   const raw = await readTextIfExists(manifestPath);
   if (!raw) {
-    throw new Error(`No Codex App backup found at ${manifestPath}.`);
+    throw new Error(`No ChatGPT App backup found at ${manifestPath}.`);
   }
 
   const manifest = JSON.parse(raw) as BackupManifest;
@@ -268,7 +268,7 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   const launch = await launchCodexApp({ reason: "restored", openIfClosed: false });
   return {
     message: [
-      "Codex App restored to your previous profile.",
+      "ChatGPT App restored to your previous profile.",
       `Backup date: ${manifest.createdAt}`,
       codexAppLaunchMessage(launch),
     ].join("\n"),

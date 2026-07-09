@@ -7,6 +7,14 @@ function dayKey(timestampMs: number): string {
   return new Date(timestampMs).toISOString().slice(0, 10);
 }
 
+// The standalone Codex desktop app merged into the ChatGPT desktop app in 2026.
+// The standalone Codex desktop app merged into the ChatGPT desktop app in 2026.
+// Normalize the legacy "codex-app" agent id to "chatgpt" so both historical and
+// new sessions are reported under the current name in the dashboard.
+function normalizeAgent(agent: string): string {
+  return agent === "codex-app" ? "chatgpt" : agent;
+}
+
 type UsageTotals = {
   promptTokens: number;
   cachedTokens: number;

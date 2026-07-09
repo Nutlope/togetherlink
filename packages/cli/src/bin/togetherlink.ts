@@ -116,6 +116,7 @@ async function runInteractiveLauncher(): Promise<void> {
       { value: "claude", label: "Claude Code", hint: "tclaude" },
       { value: "pi", label: "Pi Code", hint: "tpi" },
       { value: "opencode", label: "OpenCode", hint: "topencode" },
+      { value: "chatgpt", label: "ChatGPT Desktop", hint: "chatgpt" },
       { value: "configure", label: "Configure", hint: "API keys and detected tools" },
     ],
   });
@@ -125,6 +126,19 @@ async function runInteractiveLauncher(): Promise<void> {
   }
   if (choice === "configure") {
     await runConfigure();
+    return;
+  }
+  if (choice === "chatgpt") {
+    // ChatGPT Desktop (the former Codex desktop app, merged in 2026). Routes
+    // to the same codex-app flow as `togetherlink chatgpt` / `codex-app`.
+    const { runCodexAppCommand } = await import("../lib/codex-app.js");
+    const result = await runCodexAppCommand({ home: os.homedir() });
+    if (result.message) {
+      console.log(result.message);
+    }
+    if (result.payload) {
+      console.log(JSON.stringify(result.payload, null, 2));
+    }
     return;
   }
 
@@ -154,7 +168,17 @@ async function main() {
 
   const parsed = parseArgs(process.argv.slice(2));
   const [rawCommand, rawVerb] = parsed.positional;
-  const command = rawCommand === "picode" ? "pi" : rawCommand;
+  // `chatgpt` is the canonical command now that the Codex desktop app merged
+  // into the ChatGPT desktop app; `codex-app` (and `chatgpt-app`) stay as
+  // backward-compatible aliases. The internal command id / config markers /
+  // backup dir keep the stable "codex-app" string so restore still finds old
+  // config blocks written by previous versions.
+  const command =
+    rawCommand === "picode"
+      ? "pi"
+      : rawCommand === "chatgpt" || rawCommand === "chatgpt-app"
+        ? "codex-app"
+        : rawCommand;
 
   if (!command) {
     await runInteractiveLauncher();

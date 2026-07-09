@@ -40,7 +40,7 @@ const LAST_SEEN_PERSIST_INTERVAL_MS = envInt(
  * - `codex`: the daemon PROXIES OpenAI Responses-shaped Codex CLI traffic and
  *   translates it to Together chat completions.
  * - `codex-app`: same proxy path as `codex`, but registered by the persistent
- *   Codex Desktop app integration so telemetry can distinguish it.
+ *   ChatGPT Desktop app integration so telemetry can distinguish it.
  */
 export type AgentId = "claude" | "opencode" | "codex" | "codex-app";
 

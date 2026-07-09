@@ -28,7 +28,7 @@ Or launch a tool directly:
 
 ```bash
 togetherlink codex        # alias: tcodex
-togetherlink codex-app    # alpha: Codex Desktop session with restore
+togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (alias: codex-app)
 togetherlink claude       # alias: tclaude
 togetherlink pi           # alias: tpi
 togetherlink opencode     # alias: topencode
@@ -42,7 +42,7 @@ The compact CLI guide is:
 
 ```text
 togetherlink configure
-togetherlink codex-app [--model <model>] [--restore]  (alpha)
+togetherlink chatgpt [--model <model>] [--restore]  (alpha, alias: codex-app)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
 togetherlink pi [...]          (alias: tpi)

@@ -64,7 +64,7 @@ togetherlink claude [...]       # alias: tclaude  (Claude Code)
 togetherlink pi [...]           # alias: tpi      (Pi Code)
 togetherlink opencode [...]     # alias: topencode (OpenCode)
 
-togetherlink codex-app [--model <model>] [--restore]   # alpha: Codex Desktop
+togetherlink codex-app [--model <model>] [--restore]   # alpha: ChatGPT Desktop
 
 togetherlink daemon stop                   # stop the background proxy daemon
 ```
@@ -80,9 +80,9 @@ Recognized togetherlink flags (parsed before the passthrough):
 - `--json` — print machine-readable payloads where supported.
 - `--restore` — restore (used with `codex-app`).
 
-### Codex Desktop App (alpha)
+### ChatGPT Desktop App (alpha)
 
-`togetherlink codex-app` persistently patches the Codex Desktop config so the desktop app routes through Together. Unlike the CLI wrappers, this change stays active until you restore it:
+`togetherlink codex-app` persistently patches the ChatGPT Desktop config so the desktop app routes through Together. Unlike the CLI wrappers, this change stays active until you restore it:
 
 ```
 togetherlink codex-app                     # configure (patches config)
@@ -224,7 +224,7 @@ The daemon is one persistent local process shared by all proxied sessions. If yo
 togetherlink daemon stop
 ```
 
-`togetherlink codex-app` (alpha) is the exception: it persistently patches Codex Desktop config to route through Together (instead of per-run injection), with backups under `~/.togetherlink/backup/codex-app/`. Restore with `togetherlink codex-app --restore`.
+`togetherlink codex-app` (alpha) is the exception: it persistently patches ChatGPT Desktop config to route through Together (instead of per-run injection), with backups under `~/.togetherlink/backup/codex-app/`. Restore with `togetherlink codex-app --restore`.
 
 ## Troubleshooting
 
@@ -233,7 +233,7 @@ togetherlink daemon stop
 - **Web search fails in Claude Code** — set an Exa API key via `togetherlink configure`. Without it, searches return a clear "EXA_API_KEY not set" error.
 - **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
 - **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
-- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Pi Code setup is untouched. For Codex Desktop, run `togetherlink codex-app --restore`.
+- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Pi Code setup is untouched. For ChatGPT Desktop, run `togetherlink codex-app --restore`.
 
 ## Links
 

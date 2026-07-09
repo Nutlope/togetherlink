@@ -99,7 +99,7 @@ const codexAppCommands = [
     command: "togetherlink codex-app",
     label: "Configure",
     description:
-      "Patches Codex Desktop config to route through Together. The change stays active until you restore.",
+      "Patches ChatGPT Desktop config to route through Together. The change stays active until you restore.",
   },
   {
     command: "togetherlink codex-app --restore",
@@ -350,19 +350,19 @@ function Home() {
         <div className="overflow-hidden rounded-[16px] border border-amber-300 bg-amber-50/60 shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(146,64,14,.06)]">
           <div className="flex flex-wrap items-center gap-3 border-b border-amber-300/70 px-[22px] pt-6 pb-5 max-[520px]:px-5">
             <span className="inline-flex size-[42px] shrink-0 items-center justify-center rounded-[10px] border border-amber-300 bg-white text-ink shadow-[inset_0_1px_0_rgba(255,255,255,.72)]">
-              <CodexMark />
+              <ChatGPTMark />
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2.5">
-                <h2 className="m-0 text-[19px] font-semibold text-ink">Codex Desktop App</h2>
+                <h2 className="m-0 text-[19px] font-semibold text-ink">ChatGPT Desktop App</h2>
                 <span className="inline-flex rotate-[-1.5deg] items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-[9px] py-1 text-[11px] font-semibold uppercase tracking-[.05em] text-amber-900 shadow-[0_1px_0_rgba(255,255,255,.85)_inset,0_1px_2px_rgba(146,64,14,.12)]">
                   <span className="size-1.5 rounded-full bg-amber-500" />
                   Alpha
                 </span>
               </div>
               <p className="m-0 mt-1.5 text-[14.5px] leading-normal text-muted">
-                Also works with the Codex desktop app. Unlike the per-run CLI wrappers above, this
-                persistently patches Codex Desktop config so the app talks to Together. When you
+                Also works with the ChatGPT desktop app. Unlike the per-run CLI wrappers above, this
+                persistently patches ChatGPT Desktop config so the app talks to Together. When you
                 want your OpenAI subscription back, run the restore command.
               </p>
             </div>
@@ -440,7 +440,7 @@ function Home() {
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, or <code>tcodex</code>, or{" "}
-          <code>tpi</code>. For the Codex desktop app run <code>togetherlink codex-app</code>{" "}
+          <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink codex-app</code>{" "}
           (alpha), and restore it with <code>togetherlink codex-app --restore</code>. On first
           launch it asks once for your Together API key - press Enter to skip and add it later.
         </Step>
@@ -662,6 +662,17 @@ function CodexMark() {
         </linearGradient>
       </defs>
     </svg>
+  );
+}
+
+function ChatGPTMark() {
+  return (
+    <img
+      src="/chatgpt-icon.png"
+      alt="ChatGPT"
+      className="size-[44px] rounded-[7px] object-contain"
+      draggable={false}
+    />
   );
 }
 

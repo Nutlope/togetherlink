@@ -11,9 +11,20 @@ const execFileAsync = promisify(execFile);
  * away from TOML manipulation, file backup, and session locking.
  *
  * All functions are best-effort: a failed platform call returns `false` rather
- * than throwing, so the orchestrator can degrade to a "open Codex manually"
+ * than throwing, so the orchestrator can degrade to an "open the app manually"
  * message instead of aborting an otherwise-complete configuration.
+ *
+ * In 2026 OpenAI merged the standalone Codex desktop app into the ChatGPT
+ * desktop app, so detection / launch / quit target the "ChatGPT" bundle while
+ * still recognising the legacy "Codex" bundle for users who haven't upgraded.
  */
+
+// macOS application bundle names, checked in priority order. The Codex desktop
+// app was rebranded into the ChatGPT desktop app, so we look for "ChatGPT"
+// first and fall back to the legacy "Codex" bundle.
+const MACOS_APP_NAMES = ["ChatGPT", "Codex"];
+// Windows process image names, in priority order.
+const WIN32_PROCESS_NAMES = ["ChatGPT.exe", "Codex.exe"];
 
 export type CodexAppLaunchResult = {
   launched: boolean;
@@ -51,20 +62,20 @@ export async function launchCodexApp(options: {
 
 export function codexAppLaunchMessage(result: CodexAppLaunchResult): string {
   if (result.wasRunning && result.restarted && result.launched) {
-    return "Codex App was already open; restart approved and relaunch requested.";
+    return "ChatGPT App was already open; restart approved and relaunch requested.";
   }
   if (result.wasRunning && result.restartDeclined) {
-    return "Codex App is already open. Restart it when you are ready so it reloads this profile.";
+    return "ChatGPT App is already open. Restart it when you are ready so it reloads this profile.";
   }
   if (result.wasRunning && result.restartUnsupported) {
-    return "Codex App is already open, but togetherlink could not restart it. Quit and reopen Codex App when you are ready.";
+    return "ChatGPT App is already open, but togetherlink could not restart it. Quit and reopen ChatGPT App when you are ready.";
   }
   if (!result.wasRunning && !result.launchAttempted) {
-    return "Codex App was not running.";
+    return "ChatGPT App was not running.";
   }
   return result.launched
-    ? "Codex App launch requested."
-    : "Config written, but Codex App could not be launched automatically. Open Codex App manually.";
+    ? "ChatGPT App launch requested."
+    : "Config written, but ChatGPT App could not be launched automatically. Open ChatGPT App manually.";
 }
 
 async function shouldRestartCodexApp(reason: CodexAppLaunchReason): Promise<boolean> {
@@ -74,10 +85,10 @@ async function shouldRestartCodexApp(reason: CodexAppLaunchReason): Promise<bool
   const clack = await import("@clack/prompts");
   const action =
     reason === "restored"
-      ? "reload your restored Codex profile"
+      ? "reload your restored ChatGPT profile"
       : "reload the Togetherlink profile";
   const restart = await clack.confirm({
-    message: `Codex App is already open. Restart it now to ${action}?`,
+    message: `ChatGPT App is already open. Restart it now to ${action}?`,
     initialValue: false,
   });
   return restart === true;
@@ -89,30 +100,55 @@ export async function openCodexApp(): Promise<boolean> {
     return true;
   }
   if (process.platform === "darwin") {
-    return spawnDetached("open", ["-a", "Codex", process.cwd()]);
+    for (const name of MACOS_APP_NAMES) {
+      if (await spawnDetached("open", ["-a", name, process.cwd()])) {
+        return true;
+      }
+    }
+    return false;
   }
   if (process.platform === "win32") {
-    return spawnDetached("cmd", ["/c", "start", "", "Codex"]);
+    for (const name of WIN32_PROCESS_NAMES) {
+      if (await spawnDetached("cmd", ["/c", "start", "", name])) {
+        return true;
+      }
+    }
+    return false;
   }
   return false;
 }
 
 export async function isCodexAppRunning(): Promise<boolean> {
   if (process.platform === "darwin") {
+    return Boolean(await runningMacosAppName());
+  }
+  if (process.platform === "win32") {
+    return Boolean(await runningWin32ProcessName());
+  }
+  return false;
+}
+
+export async function quitCodexApp(): Promise<boolean> {
+  if (process.platform === "darwin") {
+    const name = await runningMacosAppName();
+    if (!name) {
+      return false;
+    }
     try {
-      const { stdout } = await execFileAsync("/usr/bin/osascript", [
-        "-e",
-        'application "Codex" is running',
-      ]);
-      return stdout.trim() === "true";
+      await execFileAsync("/usr/bin/osascript", ["-e", `tell application "${name}" to quit`]);
+      return waitForCodexAppExit();
     } catch {
       return false;
     }
   }
   if (process.platform === "win32") {
+    const name = await runningWin32ProcessName();
+    if (!name) {
+      return false;
+    }
     try {
-      const { stdout } = await execFileAsync("tasklist", ["/FI", "IMAGENAME eq Codex.exe"]);
-      return /\bCodex\.exe\b/i.test(stdout);
+      await execFileAsync("taskkill", ["/IM", name]);
+      return waitForCodexAppExit();
     } catch {
       return false;
     }
@@ -120,24 +156,35 @@ export async function isCodexAppRunning(): Promise<boolean> {
   return false;
 }
 
-export async function quitCodexApp(): Promise<boolean> {
-  if (process.platform === "darwin") {
+async function runningMacosAppName(): Promise<string | undefined> {
+  for (const name of MACOS_APP_NAMES) {
     try {
-      await execFileAsync("/usr/bin/osascript", ["-e", 'tell application "Codex" to quit']);
-      return waitForCodexAppExit();
+      const { stdout } = await execFileAsync("/usr/bin/osascript", [
+        "-e",
+        `application "${name}" is running`,
+      ]);
+      if (stdout.trim() === "true") {
+        return name;
+      }
     } catch {
-      return false;
+      // Try the next bundle name.
     }
   }
-  if (process.platform === "win32") {
+  return undefined;
+}
+
+async function runningWin32ProcessName(): Promise<string | undefined> {
+  for (const name of WIN32_PROCESS_NAMES) {
     try {
-      await execFileAsync("taskkill", ["/IM", "Codex.exe"]);
-      return waitForCodexAppExit();
+      const { stdout } = await execFileAsync("tasklist", ["/FI", `IMAGENAME eq ${name}`]);
+      if (stdout.toLowerCase().includes(name.toLowerCase())) {
+        return name;
+      }
     } catch {
-      return false;
+      // Try the next process name.
     }
   }
-  return false;
+  return undefined;
 }
 
 async function waitForCodexAppExit(): Promise<boolean> {
