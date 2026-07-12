@@ -78,6 +78,29 @@ describe("Claude context budget utilities", () => {
     );
     expect(messages[1]?.content.length).toBeLessThan(longText.length);
   });
+
+  test("never starves compaction to a tiny proactive output budget", () => {
+    const payload: Record<string, unknown> = {
+      model: model.id,
+      max_tokens: 32_000,
+      // Small individual messages cannot be text-trimmed by the proactive
+      // pass, reproducing a long tool-heavy session near its context edge.
+      messages: Array.from({ length: 2_000 }, (_, index) => ({
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: `turn-${index}`,
+      })),
+    };
+
+    applyEstimatedContextBudget(
+      payload,
+      { ...model, limit: { context: 10_000, output: 32_000 } },
+      { isCompactionRequest: true },
+      "test",
+      20_000,
+    );
+
+    expect(payload.max_tokens).toBe(32_000);
+  });
 });
 
 describe("context trim alarm (TURN.md 1e)", () => {

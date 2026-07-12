@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { GLM_5_2, type ModelDefinition } from "../../models/src/index.js";
 import { buildClaudeEnv } from "../../cli/src/lib/claude/core.js";
+import { isClaudeCompactionRequest } from "../../cli/src/lib/claude/compaction.js";
 import { CLAUDE_HAIKU_MODEL } from "../../cli/src/lib/claude/defaults.js";
 import { handleProxyRequest } from "../../cli/src/lib/claude/proxy.js";
 import type { ClaudeProxyOptions } from "../../cli/src/lib/claude/proxy.js";
@@ -43,7 +44,7 @@ describe("Claude proxy compatibility API", () => {
       expect(env.ANTHROPIC_MODEL).toBe(GLM_5_2.anthropicAlias);
       expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(EXPECTED_HAIKU_MODEL_ID);
       expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).not.toBe(GLM_5_2.anthropicAlias);
-      expect(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBeUndefined();
+      expect(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("32000");
     } finally {
       if (previous === undefined) {
         delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
@@ -254,11 +255,84 @@ describe("Claude proxy compatibility API", () => {
 
     expect(response.status).toBe(200);
     expect(upstreamBodies).toHaveLength(1);
-    expect(upstreamBodies[0]?.max_tokens).toBe(8_000);
+    expect(upstreamBodies[0]?.max_tokens).toBe(32_000);
     const upstreamContent = String(firstUserContent(upstreamBodies[0]));
     expect(upstreamContent).toContain("Togetherlink bounded compaction request");
     expect(upstreamContent).not.toContain("include full code snippets");
     expect(upstreamContent).not.toContain("List ALL user messages");
+  });
+
+  test("detects Claude Code full, recent, and continuing-session compaction variants", () => {
+    for (const task of [
+      "Your task is to create a detailed summary of the conversation so far",
+      "Your task is to create a detailed summary of the RECENT portion of the conversation",
+      "Your task is to create a detailed summary of this conversation",
+    ]) {
+      expect(
+        isClaudeCompactionRequest({
+          model: GLM_5_2.anthropicAlias,
+          max_tokens: 32_000,
+          messages: [
+            {
+              role: "user",
+              content: `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\nYour entire response must be plain text: an <analysis> block followed by a <summary> block.\n${task}`,
+            },
+          ],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  test("finishes streamed compaction without triggering Claude Code continuation", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return sseResponse([
+          {
+            choices: [
+              {
+                // GLM may return summarization output in reasoning_content even
+                // when reasoning is disabled. Compaction must expose it as
+                // assistant text or Claude Code rejects the response entirely.
+                delta: {
+                  reasoning_content: "<analysis>brief</analysis><summary>bounded handoff</summary>",
+                },
+                finish_reason: "length",
+              },
+            ],
+            usage: { prompt_tokens: 250_000, completion_tokens: 8_000, total_tokens: 258_000 },
+          },
+        ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        stream: true,
+        max_tokens: 32_000,
+        thinking: { type: "enabled", budget_tokens: 32_000, effort: "max" },
+        messages: [{ role: "user", content: claudeCompactionPrompt("prior turn") }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toMatchObject({
+      max_tokens: 32_000,
+      reasoning: { enabled: false },
+      chat_template_kwargs: { clear_thinking: true },
+    });
+    expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
+    expect(response.body).toContain("bounded handoff");
+    expect(response.body).toContain('"type":"text_delta"');
+    expect(response.body).not.toContain('"type":"thinking_delta"');
+    expect(response.body).toContain('"stop_reason":"end_turn"');
+    expect(response.body).not.toContain('"stop_reason":"max_tokens"');
   });
 
   test("honors user-configured Claude Code max output tokens during compaction", async () => {

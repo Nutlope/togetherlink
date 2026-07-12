@@ -28,6 +28,9 @@ const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
 ] as const;
 
+// Preserve Claude Code's native 32k cumulative-output guard. Togetherlink
+// independently caps ordinary upstream turns at 28k, while compaction keeps
+// the full budget requested by Claude Code.
 const DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS = 32_000;
 
 export type ClaudeLaunchOptions = {
@@ -64,6 +67,9 @@ export function buildClaudeEnv({
   env.ANTHROPIC_AUTH_TOKEN = authToken;
   env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1";
   env.ANTHROPIC_MODEL = modelId;
+  if (env.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined) {
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS);
+  }
   applyClaudeModelMenuEnv(env, modelId);
 
   // Disable Claude Code's periodic "How is Claude doing this session?" survey.

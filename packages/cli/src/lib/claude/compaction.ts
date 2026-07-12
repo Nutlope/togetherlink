@@ -1,12 +1,14 @@
 import type { AnthropicContentBlock, AnthropicMessagesRequest } from "./wire-types.js";
 
 const CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
-const DEFAULT_COMPACTION_MAX_OUTPUT_TOKENS = 8_000;
 
 const COMPACTION_SIGNATURES = [
   "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.",
   "Your entire response must be plain text: an <analysis> block followed by a <summary> block.",
-  "Your task is to create a detailed summary of the conversation so far",
+  // Claude Code uses full-history, recent-portion, and continuing-session
+  // variants. Their suffix differs, but this stable prefix identifies all of
+  // them without tying Togetherlink to one exact release's wording.
+  "Your task is to create a detailed summary",
 ] as const;
 
 const COMPACTION_INSTRUCTION_START = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.";
@@ -34,9 +36,10 @@ export function tuneClaudeCompactionRequest(
     finiteTokenCount(options.claudeCodeMaxOutputTokens) ?? CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS;
   const userConfiguredClaudeMaxOutputTokens = options.userConfiguredClaudeMaxOutputTokens === true;
   const effectiveRequestedMaxTokens = requestedMaxTokens ?? claudeCodeMaxOutputTokens;
-  const maxTokens = userConfiguredClaudeMaxOutputTokens
-    ? Math.min(effectiveRequestedMaxTokens, claudeCodeMaxOutputTokens)
-    : Math.min(effectiveRequestedMaxTokens, DEFAULT_COMPACTION_MAX_OUTPUT_TOKENS);
+  // Preserve Claude Code's own compaction request budget. The client-level
+  // limit remains authoritative when the user explicitly configures a lower
+  // value, but Togetherlink does not impose a separate compaction-only cap.
+  const maxTokens = Math.min(effectiveRequestedMaxTokens, claudeCodeMaxOutputTokens);
 
   if (maxTokens !== undefined) {
     body.max_tokens = maxTokens;

@@ -207,7 +207,11 @@ export async function handleProxyRequest(
         streamAnthropicFromTogether(
           res,
           body,
-          { ...options, rawBytes: budgetRawBytes },
+          {
+            ...options,
+            rawBytes: budgetRawBytes,
+            isCompactionRequest: compactionTuning.detected,
+          },
           upstreamAbort.signal,
           perf,
         ),
@@ -230,10 +234,28 @@ export async function handleProxyRequest(
 
   const openAiResponse = await callTogetherChatCompletions(
     body,
-    { ...options, rawBytes: budgetRawBytes },
+    {
+      ...options,
+      rawBytes: budgetRawBytes,
+      isCompactionRequest: compactionTuning.detected,
+    },
     upstreamAbort.signal,
     perf,
   );
+  if (compactionTuning.detected && openAiResponse.choices?.[0]?.finish_reason === "length") {
+    openAiResponse.choices[0].finish_reason = "stop";
+  }
+  if (compactionTuning.detected) {
+    const message = openAiResponse.choices?.[0]?.message;
+    if (message && !message.content) {
+      const reasoning = message.reasoning_content ?? message.reasoning;
+      if (reasoning) {
+        message.content = reasoning;
+        message.reasoning = null;
+        message.reasoning_content = null;
+      }
+    }
+  }
   const anthropicMessage = perf.spanSync("response_map", () =>
     toAnthropicMessage(openAiResponse, body.model ?? options.modelId),
   );

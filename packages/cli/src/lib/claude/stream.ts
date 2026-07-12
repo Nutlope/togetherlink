@@ -40,6 +40,7 @@ type ClaudeStreamOptions = {
   debug?: boolean | undefined;
   claudeCodeMaxOutputTokens?: number | undefined;
   claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
+  isCompactionRequest?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
   rawBytes?: number | undefined;
@@ -68,7 +69,9 @@ export async function streamAnthropicFromTogether(
     const upstreamMessages =
       nativeTools.length > 0 ? withClaudeNativeToolSystemPrompt(messages, nativeTools) : messages;
     const tools = toOpenAITools(body.tools, options);
-    const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+    const reasoningEffort = options.isCompactionRequest
+      ? undefined
+      : togetherReasoningEffort(body, targetModel.definition);
     const maxTokens = clampClaudeClientMaxTokens(body.max_tokens, targetModel.definition, options);
     return {
       targetModel,
@@ -92,8 +95,12 @@ export async function streamAnthropicFromTogether(
     temperature: body.temperature,
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
-    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    chat_template_kwargs: { clear_thinking: false },
+    ...(options.isCompactionRequest
+      ? { reasoning: { enabled: false } }
+      : reasoningEffort
+        ? { reasoning_effort: reasoningEffort }
+        : {}),
+    chat_template_kwargs: { clear_thinking: options.isCompactionRequest === true },
     stream: true,
     // Guarantee Together sends a usage chunk at the end so cost tracking has
     // real token counts (without this, some streamed responses omit usage).
@@ -221,8 +228,17 @@ export async function streamAnthropicFromTogether(
         if (delta) {
           const reasoning = delta.reasoning ?? delta.reasoning_content;
           if (typeof reasoning === "string" && reasoning.length > 0) {
-            perf?.markOnce("first_delta", { kind: "thinking" });
-            blockManager.emitThinking(reasoning);
+            if (options.isCompactionRequest) {
+              // Some Together reasoning models still place summarization output
+              // in reasoning_content when reasoning is explicitly disabled.
+              // Claude Code's compactor only accepts assistant text, so expose
+              // that provider-specific channel as text for this request type.
+              perf?.markOnce("first_delta", { kind: "text" });
+              blockManager.emitText(reasoning);
+            } else {
+              perf?.markOnce("first_delta", { kind: "thinking" });
+              blockManager.emitThinking(reasoning);
+            }
           }
           if (typeof delta.content === "string" && delta.content.length > 0) {
             perf?.markOnce("first_delta", { kind: "text" });
@@ -261,6 +277,14 @@ export async function streamAnthropicFromTogether(
     outputTokens,
     requestedMaxTokens: payload.max_tokens as number | undefined,
   });
+  // Claude Code automatically continues a response reported as max_tokens.
+  // That behavior is useful for normal turns but fatal for compaction: several
+  // bounded summary chunks accumulate until Claude Code's own output guard
+  // aborts the operation. A compact response is a single bounded handoff, so
+  // never invite continuation after Together reaches its summary budget.
+  if (options.isCompactionRequest && upstreamFinishReason === "length") {
+    stopReason = "end_turn";
+  }
   if (upstreamFinishReason === "length" && stopReason !== "max_tokens") {
     debugLog(options, "downgraded short Together length stop", {
       outputTokens,

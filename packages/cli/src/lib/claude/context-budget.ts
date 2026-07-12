@@ -19,6 +19,7 @@ type ContextBudgetOptions = {
   debug?: boolean | undefined;
   claudeCodeMaxOutputTokens?: number | undefined;
   claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
+  isCompactionRequest?: boolean | undefined;
   /**
    * Override the context-trim alarm emitter. Production call sites leave this
    * undefined so the real always-on warning + fire-and-forget telemetry fire;
@@ -57,7 +58,7 @@ export function clampClaudeClientMaxTokens(
   const claudeCodeMaxOutputTokens =
     finiteTokenCount(options.claudeCodeMaxOutputTokens) ?? CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS;
   const clientCap =
-    options.claudeCodeMaxOutputTokensUserSet === true
+    options.claudeCodeMaxOutputTokensUserSet === true || options.isCompactionRequest === true
       ? claudeCodeMaxOutputTokens
       : Math.min(claudeCodeMaxOutputTokens, DEFAULT_CLAUDE_NORMAL_MAX_OUTPUT_TOKENS);
   return Math.min(clamped, clientCap);
@@ -124,6 +125,20 @@ export function applyEstimatedContextBudget(
   );
   const nextMaxTokens = Math.min(currentMaxTokens, model.limit.output, availableOutputTokens);
   if (nextMaxTokens >= currentMaxTokens) {
+    return;
+  }
+  if (options.isCompactionRequest) {
+    // Never turn a compaction request into a one-token response. If the cheap
+    // estimator cannot free enough room, preserve the bounded summary budget
+    // and let Together's exact context-length error drive the reactive
+    // trim/drop ladder. That ladder can then retain Claude Code's original
+    // compaction output budget.
+    debugLog(options, `preserved ${label} compaction output budget for reactive context fit`, {
+      model: payload.model,
+      maxTokens: currentMaxTokens,
+      estimatedAvailableOutputTokens: availableOutputTokens,
+      estimatedInputTokens: refinedInputTokens,
+    });
     return;
   }
   payload.max_tokens = nextMaxTokens;

@@ -32,6 +32,7 @@ type ClaudeChatOptions = {
   debug?: boolean | undefined;
   claudeCodeMaxOutputTokens?: number | undefined;
   claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
+  isCompactionRequest?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
   rawBytes?: number | undefined;
@@ -63,7 +64,9 @@ export async function callTogetherChatCompletions(
   const nativeToolUses = new Map<string, number>();
 
   for (let turn = 0; turn < 5; turn += 1) {
-    const reasoningEffort = togetherReasoningEffort(body, targetModel.definition);
+    const reasoningEffort = options.isCompactionRequest
+      ? undefined
+      : togetherReasoningEffort(body, targetModel.definition);
     const maxTokens = clampClaudeClientMaxTokens(body.max_tokens, targetModel.definition, options);
     const payload = {
       model: targetModel.definition.id,
@@ -76,8 +79,12 @@ export async function callTogetherChatCompletions(
       temperature: body.temperature,
       tools,
       tool_choice: toOpenAIToolChoice(body.tool_choice),
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-      chat_template_kwargs: { clear_thinking: false },
+      ...(options.isCompactionRequest
+        ? { reasoning: { enabled: false } }
+        : reasoningEffort
+          ? { reasoning_effort: reasoningEffort }
+          : {}),
+      chat_template_kwargs: { clear_thinking: options.isCompactionRequest === true },
       stream: false,
     };
     // Estimate input tokens from the inbound raw byte length via the session's
