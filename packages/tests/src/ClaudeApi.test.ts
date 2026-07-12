@@ -270,7 +270,7 @@ describe("Claude proxy compatibility API", () => {
     ]) {
       expect(
         isClaudeCompactionRequest({
-          model: GLM_5_2.anthropicAlias,
+          model: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
           max_tokens: 32_000,
           messages: [
             {
