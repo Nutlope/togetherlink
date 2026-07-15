@@ -232,14 +232,13 @@ function Home() {
           <img className="block h-[15px] w-auto" src="/together-ai.png" alt="Together AI" />
         </a>
         <h1 className="m-0 text-balance text-[clamp(34px,6vw,52px)] font-semibold leading-[1.08] text-ink">
-          Use Together AI
+          Use Open source models
           <br />
-          in the agents you already run.
+          in Codex and Claude Code
         </h1>
         <p className="mx-auto mt-5 mb-9 max-w-[560px] text-pretty text-[19px] leading-normal text-muted">
-          Install once, then launch OpenCode, Claude Code, Codex CLI, or Pi Code with short
-          commands. TogetherLink injects Together settings for that run only, so your normal tool
-          configs stay clean.
+          Install once, then run GLM 5.2 in Claude Code or Codex with short commands. TogetherLink
+          injects Together settings for that run only, so your normal tool configs stay clean.
         </p>
 
         <div className="relative mx-auto mb-9 flex min-h-[250px] max-w-[760px] items-center justify-center overflow-hidden rounded-[24px] bg-[radial-gradient(circle_at_center,#f5f5f4_0,#ffffff_58%,#fafafa_100%)] px-5 py-8 shadow-[inset_0_0_0_1px_rgba(229,231,235,.9),0_1px_2px_rgba(10,10,10,.04)] max-[680px]:min-h-0 max-[680px]:flex-col max-[680px]:gap-5 max-[680px]:rounded-[18px]">
