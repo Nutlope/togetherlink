@@ -12,7 +12,7 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | sh
@@ -30,6 +30,7 @@ Or launch a tool directly:
 togetherlink codex        # alias: tcodex
 togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (alias: codex-app)
 togetherlink claude       # alias: tclaude
+togetherlink grok         # alias: tgrok
 togetherlink pi           # alias: tpi
 togetherlink opencode     # alias: topencode
 ```
@@ -45,6 +46,7 @@ togetherlink configure
 togetherlink chatgpt [--model <model>] [--restore]  (alpha, alias: codex-app)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
+togetherlink grok [...]        (alias: tgrok)
 togetherlink pi [...]          (alias: tpi)
 togetherlink opencode [...]    (alias: topencode)
 ```

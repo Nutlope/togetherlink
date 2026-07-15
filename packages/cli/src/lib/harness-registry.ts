@@ -4,6 +4,7 @@ import type { Harness } from "./harness-types.js";
 const LOADERS: Partial<Record<HarnessId, () => Promise<{ default: Harness }>>> = {
   [HARNESS.CLAUDE]: () => import("./harnesses/claude.js"),
   [HARNESS.CODEX]: () => import("./harnesses/codex.js"),
+  [HARNESS.GROK]: () => import("./harnesses/grok.js"),
   [HARNESS.OPENCODE]: () => import("./harnesses/opencode.js"),
   [HARNESS.PI]: () => import("./harnesses/pi.js"),
 };

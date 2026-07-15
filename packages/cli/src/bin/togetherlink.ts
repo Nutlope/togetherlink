@@ -113,6 +113,7 @@ async function runInteractiveLauncher(): Promise<void> {
     message: "What do you want to run?",
     options: [
       { value: "codex", label: "Codex", hint: "tcodex" },
+      { value: "grok", label: "Grok Build", hint: "tgrok" },
       { value: "claude", label: "Claude Code", hint: "tclaude" },
       { value: "pi", label: "Pi Code", hint: "tpi" },
       { value: "opencode", label: "OpenCode", hint: "topencode" },
@@ -267,6 +268,7 @@ async function main() {
   if (
     (invocation.command === "claude" ||
       invocation.command === "codex" ||
+      invocation.command === "grok" ||
       invocation.command === "opencode" ||
       invocation.command === "pi") &&
     invocation.command !== undefined

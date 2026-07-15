@@ -17,16 +17,16 @@ architecturally distinct families (recorded as `ProxiedHarness` and
   daemon's Together client, tracks cost via a `CostTracker`, and deregisters on
   exit. The shared lifecycle lives in `runProxiedSession`
   (`packages/cli/src/lib/proxied-session.ts`).
-- **Spawned harness** — OpenCode, Pi. `run` spawns the agent binary directly;
-  the binary's own provider plugin talks to Together (OpenCode) or reads a
-  `models.json` from disk (Pi). No daemon, no proxy, no `CostTracker`, no
-  keepalive.
+- **Spawned harness** — OpenCode, Pi, Grok. `run` spawns the agent binary
+  directly; the binary talks to Together using inline config (OpenCode), a
+  temporary `models.json` (Pi), or an isolated temporary `GROK_HOME` (Grok).
+  No daemon, no proxy, no `CostTracker`, no keepalive.
 
 **Harness** — anything that adapts one agent CLI to Togetherlink. _Avoid:_
 integration, connector.
 
-**HarnessId** — the enum of harness identifiers (`claude`, `codex`, `opencode`,
-`pi`). Note: the daemon also knows about `codex-app`, a fifth agent id not in
+**HarnessId** — the enum of harness identifiers (`claude`, `codex`, `grok`,
+`opencode`, `pi`). Note: the daemon also knows about `codex-app`, an agent id not in
 `HarnessId` — an orphan to be reconciled.
 
 ## The daemon seam

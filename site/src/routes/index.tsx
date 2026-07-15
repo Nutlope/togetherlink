@@ -65,6 +65,19 @@ const features = [
     icon: <PiMark />,
     accent: undefined,
   },
+  {
+    title: "Grok Build",
+    tag: "Beta",
+    tagTone: "beta",
+    body: (
+      <>
+        Run <code>tgrok</code> and Grok Build launches directly on Together with the curated model
+        catalog in a temporary home. Your Grok config stays untouched and sessions still resume.
+      </>
+    ),
+    icon: <GrokMark />,
+    accent: undefined,
+  },
 ];
 
 const heroTools = [
@@ -72,19 +85,21 @@ const heroTools = [
   { name: "Claude Code", command: "tclaude", icon: <ClaudeMark /> },
   { name: "Codex CLI", command: "tcodex", icon: <CodexMark /> },
   { name: "Pi Code", command: "tpi", icon: <PiMark /> },
+  { name: "Grok Build", command: "tgrok", icon: <GrokMark /> },
 ];
 
 const heroProof = [
-  { value: "4", label: "coding agents" },
+  { value: "5", label: "coding agents" },
   { value: "1", label: "install command" },
   { value: "0", label: "config files rewritten" },
 ];
 
 const heroToolPositions = [
-  "sm:absolute sm:left-[8%] sm:top-[18%]",
-  "sm:absolute sm:right-[7%] sm:top-[18%]",
-  "sm:absolute sm:left-[10%] sm:bottom-[18%]",
-  "sm:absolute sm:right-[9%] sm:bottom-[18%]",
+  "sm:absolute sm:left-[8%] sm:top-[7%]",
+  "sm:absolute sm:right-[7%] sm:top-[7%]",
+  "sm:absolute sm:left-[7%] sm:bottom-[7%]",
+  "sm:absolute sm:left-1/2 sm:bottom-[7%] sm:-translate-x-1/2",
+  "sm:absolute sm:right-[7%] sm:bottom-[7%]",
 ];
 
 const explicitCommands = [
@@ -92,6 +107,7 @@ const explicitCommands = [
   "togetherlink claude",
   "togetherlink codex",
   "togetherlink pi",
+  "togetherlink grok",
 ];
 
 const codexAppCommands = [
@@ -241,7 +257,7 @@ function Home() {
           injects Together settings for that run only, so your normal tool configs stay clean.
         </p>
 
-        <div className="relative mx-auto mb-9 flex min-h-[250px] max-w-[760px] items-center justify-center overflow-hidden rounded-[24px] bg-[radial-gradient(circle_at_center,#f5f5f4_0,#ffffff_58%,#fafafa_100%)] px-5 py-8 shadow-[inset_0_0_0_1px_rgba(229,231,235,.9),0_1px_2px_rgba(10,10,10,.04)] max-[680px]:min-h-0 max-[680px]:flex-col max-[680px]:gap-5 max-[680px]:rounded-[18px]">
+        <div className="relative mx-auto mb-9 flex min-h-[360px] max-w-[760px] items-center justify-center overflow-hidden rounded-[24px] bg-[radial-gradient(circle_at_center,#f5f5f4_0,#ffffff_58%,#fafafa_100%)] px-5 py-8 shadow-[inset_0_0_0_1px_rgba(229,231,235,.9),0_1px_2px_rgba(10,10,10,.04)] max-[680px]:min-h-0 max-[680px]:flex-col max-[680px]:gap-5 max-[680px]:rounded-[18px]">
           <div className="pointer-events-none absolute inset-x-12 top-1/2 hidden h-px bg-[linear-gradient(90deg,transparent,#d1d5db,transparent)] sm:block" />
           <div className="pointer-events-none absolute inset-y-8 left-1/2 hidden w-px bg-[linear-gradient(180deg,transparent,#d1d5db,transparent)] sm:block" />
           <div className="relative z-10 flex size-[134px] flex-col items-center justify-center rounded-full bg-white text-ink shadow-[0_1px_2px_rgba(10,10,10,.04),0_24px_70px_-28px_rgba(10,10,10,.32),inset_0_0_0_1px_rgba(229,231,235,.96)]">
@@ -305,11 +321,11 @@ function Home() {
         </div>
       </section>
 
-      <section className="mt-[52px] mb-[72px] grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-3.5">
-        {features.map((feature) => (
+      <section className="mt-[52px] mb-[72px] grid gap-3.5 md:grid-cols-2 lg:grid-cols-6">
+        {features.map((feature, index) => (
           <article
             key={feature.title}
-            className="flex h-full flex-col rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)]"
+            className={`flex h-full flex-col rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)] lg:col-span-2 ${index === 3 ? "lg:col-start-2" : index === 4 ? "lg:col-start-4" : ""}`}
           >
             <div className="flex items-start justify-between gap-3.5">
               <span
@@ -435,18 +451,18 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, and <code>tpi</code>.
+          <code>tcodex</code>, <code>tgrok</code>, and <code>tpi</code>.
         </Step>
         <Step number="2">
-          Run <code>topencode</code>, <code>tclaude</code>, or <code>tcodex</code>, or{" "}
-          <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink chatgpt</code>{" "}
+          Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>, <code>tgrok</code>,
+          or <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink chatgpt</code>{" "}
           (alpha), and restore it with <code>togetherlink chatgpt --restore</code>. On first launch
           it asks once for your Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change
           your mind? Just stop using it - no agent config was saved, so your subscriptions and your
-          OpenCode/Claude Code/Codex CLI/Pi Code config are untouched.
+          OpenCode/Claude Code/Codex CLI/Grok Build/Pi Code config are untouched.
         </Step>
         <div className="border-t border-line pt-[18px]">
           <p className="m-0 text-[15px] leading-relaxed text-muted">
@@ -510,6 +526,14 @@ function Home() {
             rel="noopener noreferrer"
           >
             Codex CLI
+          </a>
+          <a
+            className="transition-colors hover:text-ink"
+            href="https://github.com/xai-org/grok-build"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Grok Build
           </a>
         </div>
         <p className="m-0 text-[13px]">{version}</p>
@@ -597,7 +621,7 @@ function HeroTool({
 }>) {
   return (
     <div
-      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5 max-[380px]:w-full`}
+      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5 max-[380px]:w-full ${index === heroTools.length - 1 ? "max-[680px]:col-span-2 max-[680px]:w-1/2 max-[680px]:justify-self-center max-[380px]:col-span-1 max-[380px]:w-full" : ""}`}
     >
       <span className="inline-flex size-[40px] shrink-0 items-center justify-center rounded-[10px] bg-code text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
         {icon}
@@ -684,6 +708,20 @@ function PiMark() {
         d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
       />
       <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
+    </svg>
+  );
+}
+
+function GrokMark() {
+  return (
+    <svg className="size-[27px]" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <circle cx="16" cy="16" r="8.5" stroke="currentColor" strokeWidth="3.2" />
+      <path
+        d="M8.25 23.75 23.75 8.25"
+        stroke="currentColor"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

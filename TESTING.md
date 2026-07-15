@@ -13,7 +13,7 @@ Use this loop:
 3. Run only that focused test and confirm it fails.
 4. Patch the smallest proxy or launcher boundary that makes the regression pass.
 5. Run the focused test again, then the relevant typecheck/build.
-6. Re-run a live smoke using the user's original pattern when the bug depends on real Codex, Claude, OpenCode, Pi, or Together behavior.
+6. Re-run a live smoke using the user's original pattern when the bug depends on real Codex, Claude, Grok, OpenCode, Pi, or Together behavior.
 
 For Codex proxy bugs, prefer `packages/tests/src/CodexProxyApi.test.ts` for deterministic protocol regressions before doing a live `tcodex -- exec ...` smoke. Examples of patterns that need regression coverage:
 
@@ -89,6 +89,28 @@ pnpm -F @togetherlink/cli exec togetherlink --main together-glm-5-2 claude
 pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k2-7-code claude
 pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
 ```
+
+### Grok Build
+
+Grok Build uses direct Together chat completions. `togetherlink grok` creates a temporary `GROK_HOME`, registers the curated Together model catalog, snapshots the user's non-model settings as a lower-priority layer, and links normal Grok sessions and user resources into the temporary home. The real `~/.grok/config.toml` and Grok authentication stay untouched.
+
+Install Grok from xAI, then launch it through Together:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+export TOGETHER_API_KEY="..."
+
+pnpm -F @togetherlink/cli exec togetherlink grok
+tgrok
+```
+
+Run Grok headlessly through Together:
+
+```bash
+tgrok --output-format streaming-json --disable-web-search --no-memory --no-subagents -p "Say hi"
+```
+
+Grok's native `web_search` auxiliary model requires an endpoint with Responses API web-search support, which Together chat completions does not currently provide. Use `--disable-web-search` for deterministic headless runs.
 
 ### Codex
 
@@ -320,7 +342,7 @@ try {
     clientInfo: {
       name: "togetherlink-debug",
       title: "Togetherlink Debug",
-      version: "0.5.26",
+      version: "0.6.0",
     },
     capabilities: {
       experimentalApi: true,
@@ -378,7 +400,7 @@ The Claude/Codex proxy and per-run Together settings are intentionally temporary
 
 ## Live Agent Gauntlet
 
-The executable live suite is in `packages/tests`. It uses Vitest, real Claude/Codex/OpenCode CLI processes, and real Together inference; it does not mock the model provider.
+The executable live suite is in `packages/tests`. It uses Vitest, real Claude/Codex/Grok/OpenCode/Pi CLI processes, and real Together inference; it does not mock the model provider.
 
 Build once, then run any harness test file:
 
@@ -387,6 +409,7 @@ node_modules/.bin/tsc -p packages/cli/tsconfig.json
 chmod +x packages/cli/dist/bin/togetherlink.js
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts
+packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Grok.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Pi.test.ts
 ```
@@ -402,6 +425,7 @@ Current scenarios cover:
 - Long-context pressure with a final checksum assertion.
 - Claude and Codex proxy hard context-limit retries with real Together requests that first exceed `input + max_tokens`, then succeed after the proxy lowers `max_tokens`.
 - Codex reasoning-stream usage (`reasoning_output_tokens > 0`).
+- Grok streaming, terminal tools, usage attribution, and curated model catalog behavior.
 - Lighter OpenCode coverage for basic streaming, bash tools, and context pressure.
 - Pi Code coverage for streaming JSON, bash tool calls, usage/cost accounting, and Together model-list vision metadata.
 
@@ -437,6 +461,7 @@ The workflow installs the real agent CLIs explicitly:
 
 ```bash
 npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai @earendil-works/pi-coding-agent
+curl -fsSL https://x.ai/cli/install.sh | bash
 ```
 
 This is intentionally a CI setup step, not something `togetherlink` does silently on a user's machine.

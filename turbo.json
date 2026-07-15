@@ -114,6 +114,25 @@
       ],
       "outputs": []
     },
+    "test:gauntlet:grok": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/Grok.test.ts",
+        "src/harnesses/grok.ts",
+        "src/assert.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/json-lines.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
+    },
     "test:gauntlet:pi": {
       "dependsOn": ["^build"],
       "inputs": [

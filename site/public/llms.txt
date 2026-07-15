@@ -1,8 +1,8 @@
 # togetherlink
 
-> Use Together AI models in the coding-agent CLIs you already run — OpenCode, Claude Code, Codex CLI, and Pi Code. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
+> Use Together AI models in the coding-agent CLIs you already run — OpenCode, Claude Code, Codex CLI, Grok Build, and Pi Code. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
 
-togetherlink is an Apache-2.0 CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tpi`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode and Pi Code it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
+togetherlink is an Apache-2.0 CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tgrok`, `tpi`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, Grok Build, and Pi Code it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
 
 This is the LLM-readable documentation file for the project. If you are an AI agent asked to install, configure, or use togetherlink (headless or interactive), read this file first. It covers installation, configuration, every command, the available models, headless/agentic usage patterns, how to keep the tool up to date, and the routing architecture.
 
@@ -15,7 +15,7 @@ This is the LLM-readable documentation file for the project. If you are an AI ag
 
 ## Install
 
-One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, and `tpi` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
+One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, and `tpi` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
 
 ```
 curl -fsSL https://togetherlink.vercel.app/install.sh | sh
@@ -24,7 +24,7 @@ curl -fsSL https://togetherlink.vercel.app/install.sh | sh
 After install, restart your shell (or run the `export PATH=...` line it prints) so the commands are on PATH. The install:
 
 - Downloads the self-contained JS bundle to `~/.togetherlink/bin/togetherlink.js`.
-- Writes shell wrappers (`togetherlink`, `tcodex`, `tclaude`, `topencode`, `tpi`) that run the bundle with `bun`.
+- Writes shell wrappers (`togetherlink`, `tcodex`, `tclaude`, `topencode`, `tgrok`, `tpi`) that run the bundle with `bun`.
 - Links them into a writable directory on your PATH.
 - Does NOT install the underlying agent CLIs. If a tool is missing, togetherlink prints its official install command and exits.
 
@@ -61,6 +61,7 @@ togetherlink help | --help | -h             # print this usage
 
 togetherlink codex [...]        # alias: tcodex   (Codex CLI)
 togetherlink claude [...]       # alias: tclaude  (Claude Code)
+togetherlink grok [...]         # alias: tgrok    (Grok Build)
 togetherlink pi [...]           # alias: tpi      (Pi Code)
 togetherlink opencode [...]     # alias: topencode (OpenCode)
 
@@ -98,7 +99,7 @@ togetherlink routes to a curated set of Together AI models. The default for Code
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.5.26):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.0):
 
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
@@ -121,7 +122,7 @@ Vision-capable models accept image attachments directly; text-only models (GLM 5
 
 ## Headless & agentic usage
 
-Both Claude Code and Codex CLI run headlessly (no TTY), so you can delegate code changes to an AI agent from scripts, CI, or another orchestrating agent. The patterns below were verified against the installed `tcodex` and `tclaude` (v0.5.26) and apply to both. They differ in the headless subcommand and in how permissions are handled; the stdin, banner, and model-selection behavior is identical.
+Claude Code, Codex CLI, and Grok Build run headlessly (no TTY), so you can delegate code changes to an AI agent from scripts, CI, or another orchestrating agent. Grok's headless form is `tgrok --output-format streaming-json --disable-web-search --no-memory --no-subagents -p "task"`.
 
 ### The working invocation pattern
 
@@ -132,7 +133,7 @@ Both wrappers spawn the agent pointed at the local Together proxy and pass your 
 If you are an orchestrating agent running inside Claude Code, Codex, or another CLI that has its own native subagent/delegation tool, prefer this pattern for non-trivial togetherlink work:
 
 1. Spawn a native subagent first.
-2. Tell that subagent to run the needed `togetherlink` command itself (`tcodex`, `tclaude`, `topencode`, or `tpi`) with a tight task, explicit files, `< /dev/null`, and the guardrails below.
+2. Tell that subagent to run the needed `togetherlink` command itself (`tcodex`, `tclaude`, `topencode`, `tgrok`, or `tpi`) with a tight task, explicit files, `< /dev/null`, and the guardrails below.
 3. Have the subagent wait for the delegated togetherlink run, inspect its result/diff, and report only the useful summary back to you.
 
 Do this instead of having the main orchestrating agent call `tcodex`/`tclaude` directly for every delegated edit. It keeps the main agent's context and inference budget focused on coordination/review, lets the native subagent own the details of launching and monitoring togetherlink, and works especially well when Claude Code delegates to a subagent that then uses Codex through `tcodex`.
@@ -212,11 +213,11 @@ You can check the installed version with `togetherlink --version` and compare it
 
 ## Architecture (how routing works)
 
-There are two harness families behind the four tools:
+There are two harness families behind the five tools:
 
 - **Proxied harnesses — Claude Code, Codex CLI.** `tclaude` and `tcodex` spawn a shared local daemon and route the agent's `/v1/*` traffic through it. The daemon translates the agent's native wire format (Anthropic Messages for Claude, OpenAI Responses for Codex) to Together's chat-completions API and back. Per run: it resolves the model, ensures the daemon, registers a session with your token, prints a banner, spawns the agent pointed at the local proxy, tracks cost, and deregisters on exit. Nothing is written to your real agent config — close it and your setup is exactly as it was.
 
-- **Spawned harnesses — OpenCode, Pi Code.** `topencode` and `tpi` spawn the agent binary directly. The binary talks to Together itself, using ephemeral config injected only for that launch (OpenCode) or a temporary `models.json` on disk (Pi). No daemon, no proxy.
+- **Spawned harnesses — OpenCode, Grok Build, Pi Code.** `topencode`, `tgrok`, and `tpi` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), an isolated temporary `GROK_HOME` with persistent session links (Grok), or a temporary `models.json` (Pi). No daemon, no proxy.
 
 The daemon is one persistent local process shared by all proxied sessions. If you ever need to stop it manually:
 
@@ -233,7 +234,8 @@ togetherlink daemon stop
 - **Web search fails in Claude Code** — set an Exa API key via `togetherlink configure`. Without it, searches return a clear "EXA_API_KEY not set" error.
 - **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
 - **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
-- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Pi Code setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
+- **Grok web search fails** — Grok's native `web_search` auxiliary model requires Responses API web-search support. Together's direct chat-completions route does not provide that xAI-specific surface; pass `--disable-web-search` for deterministic headless runs.
+- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Grok Build / Pi Code setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
 
 ## Links
 

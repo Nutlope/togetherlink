@@ -84,4 +84,12 @@ describe("harness invocation parsing", () => {
     expect(parsed.flags.main).toBe("moonshotai/Kimi-K2.7-Code");
     expect(parsed.flags.restore).toBe(true);
   });
+
+  test("forwards Grok headless flags to the native CLI", () => {
+    const parsed = parseArgs(["grok", "--", "--output-format", "streaming-json", "-p", "hi"]);
+    const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
+
+    expect(invocation.command).toBe("grok");
+    expect(invocation.flags.passthrough).toEqual(["--output-format", "streaming-json", "-p", "hi"]);
+  });
 });
