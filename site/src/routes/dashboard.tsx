@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useSession } from "@tanstack/react-start/server";
-import worldMap from "@svg-maps/world";
 import { ConvexHttpClient } from "convex/browser";
 import { useEffect, useState } from "react";
+import WorldMap, { regions, type ISOCode } from "react-svg-worldmap";
 import { api } from "../../convex/_generated/api";
 
 type DashboardSummary = Awaited<ReturnType<typeof fetchSummary>>;
@@ -13,10 +13,7 @@ type RecentSession = DashboardData["recentSessions"][number];
 type CountryLifetime = DashboardData["countryLifetime"][number];
 type MapMetric = "installs" | "sessions" | "tokens" | "cost";
 
-const WORLD_MAP = worldMap as {
-  viewBox: string;
-  locations: Array<{ id: string; name: string; path: string }>;
-};
+const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
 const RECENT_SESSIONS_LIMIT = 10;
 
@@ -398,18 +395,14 @@ function WorldUsageMap({
   countryCount: number;
 }) {
   const [metric, setMetric] = useState<MapMetric>("installs");
-  const [hoveredCountryCode, setHoveredCountryCode] = useState<string | null>(null);
-  const countriesByCode = new Map(
-    countries.map((country) => [country.countryCode.toLowerCase(), country]),
-  );
   const values = countries.map((country) => mapMetricValue(country, metric));
   const maxValue = Math.max(1, ...values);
-  const hoveredCountry = hoveredCountryCode
-    ? countriesByCode.get(hoveredCountryCode.toLowerCase())
-    : undefined;
-  const hoveredLocation = hoveredCountryCode
-    ? WORLD_MAP.locations.find((location) => location.id === hoveredCountryCode.toLowerCase())
-    : undefined;
+  const mapData = countries
+    .filter((country) => WORLD_MAP_COUNTRY_CODES.has(country.countryCode))
+    .map((country) => ({
+      country: country.countryCode.toLowerCase() as ISOCode,
+      value: mapMetricValue(country, metric),
+    }));
   const topCountries = [...countries]
     .filter((country) => country.countryCode !== "UNKNOWN")
     .sort((a, b) => mapMetricValue(b, metric) - mapMetricValue(a, metric))
@@ -444,51 +437,45 @@ function WorldUsageMap({
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_310px]">
         <div className="relative min-h-[360px] bg-[#fbfcfd] p-4">
           <div className="absolute left-4 top-4 z-10 rounded-md border border-line bg-white/95 px-3 py-2 shadow-sm">
-            <div className="text-xs text-muted">{hoveredLocation?.name ?? "Hover a country"}</div>
-            <div className="mt-0.5 font-mono text-sm font-medium text-ink">
-              {hoveredCountry
-                ? formatMapMetric(mapMetricValue(hoveredCountry, metric), metric)
-                : `Showing ${metric}`}
-            </div>
+            <div className="text-xs text-muted">Lifetime view</div>
+            <div className="mt-0.5 font-mono text-sm font-medium capitalize text-ink">{metric}</div>
           </div>
-          <svg
-            viewBox={WORLD_MAP.viewBox}
-            role="img"
-            aria-label={`World map colored by lifetime ${metric}`}
-            className="h-full min-h-[330px] w-full"
-          >
-            {WORLD_MAP.locations.map((location) => {
-              const country = countriesByCode.get(location.id);
-              const value = country ? mapMetricValue(country, metric) : 0;
-              return (
-                <path
-                  key={location.id}
-                  d={location.path}
-                  fill={mapFill(value, maxValue)}
-                  stroke="#ffffff"
-                  strokeWidth={0.55}
-                  className="cursor-default transition-opacity hover:opacity-75"
-                  onMouseEnter={() => setHoveredCountryCode(location.id)}
-                  onMouseLeave={() => setHoveredCountryCode(null)}
-                >
-                  <title>
-                    {location.name}: {formatMapMetric(value, metric)}
-                  </title>
-                </path>
-              );
-            })}
-          </svg>
+          <div className="dashboard-world-map flex min-h-[330px] items-center justify-center pt-8">
+            <WorldMap
+              title={`World map colored by lifetime ${metric}`}
+              data={mapData}
+              size="responsive"
+              color="#1d4ed8"
+              backgroundColor="#fbfcfd"
+              borderColor="#ffffff"
+              strokeOpacity={1}
+              styleFunction={(context) => ({
+                fill: mapFill(
+                  typeof context.countryValue === "number" ? context.countryValue : 0,
+                  maxValue,
+                ),
+                stroke: "#ffffff",
+                strokeWidth: 0.6,
+                cursor: "default",
+              })}
+              tooltipTextFunction={(context) =>
+                `${context.countryName}: ${formatMapMetric(
+                  typeof context.countryValue === "number" ? context.countryValue : 0,
+                  metric,
+                )}`
+              }
+            />
+          </div>
           <div className="absolute bottom-3 right-4 text-[10px] text-faint">
-            Map geometry:{" "}
+            Map:{" "}
             <a
-              href="https://www.npmjs.com/package/@svg-maps/world"
+              href="https://www.npmjs.com/package/react-svg-worldmap"
               target="_blank"
               rel="noreferrer"
               className="underline underline-offset-2"
             >
-              @svg-maps/world
-            </a>{" "}
-            (CC BY 4.0)
+              react-svg-worldmap
+            </a>
           </div>
         </div>
 
