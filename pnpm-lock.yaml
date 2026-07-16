@@ -52,6 +52,9 @@ importers:
 
   site:
     dependencies:
+      '@svg-maps/world':
+        specifier: 2.0.0
+        version: 2.0.0
       '@tanstack/react-router':
         specifier: ^1.132.0
         version: 1.170.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -916,6 +919,9 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@svg-maps/world@2.0.0':
+    resolution: {integrity: sha512-VmYYnyygJ5Zhr48xPqukFBoq4aCBgVNIjBzqBnWKXSdHhrRK3pntdvbCa8lMsxwVCFzEw9a+smIMEGI2sC1xcQ==}
 
   '@tailwindcss/node@4.3.1':
     resolution: {integrity: sha512-6NDaqRoAMSXD1mr/RXu0HBvNE9a2n5tHPsxu9XHLws8o4Twes5rBM2205SUUiJ9goAtadrN6xTGX0UDEwp/N4A==}
@@ -2714,6 +2720,8 @@ snapshots:
     optional: true
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@svg-maps/world@2.0.0': {}
 
   '@tailwindcss/node@4.3.1':
     dependencies:
