@@ -6,7 +6,9 @@ import { GLM_5_2, SELECTABLE_MODELS } from "@togetherlink/models";
 import {
   buildGrokConfigToml,
   grokArgsWithoutTogetherlinkOverrides,
+  grokArgsWithTogetherlinkIdentity,
   grokModelAlias,
+  GROK_IDENTITY_RULE,
   GROK_VISION_MODEL_ALIAS,
   populateTemporaryGrokHome,
 } from "../../cli/src/lib/grok/core.js";
@@ -46,6 +48,24 @@ describe("Grok harness", () => {
         "hello",
       ]),
     ).toEqual(["-p", "hello"]);
+  });
+
+  test("appends Togetherlink identity while preserving user prompt rules", () => {
+    expect(
+      grokArgsWithTogetherlinkIdentity(["--rules", "Always use pnpm.", "-p", "hello"]),
+    ).toEqual(["--rules", `${GROK_IDENTITY_RULE}\n\nAlways use pnpm.`, "-p", "hello"]);
+
+    expect(
+      grokArgsWithTogetherlinkIdentity([
+        "--system-prompt-override=You are a coding agent.",
+        "-p",
+        "hello",
+      ]),
+    ).toEqual([
+      `--system-prompt-override=You are a coding agent.\n\n${GROK_IDENTITY_RULE}`,
+      "-p",
+      "hello",
+    ]);
   });
 
   test("isolates config while preserving sessions and user settings", () => {

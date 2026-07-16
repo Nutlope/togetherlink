@@ -92,7 +92,7 @@ pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
 
 ### Grok Build
 
-Grok Build uses direct Together chat completions. `togetherlink grok` creates a temporary `GROK_HOME`, registers the curated Together model catalog, snapshots the user's non-model settings as a lower-priority layer, and links normal Grok sessions and user resources into the temporary home. The real `~/.grok/config.toml` and Grok authentication stay untouched.
+Grok Build uses direct Together chat completions. `togetherlink grok` creates a temporary `GROK_HOME`, registers the curated Together model catalog, snapshots the user's non-model settings as a lower-priority layer, and links normal Grok sessions and user resources into the temporary home. It also appends a compact identity rule through Grok's native `--rules` flag so the Together model does not claim to be an xAI model; user-supplied rules are preserved. The real `~/.grok/config.toml` and Grok authentication stay untouched.
 
 Install Grok from xAI, then launch it through Together:
 

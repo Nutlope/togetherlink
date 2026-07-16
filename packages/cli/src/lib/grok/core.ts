@@ -5,6 +5,8 @@ import type { ModelDefinition } from "@togetherlink/models";
 
 export const GROK_API_KEY_ENV = "TOGETHER_API_KEY";
 export const GROK_MAX_COMPLETION_TOKENS = 8192;
+export const GROK_IDENTITY_RULE =
+  "You are a Together AI model routed through togetherlink, not an xAI Grok model. Grok Build is the coding harness you are operating inside.";
 
 const GROK_PERSISTENT_DIRECTORIES = [
   "sessions",
@@ -122,8 +124,61 @@ export function grokArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
   return sanitized;
 }
 
+export function grokArgsWithTogetherlinkIdentity(args: string[]): string[] {
+  const sanitized = grokArgsWithoutTogetherlinkOverrides(args);
+  const passthrough: string[] = [];
+  const userRules: string[] = [];
+  let systemPromptOverride: string | undefined;
+
+  for (let index = 0; index < sanitized.length; index += 1) {
+    const arg = sanitized[index];
+    if (arg === undefined) continue;
+
+    if (arg === "--rules" || arg === "--append-system-prompt") {
+      const value = sanitized[index + 1];
+      if (value !== undefined) {
+        userRules.push(value);
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--rules=") || arg.startsWith("--append-system-prompt=")) {
+      userRules.push(arg.slice(arg.indexOf("=") + 1));
+      continue;
+    }
+
+    if (arg === "--system-prompt-override" || arg === "--system-prompt") {
+      const value = sanitized[index + 1];
+      if (value !== undefined) {
+        systemPromptOverride = value;
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--system-prompt-override=") || arg.startsWith("--system-prompt=")) {
+      systemPromptOverride = arg.slice(arg.indexOf("=") + 1);
+      continue;
+    }
+
+    passthrough.push(arg);
+  }
+
+  if (systemPromptOverride !== undefined) {
+    return [
+      `--system-prompt-override=${joinPromptRules(systemPromptOverride, GROK_IDENTITY_RULE)}`,
+      ...passthrough,
+    ];
+  }
+
+  return ["--rules", joinPromptRules(GROK_IDENTITY_RULE, ...userRules), ...passthrough];
+}
+
 function linkDirectory(source: string, destination: string): void {
   symlinkSync(source, destination, process.platform === "win32" ? "junction" : undefined);
+}
+
+function joinPromptRules(...rules: string[]): string {
+  return rules.filter((rule) => rule.trim().length > 0).join("\n\n");
 }
 
 function tomlString(value: string): string {

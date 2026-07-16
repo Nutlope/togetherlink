@@ -6,7 +6,7 @@ import { resolveCodexModel } from "../codex/defaults.js";
 import {
   GROK_API_KEY_ENV,
   GROK_VISION_MODEL_ALIAS,
-  grokArgsWithoutTogetherlinkOverrides,
+  grokArgsWithTogetherlinkIdentity,
   grokModelAlias,
   populateTemporaryGrokHome,
 } from "../grok/core.js";
@@ -38,7 +38,7 @@ export default defineHarness({
     const args = [
       "--model",
       selectedAlias,
-      ...grokArgsWithoutTogetherlinkOverrides(ctx.passthrough ?? []),
+      ...grokArgsWithTogetherlinkIdentity(ctx.passthrough ?? []),
     ];
     const env: NodeJS.ProcessEnv = {
       ...process.env,

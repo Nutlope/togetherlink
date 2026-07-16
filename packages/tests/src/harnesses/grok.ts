@@ -87,6 +87,41 @@ export function grokScenarios(): Scenario[] {
       },
     },
     {
+      name: "grok: Together identity rule",
+      run: async (context) => {
+        const result = await runCommand(
+          context,
+          "grok-together-identity",
+          process.execPath,
+          [
+            context.cliBin,
+            "grok",
+            "--",
+            "--output-format",
+            "streaming-json",
+            "--disable-web-search",
+            "--no-memory",
+            "--no-subagents",
+            "--max-turns",
+            "1",
+            "-p",
+            "In one short sentence, identify who built you and which model provider is serving this session.",
+          ],
+          {
+            env: { HOME: path.join(context.tmpDir, "grok-identity-home"), GROK_HOME: "" },
+            timeoutMs: 180_000,
+          },
+        );
+        assert(result.status === 0, `exit ${result.status}`);
+        const streamedText = grokEvents(result.stdout)
+          .filter((event) => event.type === "text")
+          .map((event) => String(event.data ?? ""))
+          .join("");
+        assert(/Together AI/i.test(streamedText), "missing Together AI identity");
+        assert(!/\bxAI\b/i.test(streamedText), "incorrectly claimed xAI model identity");
+      },
+    },
+    {
       name: "grok: curated Together model catalog",
       run: async (context) => {
         const result = await runCommand(
