@@ -14,7 +14,8 @@
     "nitro": "3.0.260610-beta",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-svg-worldmap": "2.0.2"
+    "react-svg-worldmap": "2.0.2",
+    "tslib": "2.8.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
