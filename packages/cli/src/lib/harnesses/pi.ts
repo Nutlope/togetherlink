@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
+import { runTrackedSpawnedSession } from "../spawned-session.js";
 import { resolveTogetherApiKey } from "../together-core.js";
 
 const PI_PROVIDER_ID = "together";
@@ -115,25 +115,22 @@ export default defineHarness({
     }
 
     process.stderr.write(`togetherlink ▸ Launching Pi Code with Together AI.\n`);
-    const child = spawn("pi", args, {
-      env: {
-        ...process.env,
-        PI_CODING_AGENT_DIR: agentDir,
-        PI_CODING_AGENT_SESSION_DIR: sessionDir,
-        TOGETHER_API_KEY: apiKey,
+    const result = await runTrackedSpawnedSession({
+      agent: HARNESS.PI,
+      modelId: selectedModel.id,
+      binary: "pi",
+      args,
+      options: {
+        env: {
+          ...process.env,
+          PI_CODING_AGENT_DIR: agentDir,
+          PI_CODING_AGENT_SESSION_DIR: sessionDir,
+          TOGETHER_API_KEY: apiKey,
+        },
+        stdio: "inherit",
       },
-      stdio: "inherit",
+      home: ctx.home,
     });
-
-    const result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null }>(
-      (resolve) => {
-        child.on("error", (err) => {
-          process.stderr.write(`togetherlink ▸ Failed to launch pi: ${err.message}.\n`);
-          resolve({ status: 1, signal: null });
-        });
-        child.on("exit", (status, signal) => resolve({ status, signal }));
-      },
-    );
 
     try {
       rmSync(agentDir, { recursive: true, force: true });

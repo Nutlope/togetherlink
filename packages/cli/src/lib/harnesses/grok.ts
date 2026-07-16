@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +11,7 @@ import {
 } from "../grok/core.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
+import { runTrackedSpawnedSession } from "../spawned-session.js";
 import { resolveTogetherApiKey } from "../together-core.js";
 
 export default defineHarness({
@@ -61,16 +61,14 @@ export default defineHarness({
 
     process.stderr.write("togetherlink ▸ Launching Grok Build with Together AI.\n");
     try {
-      const child = spawn("grok", args, { env, stdio: "inherit" });
-      const result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null }>(
-        (resolve) => {
-          child.on("error", (error) => {
-            process.stderr.write(`togetherlink ▸ Failed to launch grok: ${error.message}.\n`);
-            resolve({ status: 1, signal: null });
-          });
-          child.on("exit", (status, signal) => resolve({ status, signal }));
-        },
-      );
+      const result = await runTrackedSpawnedSession({
+        agent: HARNESS.GROK,
+        modelId: selectedModel.id,
+        binary: "grok",
+        args,
+        options: { env, stdio: "inherit" },
+        home: ctx.home,
+      });
       process.exitCode = typeof result.status === "number" ? result.status : result.signal ? 1 : 0;
     } finally {
       rmSync(temporaryHome, { recursive: true, force: true });
