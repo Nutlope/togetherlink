@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useSession } from "@tanstack/react-start/server";
 import { ConvexHttpClient } from "convex/browser";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import WorldMap, { regions, type ISOCode } from "react-svg-worldmap";
 import { api } from "../../convex/_generated/api";
 
@@ -16,6 +16,12 @@ type MapMetric = "installs" | "sessions" | "tokens" | "cost";
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
 const RECENT_SESSIONS_LIMIT = 10;
+const EMPTY_USAGE = {
+  promptTokens: 0,
+  cachedTokens: 0,
+  completionTokens: 0,
+  costUsd: 0,
+};
 
 async function dashboardSession() {
   return useSession<{ authed?: boolean }>({
@@ -38,6 +44,41 @@ async function fetchSummary() {
   }
   const client = new ConvexHttpClient(url);
   return client.query(api.analytics.getDashboardSummary, { days: 30 });
+}
+
+function normalizeDashboardData(value: unknown): DashboardSummary {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Partial<DashboardData>;
+  return {
+    overview: {
+      installs24h: data.overview?.installs24h ?? 0,
+      installsLifetime: data.overview?.installsLifetime ?? 0,
+      uniqueInstallsLifetime: data.overview?.uniqueInstallsLifetime ?? 0,
+      activeInstalls24h: data.overview?.activeInstalls24h ?? 0,
+      activeInstallsLifetime: data.overview?.activeInstallsLifetime ?? 0,
+      sessions24h: data.overview?.sessions24h ?? 0,
+      sessionsLifetime: data.overview?.sessionsLifetime ?? 0,
+      countries24h: data.overview?.countries24h ?? 0,
+      countriesLifetime: data.overview?.countriesLifetime ?? 0,
+      usage24h: data.overview?.usage24h ?? EMPTY_USAGE,
+      usageLifetime: data.overview?.usageLifetime ?? EMPTY_USAGE,
+    },
+    countryLifetime: data.countryLifetime ?? [],
+    installsPerDay: data.installsPerDay ?? [],
+    activeInstallsPerDay: data.activeInstallsPerDay ?? [],
+    sessionsStartedPerDay: data.sessionsStartedPerDay ?? [],
+    sessionsEndedPerDay: data.sessionsEndedPerDay ?? [],
+    tokenUsageByAgent: data.tokenUsageByAgent ?? [],
+    tokenUsageByModel: data.tokenUsageByModel ?? [],
+    osDistribution: data.osDistribution ?? [],
+    countryDistribution: data.countryDistribution ?? [],
+    versionDistribution: data.versionDistribution ?? [],
+    installSummaries: data.installSummaries ?? [],
+    installDaily: data.installDaily ?? [],
+    recentSessions: data.recentSessions ?? [],
+    failedSessionRate: data.failedSessionRate ?? 0,
+    totalEvents: data.totalEvents ?? 0,
+  };
 }
 
 const checkDashboardAuth = createServerFn({ method: "GET" }).handler(async () => {
@@ -108,7 +149,7 @@ function DashboardRoute() {
       setRefreshing(true);
     }
     try {
-      const result = await getDashboardData();
+      const result = normalizeDashboardData(await getDashboardData());
       setData(result);
       setLastUpdated(Date.now());
       setError(null);
@@ -522,6 +563,8 @@ function InstallPicker({
   onSelectedInstallIdChange: (installId: string) => void;
   onNicknameSave: (installId: string, nickname: string) => Promise<void>;
 }) {
+  const [editingInstall, setEditingInstall] = useState<InstallSummary | null>(null);
+
   return (
     <section className="md:col-span-2 rounded-lg border border-line-strong p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -548,11 +591,10 @@ function InstallPicker({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
+        <table className="w-full min-w-[680px] border-separate border-spacing-0 text-left text-sm">
           <thead>
             <tr className="text-xs uppercase text-faint">
-              <th className="border-b border-line py-2 font-medium">Name</th>
-              <th className="border-b border-line py-2 font-medium">Install</th>
+              <th className="border-b border-line py-2 font-medium">Person / install</th>
               <th className="border-b border-line py-2 font-medium">Last seen</th>
               <th className="border-b border-line py-2 font-medium">Sessions</th>
               <th className="border-b border-line py-2 font-medium">Cost</th>
@@ -568,16 +610,11 @@ function InstallPicker({
                 className={selectedInstallId === install.installId ? "bg-code" : undefined}
               >
                 <td className="border-b border-line py-2 pr-4">
-                  <NicknameField install={install} onSave={onNicknameSave} />
-                </td>
-                <td className="border-b border-line py-2 pr-4">
-                  <button
-                    type="button"
-                    onClick={() => onSelectedInstallIdChange(install.installId)}
-                    className="font-mono text-ink underline-offset-2 hover:underline"
-                  >
-                    {shortInstallId(install.installId)}
-                  </button>
+                  <PersonInstallCell
+                    install={install}
+                    onSelect={() => onSelectedInstallIdChange(install.installId)}
+                    onEdit={() => setEditingInstall(install)}
+                  />
                 </td>
                 <td className="border-b border-line py-2 pr-4 font-mono text-muted">
                   {formatDateTime(install.lastSeenAt)}
@@ -600,60 +637,175 @@ function InstallPicker({
           </tbody>
         </table>
       </div>
+
+      {editingInstall && (
+        <EditInstallNameDialog
+          install={editingInstall}
+          onClose={() => setEditingInstall(null)}
+          onSave={async (nickname) => {
+            await onNicknameSave(editingInstall.installId, nickname);
+            setEditingInstall(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
-function NicknameField({
+function PersonInstallCell({
   install,
+  onSelect,
+  onEdit,
+}: {
+  install: InstallSummary;
+  onSelect: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="flex min-w-56 items-center gap-2">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="min-w-0 flex-1 text-left active:scale-[0.96]"
+        title={install.installId}
+      >
+        <span
+          className={`block truncate text-sm text-ink ${install.nickname ? "font-medium" : "font-mono"}`}
+        >
+          {install.nickname ?? shortInstallId(install.installId)}
+        </span>
+        {install.nickname && (
+          <span className="mt-0.5 block truncate font-mono text-xs text-muted">
+            {shortInstallId(install.installId)}
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={`Edit name for ${install.nickname ?? shortInstallId(install.installId)}`}
+        title="Edit name"
+        className="flex size-10 shrink-0 items-center justify-center rounded-md text-faint transition-[color,background-color,scale] duration-150 ease-out hover:bg-code hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96]"
+      >
+        <PencilIcon />
+      </button>
+    </div>
+  );
+}
+
+function EditInstallNameDialog({
+  install,
+  onClose,
   onSave,
 }: {
   install: InstallSummary;
-  onSave: (installId: string, nickname: string) => Promise<void>;
+  onClose: () => void;
+  onSave: (nickname: string) => Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [nickname, setNickname] = useState(install.nickname ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setNickname(install.nickname ?? "");
-  }, [install.installId, install.nickname]);
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
 
   const hasChanges = nickname.trim() !== (install.nickname ?? "");
 
   return (
-    <form
-      className="flex min-w-64 items-center gap-2"
-      onSubmit={async (event) => {
+    <dialog
+      ref={dialogRef}
+      onCancel={(event) => {
         event.preventDefault();
-        setSaving(true);
-        setError(null);
-        try {
-          await onSave(install.installId, nickname);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
-        } finally {
-          setSaving(false);
-        }
+        if (!saving) onClose();
       }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose();
+      }}
+      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-xl bg-transparent p-0 backdrop:bg-black/25 backdrop:backdrop-blur-[1px]"
     >
-      <div className="min-w-0 flex-1">
-        <input
-          value={nickname}
-          onChange={(event) => setNickname(event.target.value)}
-          placeholder="Add name"
-          className="w-full rounded-md border border-line-strong bg-white px-2 py-1 font-mono text-sm text-ink outline-none focus:border-ink"
-        />
-        {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
-      </div>
-      <button
-        type="submit"
-        disabled={saving || !hasChanges}
-        className="rounded-md border border-line-strong px-2 py-1 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      <form
+        className="rounded-xl bg-white p-5 shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_12px_32px_rgba(0,0,0,0.16)]"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setSaving(true);
+          setError(null);
+          try {
+            await onSave(nickname);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setSaving(false);
+          }
+        }}
       >
-        {saving ? "Saving" : "Save"}
-      </button>
-    </form>
+        <div>
+          <h3 className="text-base font-semibold text-ink">Edit person name</h3>
+          <p className="mt-1 text-sm text-muted">
+            Add a recognizable name for this anonymous install.
+          </p>
+        </div>
+
+        <label className="mt-5 block">
+          <span className="mb-1.5 block text-xs font-medium text-muted">Name</span>
+          <input
+            value={nickname}
+            onChange={(event) => setNickname(event.target.value)}
+            placeholder="Customer or person name"
+            className="w-full rounded-lg border border-line-strong bg-white px-3 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink focus:shadow-[0_0_0_3px_rgba(0,0,0,0.08)]"
+            autoFocus
+          />
+        </label>
+
+        <div className="mt-2 font-mono text-xs text-faint" title={install.installId}>
+          Install {shortInstallId(install.installId)}
+        </div>
+        <p className="mt-1 text-xs text-muted">Leave the name blank to show the install ID.</p>
+        {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="min-h-10 rounded-lg px-3.5 text-sm font-medium text-muted transition-[background-color,color,scale] duration-150 hover:bg-code hover:text-ink active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || !hasChanges}
+            className="min-h-10 rounded-lg bg-ink px-4 text-sm font-medium text-white transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save name"}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className="size-4"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4.25 13.75 3.5 16.5l2.75-.75L14.7 7.3a1.75 1.75 0 0 0 0-2.48l-.52-.52a1.75 1.75 0 0 0-2.48 0L4.25 13.75Z" />
+      <path d="m10.75 5.25 4 4" />
+    </svg>
   );
 }
 

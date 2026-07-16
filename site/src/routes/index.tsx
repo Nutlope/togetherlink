@@ -81,8 +81,9 @@ const features = [
 ];
 
 const heroTools = [
-  { name: "OpenCode", command: "topencode", icon: <OpenCodeMark /> },
   { name: "Claude Code", command: "tclaude", icon: <ClaudeMark /> },
+  { name: "ChatGPT App", command: "chatgpt", icon: <ChatGPTHeroMark /> },
+  { name: "OpenCode", command: "topencode", icon: <OpenCodeMark /> },
   { name: "Codex CLI", command: "tcodex", icon: <CodexMark /> },
   { name: "Pi Code", command: "tpi", icon: <PiMark /> },
   { name: "Grok Build", command: "tgrok", icon: <GrokMark /> },
@@ -95,11 +96,12 @@ const heroProof = [
 ];
 
 const heroToolPositions = [
-  "sm:absolute sm:left-[8%] sm:top-[7%]",
-  "sm:absolute sm:right-[7%] sm:top-[7%]",
-  "sm:absolute sm:left-[7%] sm:bottom-[7%]",
+  "sm:absolute sm:left-[5%] sm:top-[7%]",
+  "sm:absolute sm:left-1/2 sm:top-[7%] sm:-translate-x-1/2",
+  "sm:absolute sm:right-[5%] sm:top-[7%]",
+  "sm:absolute sm:left-[5%] sm:bottom-[7%]",
   "sm:absolute sm:left-1/2 sm:bottom-[7%] sm:-translate-x-1/2",
-  "sm:absolute sm:right-[7%] sm:bottom-[7%]",
+  "sm:absolute sm:right-[5%] sm:bottom-[7%]",
 ];
 
 const explicitCommands = [
@@ -621,7 +623,7 @@ function HeroTool({
 }>) {
   return (
     <div
-      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5 max-[380px]:w-full ${index === heroTools.length - 1 ? "max-[680px]:col-span-2 max-[680px]:w-1/2 max-[680px]:justify-self-center max-[380px]:col-span-1 max-[380px]:w-full" : ""}`}
+      className={`${heroToolPositions[index]} z-10 flex min-w-[170px] items-center gap-3 rounded-[16px] bg-white px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(10,10,10,.05),0_18px_50px_-30px_rgba(10,10,10,.34),inset_0_0_0_1px_rgba(229,231,235,.95)] transition-transform duration-200 ease-out hover:-translate-y-0.5 max-[680px]:min-w-0 max-[680px]:gap-2.5 max-[680px]:rounded-[12px] max-[680px]:px-3 max-[680px]:py-2.5 max-[380px]:w-full`}
     >
       <span className="inline-flex size-[40px] shrink-0 items-center justify-center rounded-[10px] bg-code text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
         {icon}
@@ -640,6 +642,17 @@ function OpenCodeMark() {
       <path d="M180 240H60V120H180V240Z" fill="#CFCECD" />
       <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#211E1E" />
     </svg>
+  );
+}
+
+function ChatGPTHeroMark() {
+  return (
+    <img
+      className="block size-[30px] rounded-[8px] outline -outline-offset-1 outline-black/10"
+      src="/chatgpt-icon.png"
+      alt=""
+      aria-hidden="true"
+    />
   );
 }
 
