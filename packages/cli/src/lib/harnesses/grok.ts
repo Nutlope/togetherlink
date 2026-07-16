@@ -45,7 +45,6 @@ export default defineHarness({
       GROK_HOME: temporaryHome,
       [GROK_API_KEY_ENV]: apiKey,
       GROK_DEFAULT_MODEL: selectedAlias,
-      GROK_WEB_SEARCH_MODEL: selectedAlias,
       GROK_SESSION_SUMMARY_MODEL: selectedAlias,
       GROK_IMAGE_DESCRIPTION_MODEL: GROK_VISION_MODEL_ALIAS,
       GROK_PROMPT_SUGGESTIONS_MODEL: selectedAlias,

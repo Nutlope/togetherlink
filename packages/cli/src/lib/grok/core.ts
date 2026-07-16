@@ -40,7 +40,6 @@ export function buildGrokConfigToml(selectedModel: ModelDefinition): string {
     "",
     "[models]",
     `default = ${tomlString(selectedAlias)}`,
-    `web_search = ${tomlString(selectedAlias)}`,
     `session_summary = ${tomlString(selectedAlias)}`,
     `image_description = ${tomlString(GROK_VISION_MODEL_ALIAS)}`,
     "",
@@ -134,6 +133,10 @@ export function grokArgsWithTogetherlinkIdentity(args: string[]): string[] {
     const arg = sanitized[index];
     if (arg === undefined) continue;
 
+    if (arg === "--disable-web-search") {
+      continue;
+    }
+
     if (arg === "--rules" || arg === "--append-system-prompt") {
       const value = sanitized[index + 1];
       if (value !== undefined) {
@@ -165,12 +168,18 @@ export function grokArgsWithTogetherlinkIdentity(args: string[]): string[] {
 
   if (systemPromptOverride !== undefined) {
     return [
+      "--disable-web-search",
       `--system-prompt-override=${joinPromptRules(systemPromptOverride, GROK_IDENTITY_RULE)}`,
       ...passthrough,
     ];
   }
 
-  return ["--rules", joinPromptRules(GROK_IDENTITY_RULE, ...userRules), ...passthrough];
+  return [
+    "--disable-web-search",
+    "--rules",
+    joinPromptRules(GROK_IDENTITY_RULE, ...userRules),
+    ...passthrough,
+  ];
 }
 
 function linkDirectory(source: string, destination: string): void {

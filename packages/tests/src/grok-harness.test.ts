@@ -32,6 +32,7 @@ describe("Grok harness", () => {
     expect(config).toContain(`default = "${grokModelAlias(GLM_5_2)}"`);
     expect(config).toContain(`session_summary = "${grokModelAlias(GLM_5_2)}"`);
     expect(config).toContain(`image_description = "${GROK_VISION_MODEL_ALIAS}"`);
+    expect(config).not.toContain("web_search =");
     expect(config).toContain('base_url = "https://api.together.ai/v1"');
     expect(config).toContain('env_key = "TOGETHER_API_KEY"');
     expect(config).toContain('api_backend = "chat_completions"');
@@ -59,7 +60,13 @@ describe("Grok harness", () => {
   test("appends Togetherlink identity while preserving user prompt rules", () => {
     expect(
       grokArgsWithTogetherlinkIdentity(["--rules", "Always use pnpm.", "-p", "hello"]),
-    ).toEqual(["--rules", `${GROK_IDENTITY_RULE}\n\nAlways use pnpm.`, "-p", "hello"]);
+    ).toEqual([
+      "--disable-web-search",
+      "--rules",
+      `${GROK_IDENTITY_RULE}\n\nAlways use pnpm.`,
+      "-p",
+      "hello",
+    ]);
 
     expect(
       grokArgsWithTogetherlinkIdentity([
@@ -68,7 +75,18 @@ describe("Grok harness", () => {
         "hello",
       ]),
     ).toEqual([
+      "--disable-web-search",
       `--system-prompt-override=You are a coding agent.\n\n${GROK_IDENTITY_RULE}`,
+      "-p",
+      "hello",
+    ]);
+  });
+
+  test("disables Grok native web search once even when the user passes the flag", () => {
+    expect(grokArgsWithTogetherlinkIdentity(["--disable-web-search", "-p", "hello"])).toEqual([
+      "--disable-web-search",
+      "--rules",
+      GROK_IDENTITY_RULE,
       "-p",
       "hello",
     ]);
