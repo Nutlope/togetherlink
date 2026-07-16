@@ -36,6 +36,22 @@ describe("telemetry", () => {
     });
   });
 
+  test("does not send analytics or create install state when telemetry is disabled", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("GITHUB_ACTIONS", "false");
+    vi.stubEnv("TOGETHERLINK_TELEMETRY_DISABLED", "1");
+
+    await sendTelemetryEvent({ event: "cli_started", agent: "codex" }, tmpDir);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(
+      readFile(path.join(tmpDir, ".togetherlink", "install-id"), "utf8"),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   test("context_trim telemetry event is POSTed with the structured trim payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);

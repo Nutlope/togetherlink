@@ -39,6 +39,14 @@ If no Together API key is configured yet, an interactive launch automatically ru
 
 If the underlying agent CLI is missing, togetherlink does not install it automatically. It prints the official install command and docs link for the selected tool, then exits.
 
+To disable TogetherLink's anonymous analytics, set:
+
+```bash
+export TOGETHERLINK_TELEMETRY_DISABLED=1
+```
+
+When set, TogetherLink does not create analytics install state or send requests to its telemetry endpoint.
+
 The compact CLI guide is:
 
 ```text

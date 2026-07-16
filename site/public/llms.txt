@@ -49,6 +49,14 @@ togetherlink configure        # stores it (skip prompts with the env present)
 
 The API key is required to actually route traffic; the installer lets you skip it (press Enter) and add it later.
 
+To disable TogetherLink's anonymous analytics:
+
+```
+export TOGETHERLINK_TELEMETRY_DISABLED=1
+```
+
+When set, TogetherLink does not create analytics install state or send requests to its telemetry endpoint.
+
 ## Commands
 
 Running `togetherlink` with no arguments opens an interactive launcher (requires a TTY) that lets you pick a tool. Run a tool directly with a subcommand:
@@ -99,7 +107,7 @@ togetherlink routes to a curated set of Together AI models. The default for Code
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.0):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.1):
 
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"

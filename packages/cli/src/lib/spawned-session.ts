@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import type { SpawnOptions } from "node:child_process";
-import { getInstallId, randomSessionId, sendTelemetryEvent } from "./telemetry.js";
+import {
+  getInstallId,
+  randomSessionId,
+  sendTelemetryEvent,
+  telemetryDisabledByEnvironment,
+} from "./telemetry.js";
 
 export type SpawnedSessionAgent = "grok" | "opencode" | "pi";
 
@@ -32,7 +37,7 @@ export async function runTrackedSpawnedSession(
 
   // Create the anonymous install id before firing the two requests so even a
   // very short child process cannot race two first-use id writes.
-  if (process.env.GITHUB_ACTIONS !== "true") {
+  if (!telemetryDisabledByEnvironment()) {
     await getInstallId(spec.home);
   }
 

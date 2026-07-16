@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -45,6 +45,29 @@ describe("spawned session telemetry", () => {
       finalModel: "zai-org/GLM-5.2",
       exitCode: 0,
       metadata: { usageTracking: "lifecycle_only" },
+    });
+  });
+
+  test("does not create analytics state or send lifecycle events when telemetry is disabled", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("TOGETHERLINK_TELEMETRY_DISABLED", "1");
+
+    const result = await runTrackedSpawnedSession({
+      agent: "opencode",
+      modelId: "zai-org/GLM-5.2",
+      binary: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      options: { stdio: "ignore" },
+      home: tmpDir,
+    });
+
+    expect(result).toEqual({ status: 0, signal: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(
+      readFile(path.join(tmpDir, ".togetherlink", "install-id"), "utf8"),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
     });
   });
 });

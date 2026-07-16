@@ -80,8 +80,10 @@ function installIdPath(home = os.homedir()): string {
   return path.join(togetherlinkHome(home), "install-id");
 }
 
-function telemetryDisabledByEnvironment(): boolean {
-  return process.env.GITHUB_ACTIONS === "true";
+export function telemetryDisabledByEnvironment(): boolean {
+  return (
+    Boolean(process.env.TOGETHERLINK_TELEMETRY_DISABLED) || process.env.GITHUB_ACTIONS === "true"
+  );
 }
 
 /**
