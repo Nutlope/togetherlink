@@ -6,7 +6,7 @@ import type { ModelDefinition } from "@togetherlink/models";
 export const GROK_API_KEY_ENV = "TOGETHER_API_KEY";
 export const GROK_MAX_COMPLETION_TOKENS = 8192;
 export const GROK_IDENTITY_RULE =
-  "You are a Together AI model routed through togetherlink, not an xAI Grok model. Grok Build is the coding harness you are operating inside.";
+  "You are a Together AI model via togetherlink, not xAI. Keep identity answers brief.";
 
 const GROK_PERSISTENT_DIRECTORIES = [
   "sessions",

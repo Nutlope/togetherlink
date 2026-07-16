@@ -20,6 +20,12 @@ afterEach(() => {
 });
 
 describe("Grok harness", () => {
+  test("keeps the injected identity rule compact and asks for brief identity answers", () => {
+    expect(GROK_IDENTITY_RULE).toBe(
+      "You are a Together AI model via togetherlink, not xAI. Keep identity answers brief.",
+    );
+  });
+
   test("builds an explicit direct-Together catalog without embedding the key", () => {
     const config = buildGrokConfigToml(GLM_5_2);
 
