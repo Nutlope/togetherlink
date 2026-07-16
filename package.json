@@ -3,7 +3,7 @@
   "version": "0.6.0",
   "private": true,
   "description": "Use Together AI models in Claude Code, OpenCode, Codex, Grok Build, and Pi Code",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",

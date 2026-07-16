@@ -2,7 +2,7 @@
 
 > Use Together AI models in the coding-agent CLIs you already run — OpenCode, Claude Code, Codex CLI, Grok Build, and Pi Code. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
 
-togetherlink is an Apache-2.0 CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tgrok`, `tpi`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, Grok Build, and Pi Code it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
+togetherlink is an MIT-licensed CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tgrok`, `tpi`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, Grok Build, and Pi Code it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
 
 This is the LLM-readable documentation file for the project. If you are an AI agent asked to install, configure, or use togetherlink (headless or interactive), read this file first. It covers installation, configuration, every command, the available models, headless/agentic usage patterns, how to keep the tool up to date, and the routing architecture.
 
