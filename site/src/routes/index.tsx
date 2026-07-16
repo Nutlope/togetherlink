@@ -714,15 +714,7 @@ function PiMark() {
 
 function GrokMark() {
   return (
-    <svg className="size-[27px]" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <circle cx="16" cy="16" r="8.5" stroke="currentColor" strokeWidth="3.2" />
-      <path
-        d="M8.25 23.75 23.75 8.25"
-        stroke="currentColor"
-        strokeWidth="3.4"
-        strokeLinecap="round"
-      />
-    </svg>
+    <img className="block size-[27px]" src="/grok-logomark-dark.svg" alt="" aria-hidden="true" />
   );
 }
 
