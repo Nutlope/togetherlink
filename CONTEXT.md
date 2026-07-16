@@ -17,16 +17,19 @@ architecturally distinct families (recorded as `ProxiedHarness` and
   daemon's Together client, tracks cost via a `CostTracker`, and deregisters on
   exit. The shared lifecycle lives in `runProxiedSession`
   (`packages/cli/src/lib/proxied-session.ts`).
-- **Spawned harness** — OpenCode, Pi. `run` spawns the agent binary directly;
-  the binary's own provider plugin talks to Together (OpenCode) or reads a
-  `models.json` from disk (Pi). No daemon, no proxy, no `CostTracker`, no
-  keepalive.
+- **Spawned harness** — OpenCode, Pi, Grok. `run` spawns the agent binary
+  directly; the binary talks to Together using inline config (OpenCode), a
+  temporary `models.json` (Pi), or an isolated temporary `GROK_HOME` (Grok).
+  No daemon, no proxy, no `CostTracker`, no keepalive. The shared
+  `runTrackedSpawnedSession` lifecycle records anonymous session start/end
+  telemetry, but token and cost totals remain unavailable because Together
+  traffic bypasses togetherlink.
 
 **Harness** — anything that adapts one agent CLI to Togetherlink. _Avoid:_
 integration, connector.
 
-**HarnessId** — the enum of harness identifiers (`claude`, `codex`, `opencode`,
-`pi`). Note: the daemon also knows about `codex-app`, a fifth agent id not in
+**HarnessId** — the enum of harness identifiers (`claude`, `codex`, `grok`,
+`opencode`, `pi`). Note: the daemon also knows about `codex-app`, an agent id not in
 `HarnessId` — an orphan to be reconciled.
 
 ## The daemon seam
@@ -74,6 +77,10 @@ shared seam (not under any harness tree).
 **proxied-session** (`proxied-session.ts`) — the shared 15-step lifecycle for a
 proxied harness: model resolve → daemon → register → telemetry → banner →
 spawn → pid update → keepalive → await exit → cost print → deregister.
+
+**spawned-session** (`spawned-session.ts`) — the shared process + lifecycle
+telemetry boundary for OpenCode, Pi, and Grok. It records which harness and
+model started/ended without claiming visibility into direct API usage.
 
 **paths** (`paths.ts`, shared) — the single source of truth for the togetherlink
 home directory + process-liveness check. Replaces 4+3 duplicated copies.

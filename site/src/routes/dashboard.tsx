@@ -2,16 +2,26 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useSession } from "@tanstack/react-start/server";
 import { ConvexHttpClient } from "convex/browser";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import WorldMap, { regions, type ISOCode } from "react-svg-worldmap";
 import { api } from "../../convex/_generated/api";
 
 type DashboardSummary = Awaited<ReturnType<typeof fetchSummary>>;
 type DashboardData = NonNullable<DashboardSummary>;
 type InstallSummary = DashboardData["installSummaries"][number];
 type RecentSession = DashboardData["recentSessions"][number];
+type CountryLifetime = DashboardData["countryLifetime"][number];
+type MapMetric = "installs" | "sessions" | "tokens" | "cost";
 
+const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
 const RECENT_SESSIONS_LIMIT = 10;
+const EMPTY_USAGE = {
+  promptTokens: 0,
+  cachedTokens: 0,
+  completionTokens: 0,
+  costUsd: 0,
+};
 
 async function dashboardSession() {
   return useSession<{ authed?: boolean }>({
@@ -34,6 +44,41 @@ async function fetchSummary() {
   }
   const client = new ConvexHttpClient(url);
   return client.query(api.analytics.getDashboardSummary, { days: 30 });
+}
+
+function normalizeDashboardData(value: unknown): DashboardSummary {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Partial<DashboardData>;
+  return {
+    overview: {
+      installs24h: data.overview?.installs24h ?? 0,
+      installsLifetime: data.overview?.installsLifetime ?? 0,
+      uniqueInstallsLifetime: data.overview?.uniqueInstallsLifetime ?? 0,
+      activeInstalls24h: data.overview?.activeInstalls24h ?? 0,
+      activeInstallsLifetime: data.overview?.activeInstallsLifetime ?? 0,
+      sessions24h: data.overview?.sessions24h ?? 0,
+      sessionsLifetime: data.overview?.sessionsLifetime ?? 0,
+      countries24h: data.overview?.countries24h ?? 0,
+      countriesLifetime: data.overview?.countriesLifetime ?? 0,
+      usage24h: data.overview?.usage24h ?? EMPTY_USAGE,
+      usageLifetime: data.overview?.usageLifetime ?? EMPTY_USAGE,
+    },
+    countryLifetime: data.countryLifetime ?? [],
+    installsPerDay: data.installsPerDay ?? [],
+    activeInstallsPerDay: data.activeInstallsPerDay ?? [],
+    sessionsStartedPerDay: data.sessionsStartedPerDay ?? [],
+    sessionsEndedPerDay: data.sessionsEndedPerDay ?? [],
+    tokenUsageByAgent: data.tokenUsageByAgent ?? [],
+    tokenUsageByModel: data.tokenUsageByModel ?? [],
+    osDistribution: data.osDistribution ?? [],
+    countryDistribution: data.countryDistribution ?? [],
+    versionDistribution: data.versionDistribution ?? [],
+    installSummaries: data.installSummaries ?? [],
+    installDaily: data.installDaily ?? [],
+    recentSessions: data.recentSessions ?? [],
+    failedSessionRate: data.failedSessionRate ?? 0,
+    totalEvents: data.totalEvents ?? 0,
+  };
 }
 
 const checkDashboardAuth = createServerFn({ method: "GET" }).handler(async () => {
@@ -104,7 +149,7 @@ function DashboardRoute() {
       setRefreshing(true);
     }
     try {
-      const result = await getDashboardData();
+      const result = normalizeDashboardData(await getDashboardData());
       setData(result);
       setLastUpdated(Date.now());
       setError(null);
@@ -178,147 +223,176 @@ function DashboardRoute() {
     ) ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <div className="mx-auto max-w-7xl px-6 py-10">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-mono text-lg font-semibold text-ink">togetherlink analytics</h1>
         <RefreshStatus refreshing={refreshing} lastUpdated={lastUpdated} />
       </header>
 
       <div className="mb-6 rounded-md border border-line-strong bg-code px-4 py-3 text-sm text-muted">
-        Scope: this dashboard only sees sessions launched through{" "}
-        <code className="font-mono text-ink">togetherlink claude</code> /{" "}
-        <code className="font-mono text-ink">togetherlink codex</code>, which route through our
-        proxy. OpenCode sessions and any direct Together API key usage bypass the proxy entirely and
-        are not counted here — so these numbers are a lower bound on total usage, not the whole
-        picture.
+        Session lifecycle covers Claude, Codex, ChatGPT Desktop, Grok Build, OpenCode, and Pi Code
+        when launched through togetherlink. Token and cost totals are available for the proxied
+        Claude, Codex, and ChatGPT paths only. Anonymous users are stable install IDs, not
+        identified people.
       </div>
 
       {loading && !data && <p className="text-sm text-muted">Loading…</p>}
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
       {data && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <InstallPicker
-            installs={data.installSummaries}
-            selectedInstallId={selectedInstallId}
-            onSelectedInstallIdChange={setSelectedInstallId}
-            onNicknameSave={async (installId, nickname) => {
-              await saveInstallNickname({ data: { installId, nickname } });
-              await loadData(false);
-            }}
-          />
+        <>
+          <section className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <OverviewMetric
+              label="Install completions"
+              value={formatNumber(data.overview.installs24h)}
+              period="last 24 hours"
+              lifetime={`${formatNumber(data.overview.installsLifetime)} lifetime`}
+            />
+            <OverviewMetric
+              label="Anonymous users"
+              value={formatNumber(data.overview.activeInstalls24h)}
+              period="active last 24 hours"
+              lifetime={`${formatNumber(data.overview.uniqueInstallsLifetime)} ever seen`}
+            />
+            <OverviewMetric
+              label="Sessions started"
+              value={formatNumber(data.overview.sessions24h)}
+              period="last 24 hours"
+              lifetime={`${formatNumber(data.overview.sessionsLifetime)} lifetime`}
+            />
+            <OverviewMetric
+              label="Token usage"
+              value={formatCompactTokens(totalTokens(data.overview.usage24h))}
+              period="last 24 hours"
+              lifetime={`${formatCompactTokens(totalTokens(data.overview.usageLifetime))} lifetime`}
+            />
+            <OverviewMetric
+              label="Total cost"
+              value={formatCost(data.overview.usage24h.costUsd)}
+              period="last 24 hours"
+              lifetime={`${formatCost(data.overview.usageLifetime.costUsd)} lifetime`}
+            />
+          </section>
 
-          {selectedInstall && (
-            <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
-              <FocusMetric label="Selected install" value={installDisplayName(selectedInstall)} />
-              <FocusMetric label="Sessions ended" value={String(selectedInstall.sessionEnds)} />
-              <FocusMetric label="30d cost" value={`$${selectedInstall.costUsd.toFixed(4)}`} />
-              <StatCard
-                title="Selected sessions ended / day"
-                rows={focusedDaily.map((r) => [r.day, r.sessionsEnded])}
-              />
-              <BarCard
-                title="Selected cost / day"
-                className="md:col-span-2"
-                items={focusedDaily.map((r) => ({
-                  label: r.day,
-                  value: r.costUsd,
-                  detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached, ${formatCacheHitRatio(r.cachedTokens, r.promptTokens)}) · ${formatTokens(r.completionTokens)} out`,
-                  valueLabel: `$${r.costUsd.toFixed(4)}`,
-                }))}
-              />
-            </div>
-          )}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <WorldUsageMap
+              countries={data.countryLifetime}
+              countryCount={data.overview.countriesLifetime}
+            />
 
-          <RecentSessionsTable
-            title={
-              selectedInstall
-                ? `Recent sessions for ${installDisplayName(selectedInstall)}`
-                : "Recent sessions"
-            }
-            sessions={focusedSessions}
-          />
+            <InstallPicker
+              installs={data.installSummaries}
+              selectedInstallId={selectedInstallId}
+              onSelectedInstallIdChange={setSelectedInstallId}
+              onNicknameSave={async (installId, nickname) => {
+                await saveInstallNickname({ data: { installId, nickname } });
+                await loadData(false);
+              }}
+            />
 
-          <StatCard
-            title="Active installs / day"
-            rows={data.activeInstallsPerDay.map((r) => [r.day, r.count])}
-          />
-          <StatCard
-            title="Installs completed / day"
-            rows={data.installsPerDay.map((r) => [r.day, r.count])}
-          />
-          <StatCard
-            title="Sessions started / day"
-            rows={data.sessionsStartedPerDay.map((r) => [r.day, r.count])}
-          />
-          <StatCard
-            title="Sessions ended / day"
-            rows={data.sessionsEndedPerDay.map((r) => [r.day, r.count])}
-          />
+            {selectedInstall && (
+              <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
+                <FocusMetric label="Selected install" value={installDisplayName(selectedInstall)} />
+                <FocusMetric label="Sessions ended" value={String(selectedInstall.sessionEnds)} />
+                <FocusMetric label="30d cost" value={`$${selectedInstall.costUsd.toFixed(4)}`} />
+                <StatCard
+                  title="Selected sessions ended / day"
+                  rows={focusedDaily.map((r) => [r.day, r.sessionsEnded])}
+                />
+                <BarCard
+                  title="Selected cost / day"
+                  className="md:col-span-2"
+                  items={focusedDaily.map((r) => ({
+                    label: r.day,
+                    value: r.costUsd,
+                    detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached, ${formatCacheHitRatio(r.cachedTokens, r.promptTokens)}) · ${formatTokens(r.completionTokens)} out`,
+                    valueLabel: `$${r.costUsd.toFixed(4)}`,
+                  }))}
+                />
+              </div>
+            )}
 
-          <BarCard
-            title="Token usage by agent"
-            className="md:col-span-2"
-            items={data.tokenUsageByAgent.map((r) => ({
-              label: r.agent,
-              value: r.costUsd,
-              detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached) · ${formatTokens(r.completionTokens)} out`,
-              valueLabel: `$${r.costUsd.toFixed(4)}`,
-            }))}
-          />
+            <RecentSessionsTable
+              title={
+                selectedInstall
+                  ? `Recent sessions for ${installDisplayName(selectedInstall)}`
+                  : "Recent sessions"
+              }
+              sessions={focusedSessions}
+            />
 
-          <BarCard
-            title="Token usage by model"
-            className="md:col-span-2"
-            items={data.tokenUsageByModel.map((r) => ({
-              label: r.model,
-              value: r.costUsd,
-              detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached) · ${formatTokens(r.completionTokens)} out`,
-              valueLabel: `$${r.costUsd.toFixed(4)}`,
-            }))}
-          />
+            <StatCard
+              title="Active installs / day"
+              rows={data.activeInstallsPerDay.map((r) => [r.day, r.count])}
+            />
+            <StatCard
+              title="Installs completed / day"
+              rows={data.installsPerDay.map((r) => [r.day, r.count])}
+            />
+            <StatCard
+              title="Sessions started / day"
+              rows={data.sessionsStartedPerDay.map((r) => [r.day, r.count])}
+            />
+            <StatCard
+              title="Sessions ended / day"
+              rows={data.sessionsEndedPerDay.map((r) => [r.day, r.count])}
+            />
 
-          <BarCard
-            title="Country distribution"
-            items={data.countryDistribution.map((r) => ({
-              label: `${flagFor(r.countryCode)} ${r.countryCode}`,
-              value: r.count,
-              valueLabel: String(r.count),
-            }))}
-          />
+            <BarCard
+              title="Token usage by agent"
+              className="md:col-span-2"
+              items={data.tokenUsageByAgent.map((r) => ({
+                label: r.agent,
+                value: r.costUsd,
+                detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached) · ${formatTokens(r.completionTokens)} out`,
+                valueLabel: `$${r.costUsd.toFixed(4)}`,
+              }))}
+            />
 
-          <BarCard
-            title="OS distribution"
-            items={data.osDistribution.map((r) => ({
-              label: r.os,
-              value: r.count,
-              valueLabel: String(r.count),
-            }))}
-          />
+            <BarCard
+              title="Token usage by model"
+              className="md:col-span-2"
+              items={data.tokenUsageByModel.map((r) => ({
+                label: r.model,
+                value: r.costUsd,
+                detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached) · ${formatTokens(r.completionTokens)} out`,
+                valueLabel: `$${r.costUsd.toFixed(4)}`,
+              }))}
+            />
 
-          <BarCard
-            title="CLI version adoption"
-            className="md:col-span-2"
-            items={data.versionDistribution.map((r) => ({
-              label: r.version,
-              value: r.count,
-              valueLabel: String(r.count),
-            }))}
-          />
+            <BarCard
+              title="OS distribution"
+              items={data.osDistribution.map((r) => ({
+                label: r.os,
+                value: r.count,
+                valueLabel: String(r.count),
+              }))}
+            />
 
-          <div className="md:col-span-2 flex flex-wrap gap-6 rounded-lg border border-line-strong p-4 text-sm">
-            <div>
-              <div className="text-muted">Failed session rate</div>
-              <div className="font-mono text-base text-ink">
-                {(data.failedSessionRate * 100).toFixed(1)}%
+            <BarCard
+              title="CLI version adoption"
+              className="md:col-span-2"
+              items={data.versionDistribution.map((r) => ({
+                label: r.version,
+                value: r.count,
+                valueLabel: String(r.count),
+              }))}
+            />
+
+            <div className="md:col-span-2 flex flex-wrap gap-6 rounded-lg border border-line-strong p-4 text-sm">
+              <div>
+                <div className="text-muted">Failed session rate</div>
+                <div className="font-mono text-base text-ink">
+                  {(data.failedSessionRate * 100).toFixed(1)}%
+                </div>
+              </div>
+              <div>
+                <div className="text-muted">Total events (30d)</div>
+                <div className="font-mono text-base text-ink">{data.totalEvents}</div>
               </div>
             </div>
-            <div>
-              <div className="text-muted">Total events (30d)</div>
-              <div className="font-mono text-base text-ink">{data.totalEvents}</div>
-            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -333,6 +407,151 @@ function FocusMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function OverviewMetric({
+  label,
+  value,
+  period,
+  lifetime,
+}: {
+  label: string;
+  value: string;
+  period: string;
+  lifetime: string;
+}) {
+  return (
+    <div className="rounded-lg border border-line-strong bg-white p-4">
+      <div className="text-xs font-medium uppercase tracking-wide text-faint">{label}</div>
+      <div className="mt-3 font-mono text-2xl font-semibold tracking-tight text-ink">{value}</div>
+      <div className="mt-1 text-xs text-muted">{period}</div>
+      <div className="mt-3 border-t border-line pt-2 font-mono text-xs text-muted">{lifetime}</div>
+    </div>
+  );
+}
+
+function WorldUsageMap({
+  countries,
+  countryCount,
+}: {
+  countries: CountryLifetime[];
+  countryCount: number;
+}) {
+  const [metric, setMetric] = useState<MapMetric>("installs");
+  const values = countries.map((country) => mapMetricValue(country, metric));
+  const maxValue = Math.max(1, ...values);
+  const mapData = countries
+    .filter((country) => WORLD_MAP_COUNTRY_CODES.has(country.countryCode))
+    .map((country) => ({
+      country: country.countryCode.toLowerCase() as ISOCode,
+      value: mapMetricValue(country, metric),
+    }));
+  const topCountries = [...countries]
+    .filter((country) => country.countryCode !== "UNKNOWN")
+    .sort((a, b) => mapMetricValue(b, metric) - mapMetricValue(a, metric))
+    .slice(0, 8);
+
+  return (
+    <section className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-4 py-4">
+        <div>
+          <h2 className="text-sm font-medium text-ink">Global adoption and usage</h2>
+          <p className="mt-1 text-xs text-muted">
+            Lifetime activity across {countryCount} countr{countryCount === 1 ? "y" : "ies"}.
+            Country is resolved when each telemetry event reaches Vercel.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1 rounded-md bg-code p-1">
+          {(["installs", "sessions", "tokens", "cost"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setMetric(option)}
+              className={`rounded px-2.5 py-1.5 text-xs font-medium capitalize ${
+                metric === option ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_310px]">
+        <div className="relative min-h-[360px] bg-[#fbfcfd] p-4">
+          <div className="absolute left-4 top-4 z-10 rounded-md border border-line bg-white/95 px-3 py-2 shadow-sm">
+            <div className="text-xs text-muted">Lifetime view</div>
+            <div className="mt-0.5 font-mono text-sm font-medium capitalize text-ink">{metric}</div>
+          </div>
+          <div className="dashboard-world-map flex min-h-[330px] items-center justify-center pt-8">
+            <WorldMap
+              title={`World map colored by lifetime ${metric}`}
+              data={mapData}
+              size="responsive"
+              color="#1d4ed8"
+              backgroundColor="#fbfcfd"
+              borderColor="#ffffff"
+              strokeOpacity={1}
+              styleFunction={(context) => ({
+                fill: mapFill(
+                  typeof context.countryValue === "number" ? context.countryValue : 0,
+                  maxValue,
+                ),
+                stroke: "#ffffff",
+                strokeWidth: 0.6,
+                cursor: "default",
+              })}
+              tooltipTextFunction={(context) =>
+                `${context.countryName}: ${formatMapMetric(
+                  typeof context.countryValue === "number" ? context.countryValue : 0,
+                  metric,
+                )}`
+              }
+            />
+          </div>
+          <div className="absolute bottom-3 right-4 text-[10px] text-faint">
+            Map:{" "}
+            <a
+              href="https://www.npmjs.com/package/react-svg-worldmap"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2"
+            >
+              react-svg-worldmap
+            </a>
+          </div>
+        </div>
+
+        <div className="border-t border-line bg-white p-4 lg:border-l lg:border-t-0">
+          <div className="mb-3 flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-faint">
+              Top countries
+            </h3>
+            <span className="text-xs capitalize text-muted">{metric}</span>
+          </div>
+          <div className="flex flex-col">
+            {topCountries.map((country, index) => (
+              <div
+                key={country.countryCode}
+                className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 border-b border-line py-2.5 last:border-b-0"
+              >
+                <span className="font-mono text-xs text-faint">{index + 1}</span>
+                <span className="truncate text-sm text-ink">
+                  {flagFor(country.countryCode)} {countryName(country.countryCode)}
+                </span>
+                <span className="font-mono text-sm text-muted">
+                  {formatMapMetric(mapMetricValue(country, metric), metric)}
+                </span>
+              </div>
+            ))}
+            {topCountries.length === 0 && (
+              <div className="py-4 text-sm text-faint">No data yet</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function InstallPicker({
   installs,
   selectedInstallId,
@@ -344,6 +563,8 @@ function InstallPicker({
   onSelectedInstallIdChange: (installId: string) => void;
   onNicknameSave: (installId: string, nickname: string) => Promise<void>;
 }) {
+  const [editingInstall, setEditingInstall] = useState<InstallSummary | null>(null);
+
   return (
     <section className="md:col-span-2 rounded-lg border border-line-strong p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -370,11 +591,10 @@ function InstallPicker({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
+        <table className="w-full min-w-[680px] border-separate border-spacing-0 text-left text-sm">
           <thead>
             <tr className="text-xs uppercase text-faint">
-              <th className="border-b border-line py-2 font-medium">Name</th>
-              <th className="border-b border-line py-2 font-medium">Install</th>
+              <th className="border-b border-line py-2 font-medium">Person / install</th>
               <th className="border-b border-line py-2 font-medium">Last seen</th>
               <th className="border-b border-line py-2 font-medium">Sessions</th>
               <th className="border-b border-line py-2 font-medium">Cost</th>
@@ -390,16 +610,11 @@ function InstallPicker({
                 className={selectedInstallId === install.installId ? "bg-code" : undefined}
               >
                 <td className="border-b border-line py-2 pr-4">
-                  <NicknameField install={install} onSave={onNicknameSave} />
-                </td>
-                <td className="border-b border-line py-2 pr-4">
-                  <button
-                    type="button"
-                    onClick={() => onSelectedInstallIdChange(install.installId)}
-                    className="font-mono text-ink underline-offset-2 hover:underline"
-                  >
-                    {shortInstallId(install.installId)}
-                  </button>
+                  <PersonInstallCell
+                    install={install}
+                    onSelect={() => onSelectedInstallIdChange(install.installId)}
+                    onEdit={() => setEditingInstall(install)}
+                  />
                 </td>
                 <td className="border-b border-line py-2 pr-4 font-mono text-muted">
                   {formatDateTime(install.lastSeenAt)}
@@ -422,60 +637,175 @@ function InstallPicker({
           </tbody>
         </table>
       </div>
+
+      {editingInstall && (
+        <EditInstallNameDialog
+          install={editingInstall}
+          onClose={() => setEditingInstall(null)}
+          onSave={async (nickname) => {
+            await onNicknameSave(editingInstall.installId, nickname);
+            setEditingInstall(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
-function NicknameField({
+function PersonInstallCell({
   install,
+  onSelect,
+  onEdit,
+}: {
+  install: InstallSummary;
+  onSelect: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="flex min-w-56 items-center gap-2">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="min-w-0 flex-1 text-left active:scale-[0.96]"
+        title={install.installId}
+      >
+        <span
+          className={`block truncate text-sm text-ink ${install.nickname ? "font-medium" : "font-mono"}`}
+        >
+          {install.nickname ?? shortInstallId(install.installId)}
+        </span>
+        {install.nickname && (
+          <span className="mt-0.5 block truncate font-mono text-xs text-muted">
+            {shortInstallId(install.installId)}
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={`Edit name for ${install.nickname ?? shortInstallId(install.installId)}`}
+        title="Edit name"
+        className="flex size-10 shrink-0 items-center justify-center rounded-md text-faint transition-[color,background-color,scale] duration-150 ease-out hover:bg-code hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96]"
+      >
+        <PencilIcon />
+      </button>
+    </div>
+  );
+}
+
+function EditInstallNameDialog({
+  install,
+  onClose,
   onSave,
 }: {
   install: InstallSummary;
-  onSave: (installId: string, nickname: string) => Promise<void>;
+  onClose: () => void;
+  onSave: (nickname: string) => Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [nickname, setNickname] = useState(install.nickname ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setNickname(install.nickname ?? "");
-  }, [install.installId, install.nickname]);
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
 
   const hasChanges = nickname.trim() !== (install.nickname ?? "");
 
   return (
-    <form
-      className="flex min-w-64 items-center gap-2"
-      onSubmit={async (event) => {
+    <dialog
+      ref={dialogRef}
+      onCancel={(event) => {
         event.preventDefault();
-        setSaving(true);
-        setError(null);
-        try {
-          await onSave(install.installId, nickname);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
-        } finally {
-          setSaving(false);
-        }
+        if (!saving) onClose();
       }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose();
+      }}
+      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-xl bg-transparent p-0 backdrop:bg-black/25 backdrop:backdrop-blur-[1px]"
     >
-      <div className="min-w-0 flex-1">
-        <input
-          value={nickname}
-          onChange={(event) => setNickname(event.target.value)}
-          placeholder="Add name"
-          className="w-full rounded-md border border-line-strong bg-white px-2 py-1 font-mono text-sm text-ink outline-none focus:border-ink"
-        />
-        {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
-      </div>
-      <button
-        type="submit"
-        disabled={saving || !hasChanges}
-        className="rounded-md border border-line-strong px-2 py-1 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      <form
+        className="rounded-xl bg-white p-5 shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_12px_32px_rgba(0,0,0,0.16)]"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setSaving(true);
+          setError(null);
+          try {
+            await onSave(nickname);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setSaving(false);
+          }
+        }}
       >
-        {saving ? "Saving" : "Save"}
-      </button>
-    </form>
+        <div>
+          <h3 className="text-base font-semibold text-ink">Edit person name</h3>
+          <p className="mt-1 text-sm text-muted">
+            Add a recognizable name for this anonymous install.
+          </p>
+        </div>
+
+        <label className="mt-5 block">
+          <span className="mb-1.5 block text-xs font-medium text-muted">Name</span>
+          <input
+            value={nickname}
+            onChange={(event) => setNickname(event.target.value)}
+            placeholder="Customer or person name"
+            className="w-full rounded-lg border border-line-strong bg-white px-3 py-2.5 text-sm text-ink outline-none transition-[border-color,box-shadow] duration-150 focus:border-ink focus:shadow-[0_0_0_3px_rgba(0,0,0,0.08)]"
+            autoFocus
+          />
+        </label>
+
+        <div className="mt-2 font-mono text-xs text-faint" title={install.installId}>
+          Install {shortInstallId(install.installId)}
+        </div>
+        <p className="mt-1 text-xs text-muted">Leave the name blank to show the install ID.</p>
+        {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="min-h-10 rounded-lg px-3.5 text-sm font-medium text-muted transition-[background-color,color,scale] duration-150 hover:bg-code hover:text-ink active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || !hasChanges}
+            className="min-h-10 rounded-lg bg-ink px-4 text-sm font-medium text-white transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save name"}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className="size-4"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4.25 13.75 3.5 16.5l2.75-.75L14.7 7.3a1.75 1.75 0 0 0 0-2.48l-.52-.52a1.75 1.75 0 0 0-2.48 0L4.25 13.75Z" />
+      <path d="m10.75 5.25 4 4" />
+    </svg>
   );
 }
 
@@ -517,10 +847,12 @@ function RecentSessionsTable({ title, sessions }: { title: string; sessions: Rec
                   {formatDuration(session.durationMs)}
                 </td>
                 <td className="border-b border-line py-2 pr-4 font-mono text-muted">
-                  {formatTokens(session.promptTokens + session.completionTokens)}
+                  {session.usageTracked
+                    ? formatTokens(session.promptTokens + session.completionTokens)
+                    : "not tracked"}
                 </td>
                 <td className="border-b border-line py-2 pr-4 font-mono text-ink">
-                  ${session.costUsd.toFixed(4)}
+                  {session.usageTracked ? formatCost(session.costUsd) : "not tracked"}
                 </td>
                 <td className="border-b border-line py-2 font-mono text-muted">
                   {session.status}
@@ -632,6 +964,68 @@ function BarCard({
 
 function formatTokens(n: number): string {
   return n.toLocaleString("en-US");
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function totalTokens(usage: { promptTokens: number; completionTokens: number }): number {
+  return usage.promptTokens + usage.completionTokens;
+}
+
+function formatCompactTokens(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+function formatCost(costUsd: number): string {
+  if (costUsd >= 100) return `$${costUsd.toFixed(0)}`;
+  if (costUsd >= 1) return `$${costUsd.toFixed(2)}`;
+  return `$${costUsd.toFixed(4)}`;
+}
+
+function mapMetricValue(country: CountryLifetime, metric: MapMetric): number {
+  switch (metric) {
+    case "installs":
+      return country.installCompletions;
+    case "sessions":
+      return country.sessionsStarted;
+    case "tokens":
+      return country.promptTokens + country.completionTokens;
+    case "cost":
+      return country.costUsd;
+  }
+}
+
+function formatMapMetric(value: number, metric: MapMetric): string {
+  switch (metric) {
+    case "tokens":
+      return formatCompactTokens(value);
+    case "cost":
+      return formatCost(value);
+    default:
+      return formatNumber(value);
+  }
+}
+
+function mapFill(value: number, maxValue: number): string {
+  if (value <= 0) return "#e9edf1";
+  const intensity = Math.max(0.18, Math.log1p(value) / Math.log1p(maxValue));
+  const lightness = 88 - intensity * 58;
+  return `hsl(221 72% ${lightness}%)`;
+}
+
+function countryName(countryCode: string): string {
+  try {
+    return (
+      new Intl.DisplayNames(["en"], { type: "region" }).of(countryCode.toUpperCase()) ?? countryCode
+    );
+  } catch {
+    return countryCode;
+  }
 }
 
 function formatCacheHitRatio(cachedTokens: number, promptTokens: number): string {

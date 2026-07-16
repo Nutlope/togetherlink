@@ -21,11 +21,12 @@ Usage:
   togetherlink whoami
   togetherlink chatgpt [--model <model>] [--restore]  (alpha)
   togetherlink codex [...]       (alias: tcodex)
+  togetherlink grok [...]        (alias: tgrok)
   togetherlink claude [...]      (alias: tclaude)
   togetherlink pi [...]          (alias: tpi)
   togetherlink opencode [...]    (alias: topencode)
 
-Extra args after codex/claude/pi/opencode are passed through.
+Extra args after codex/claude/grok/pi/opencode are passed through.
 ChatGPT App support is alpha; run \`togetherlink chatgpt --restore\` (alias: codex-app) to restore the previous desktop config.
 
 Docs: https://togetherlink.vercel.app/llms.txt

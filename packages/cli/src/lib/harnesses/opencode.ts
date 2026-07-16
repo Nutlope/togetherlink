@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { OPENCODE_DEFAULT_MODEL } from "../opencode/defaults.js";
 import { buildOpencodeConfigJson, buildOpencodeEnv } from "../opencode/core.js";
+import { runTrackedSpawnedSession } from "../spawned-session.js";
 import { resolveTogetherApiKey } from "../together-core.js";
 import { defineHarness } from "../harness-types.js";
 import { HARNESS } from "../harness.js";
@@ -52,17 +52,17 @@ export default defineHarness({
       process.stderr.write(`[togetherlink opencode] config: ${JSON.stringify(configJson)}\n`);
     }
 
-    const child = spawn("opencode", opencodeArgsWithoutModelOverrides(ctx.passthrough ?? []), {
-      env,
-      stdio: "inherit",
-    });
-
-    const result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null }>(
-      (resolve, reject) => {
-        child.on("error", reject);
-        child.on("exit", (status, signal) => resolve({ status, signal }));
+    const result = await runTrackedSpawnedSession({
+      agent: HARNESS.OPENCODE,
+      modelId,
+      binary: "opencode",
+      args: opencodeArgsWithoutModelOverrides(ctx.passthrough ?? []),
+      options: {
+        env,
+        stdio: "inherit",
       },
-    );
+      home: ctx.home,
+    });
 
     if (typeof result.status === "number") {
       process.exitCode = result.status;

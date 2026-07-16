@@ -1,9 +1,9 @@
 {
   "name": "togetherlink",
-  "version": "0.5.26",
+  "version": "0.6.0",
   "private": true,
-  "description": "Use Together AI models in Claude Code, OpenCode, Codex, and Pi Code",
-  "license": "Apache-2.0",
+  "description": "Use Together AI models in Claude Code, OpenCode, Codex, Grok Build, and Pi Code",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",

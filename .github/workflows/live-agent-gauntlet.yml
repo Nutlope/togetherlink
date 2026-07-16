@@ -12,6 +12,7 @@ on:
           - all
           - claude
           - codex
+          - grok
           - live-models-check
           - opencode
           - pi
@@ -95,10 +96,13 @@ jobs:
               # OpenCode's official npm package is `opencode-ai`; it installs the
               # `opencode` binary. See https://github.com/anomalyco/opencode.
               npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai@latest @earendil-works/pi-coding-agent
+              curl -fsSL https://x.ai/cli/install.sh | bash
+              echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
               claude --version
               codex --version
               opencode --version
               pi --version
+              "$HOME/.grok/bin/grok" --version
               ;;
             live-models-check)
               npm install -g @anthropic-ai/claude-code @openai/codex
@@ -112,6 +116,11 @@ jobs:
             codex)
               npm install -g @openai/codex
               codex --version
+              ;;
+            grok)
+              curl -fsSL https://x.ai/cli/install.sh | bash
+              echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
+              "$HOME/.grok/bin/grok" --version
               ;;
             opencode)
               # OpenCode's official npm package is `opencode-ai`; it installs the
@@ -139,13 +148,16 @@ jobs:
         run: |
           case "$HARNESS" in
             all)
-              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm exec turbo run test:gauntlet:core test:gauntlet:claude test:gauntlet:codex test:gauntlet:opencode test:gauntlet:pi --filter @togetherlink/tests --concurrency=1
+              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm exec turbo run test:gauntlet:core test:gauntlet:claude test:gauntlet:codex test:gauntlet:grok test:gauntlet:opencode test:gauntlet:pi --filter @togetherlink/tests --concurrency=1
               ;;
             claude)
               pnpm exec turbo run test:gauntlet:claude --filter @togetherlink/tests
               ;;
             codex)
               pnpm exec turbo run test:gauntlet:codex --filter @togetherlink/tests
+              ;;
+            grok)
+              pnpm exec turbo run test:gauntlet:grok --filter @togetherlink/tests
               ;;
             live-models-check)
               pnpm exec turbo run test:gauntlet:live-models-check --filter @togetherlink/tests
