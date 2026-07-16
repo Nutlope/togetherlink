@@ -72,8 +72,6 @@ togetherlink daemon stop                   # stop the background proxy daemon
 
 Any arguments after the harness name are passed straight through to the underlying agent CLI. For example, `tcodex exec "fix the typo"` runs `codex exec` with togetherlink routing.
 
-For Grok Build, togetherlink also appends this rule through Grok's native `--rules` mechanism: `You are a Together AI model routed through togetherlink, not an xAI Grok model. Grok Build is the coding harness you are operating inside.` Existing user `--rules` content is preserved and appended after this identity rule. If the user supplies `--system-prompt-override`, togetherlink appends the identity rule to that override instead.
-
 Recognized togetherlink flags (parsed before the passthrough):
 
 - `--api-key <key>` — use this Together API key for the run.
@@ -219,7 +217,7 @@ There are two harness families behind the five tools:
 
 - **Proxied harnesses — Claude Code, Codex CLI.** `tclaude` and `tcodex` spawn a shared local daemon and route the agent's `/v1/*` traffic through it. The daemon translates the agent's native wire format (Anthropic Messages for Claude, OpenAI Responses for Codex) to Together's chat-completions API and back. Per run: it resolves the model, ensures the daemon, registers a session with your token, prints a banner, spawns the agent pointed at the local proxy, tracks cost, and deregisters on exit. Nothing is written to your real agent config — close it and your setup is exactly as it was.
 
-- **Spawned harnesses — OpenCode, Grok Build, Pi Code.** `topencode`, `tgrok`, and `tpi` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), an isolated temporary `GROK_HOME` with persistent session links plus a compact Together identity rule (Grok), or a temporary `models.json` (Pi). No daemon, no proxy.
+- **Spawned harnesses — OpenCode, Grok Build, Pi Code.** `topencode`, `tgrok`, and `tpi` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), an isolated temporary `GROK_HOME` with persistent session links (Grok), or a temporary `models.json` (Pi). No daemon, no proxy.
 
 The daemon is one persistent local process shared by all proxied sessions. If you ever need to stop it manually:
 
