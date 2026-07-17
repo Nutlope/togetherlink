@@ -16,7 +16,6 @@ import type { RegisterSessionRequest } from "./daemon/state.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey } from "./together-core.js";
-import { isProcessAlive } from "./paths.js";
 import {
   removeManagedBlock as tomlRemoveManagedBlock,
   removeTomlSections,
@@ -28,9 +27,7 @@ import {
 import {
   type CodexAppSessionLock,
   appSessionLockPath,
-  readAppSessionLock,
   writeAppSessionLock,
-  assertNoLiveCodexAppSession,
   isManagedCodexAppConfig,
 } from "./codex-app/session-lock.js";
 import {
@@ -423,30 +420,6 @@ async function writeTextAtomic(file: string, value: string): Promise<void> {
 async function exists(file: string): Promise<boolean> {
   try {
     await access(file, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function recoverInterruptedCodexApp(home: string): Promise<boolean> {
-  const lock = await readAppSessionLock(home);
-  if (lock && lock.pid !== process.pid && isProcessAlive(lock.pid)) {
-    return false;
-  }
-  if (
-    !lock &&
-    !(await isManagedCodexAppConfig(
-      home,
-      codexConfigPath(home),
-      CODEX_APP_CONFIG_MARKER_START,
-      modelCatalogPath(home),
-    ))
-  ) {
-    return false;
-  }
-  try {
-    await restoreCodexApp(home);
     return true;
   } catch {
     return false;

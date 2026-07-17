@@ -9,8 +9,8 @@ interface, depth, seam, adapter, leverage, locality) comes from the
 ## Agents (the harness families)
 
 A **harness** is a Togetherlink adapter for one coding-agent CLI. There are two
-architecturally distinct families (recorded as `ProxiedHarness` and
-`SpawnedHarness` in `harness-types.ts`):
+architecturally distinct families (documented in `harness-types.ts`, not
+currently enforced in the type system):
 
 - **Proxied harness** — Claude, Codex. `run` spawns a daemon-backed proxy: it
   registers a session, starts a keepalive, routes `/v1/*` traffic through the

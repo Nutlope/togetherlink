@@ -36,30 +36,23 @@ export function defineHarness(impl: Harness): Harness {
 }
 
 /**
- * The two harness families (#8). The single `Harness.run` signature used to
- * hide two architecturally different shapes behind one interface:
+ * The two harness families (#8). The single `Harness.run` signature hides two
+ * architecturally different shapes behind one interface:
  *
- * - **ProxiedHarness** — Claude, Codex. `run` spawns a daemon-backed proxy: it
+ * - **Proxied** — Claude, Codex. `run` spawns a daemon-backed proxy: it
  *   registers a session, starts a keepalive, proxies /v1/* traffic through the
  *   daemon's Together client, tracks cost via a CostTracker, and deregisters
  *   on exit. The lifecycle lives in `runProxiedSession` (proxied-session.ts).
  *
- * - **SpawnedHarness** — OpenCode, Grok, Pi. `run` spawns the agent binary
- *   directly; the binary talks to Together using inline config (OpenCode), an
- *   isolated temporary GROK_HOME (Grok), or a models.json on disk (Pi). No
- *   daemon, no proxy, no CostTracker, no keepalive.
+ * - **Spawned** — OpenCode, Grok, Pi. `run` spawns the agent binary directly;
+ *   the binary talks to Together using inline config (OpenCode), an isolated
+ *   temporary GROK_HOME (Grok), or a models.json on disk (Pi). No daemon, no
+ *   proxy, no CostTracker, no keepalive.
  *
- * Recording this split in the type system (and in CONTEXT.md) stops the
- * abstraction from hiding two architectures as one. The orphan "codex-app"
+ * The split is documented here and in CONTEXT.md but is not currently enforced
+ * in the type system — the former `ProxiedHarness`/`SpawnedHarness` type
+ * declarations were unused and have been removed. See PLAN.md "Improvement
+ * Backlog" for re-introducing them as enforced types. The orphan "codex-app"
  * agent id the daemon knows about (absent from HarnessId) is surfaced for
  * future reconciliation.
  */
-export type ProxiedHarness = Harness & {
-  /** This harness routes /v1/* traffic through the daemon proxy. */
-  readonly family: "proxied";
-};
-
-export type SpawnedHarness = Harness & {
-  /** This harness spawns the agent binary; the binary talks to Together itself. */
-  readonly family: "spawned";
-};

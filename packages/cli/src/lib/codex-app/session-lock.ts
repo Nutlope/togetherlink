@@ -1,17 +1,19 @@
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { isProcessAlive } from "../paths.js";
 
 /**
- * The codex-app session lock — the deep module behind "is another codex-app
- * session already running?". Carved out of the former 722-line `codex-app.ts`
- * so the deletion test passes inside the file: lock read/write/recover + the
- * "is this config one we manage?" check now live behind their own interface,
- * unit-testable without booting a process or touching TOML/backup logic.
+ * The codex-app session lock module — owns the lock file written on configure
+ * (`writeAppSessionLock`) and removed on restore, plus the "is this config one
+ * we manage?" check. Carved out of the former 722-line `codex-app.ts` so lock
+ * write and config detection are unit-testable without booting a process or
+ * touching TOML/backup logic.
  *
- * `recoverInterruptedCodexApp` stays in the orchestrator (`codex-app.ts`)
- * because it composes lock-read + restore + launch — it's not lock logic.
+ * The lock is currently write-only: the concurrency guard
+ * (`assertNoLiveCodexAppSession`) and interrupted-session recovery
+ * (`recoverInterruptedCodexApp`) that read it were dead code and have been
+ * removed. See PLAN.md "Improvement Backlog" for the re-add-vs-rip-out
+ * decision.
  */
 
 export type CodexAppSessionLock = {
@@ -30,34 +32,8 @@ function togetherlinkHomeDir(home: string): string {
   return process.env.TOGETHERLINK_HOME || path.join(home, ".togetherlink");
 }
 
-export async function readAppSessionLock(home: string): Promise<CodexAppSessionLock | undefined> {
-  const raw = await readTextIfExists(appSessionLockPath(home));
-  if (!raw) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(raw) as CodexAppSessionLock;
-    if (typeof parsed.pid === "number" && typeof parsed.sessionToken === "string") {
-      return parsed;
-    }
-  } catch {
-    // Invalid lock files are treated as stale and overwritten by the next session.
-  }
-  return undefined;
-}
-
 export async function writeAppSessionLock(home: string, lock: CodexAppSessionLock): Promise<void> {
   await writeTextAtomic(appSessionLockPath(home), `${JSON.stringify(lock, null, 2)}\n`);
-}
-
-export async function assertNoLiveCodexAppSession(home: string): Promise<void> {
-  const lock = await readAppSessionLock(home);
-  if (!lock || lock.pid === process.pid || !isProcessAlive(lock.pid)) {
-    return;
-  }
-  throw new Error(
-    `Another togetherlink chatgpt session appears to be running (pid ${lock.pid}). Stop it with Ctrl+C, or run \`togetherlink chatgpt --restore\` after it exits.`,
-  );
 }
 
 /**
