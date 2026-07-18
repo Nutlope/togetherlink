@@ -80,6 +80,8 @@ function installIdPath(home = os.homedir()): string {
   return path.join(togetherlinkHome(home), "install-id");
 }
 
+const pendingInstallIds = new Map<string, Promise<string>>();
+
 export function telemetryDisabledByEnvironment(): boolean {
   return (
     Boolean(process.env.TOGETHERLINK_TELEMETRY_DISABLED) || process.env.GITHUB_ACTIONS === "true"
@@ -93,6 +95,23 @@ export function telemetryDisabledByEnvironment(): boolean {
  */
 export async function getInstallId(home = os.homedir()): Promise<string> {
   const filePath = installIdPath(home);
+  const pending = pendingInstallIds.get(filePath);
+  if (pending) {
+    return pending;
+  }
+
+  const operation = readOrCreateInstallId(filePath);
+  pendingInstallIds.set(filePath, operation);
+  try {
+    return await operation;
+  } finally {
+    if (pendingInstallIds.get(filePath) === operation) {
+      pendingInstallIds.delete(filePath);
+    }
+  }
+}
+
+async function readOrCreateInstallId(filePath: string): Promise<string> {
   const existing = await readJsonIfExists<{ id?: string }>(filePath);
   if (existing.id) {
     return existing.id;

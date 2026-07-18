@@ -6,7 +6,7 @@ import {
   emitContextTrimAlarm,
   parseTogetherContextLengthInputTokens,
 } from "../../cli/src/lib/context-fit.js";
-import { sendTelemetryEvent } from "../../cli/src/lib/telemetry.js";
+import { getInstallId, sendTelemetryEvent } from "../../cli/src/lib/telemetry.js";
 
 describe("telemetry", () => {
   let tmpDir: string;
@@ -50,6 +50,16 @@ describe("telemetry", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  test("returns one stable install id when first-use callers race", async () => {
+    const ids = await Promise.all(Array.from({ length: 10 }, () => getInstallId(tmpDir)));
+
+    expect(new Set(ids)).toHaveLength(1);
+    const stored = JSON.parse(
+      await readFile(path.join(tmpDir, ".togetherlink", "install-id"), "utf8"),
+    );
+    expect(stored.id).toBe(ids[0]);
   });
 
   test("context_trim telemetry event is POSTed with the structured trim payload", async () => {

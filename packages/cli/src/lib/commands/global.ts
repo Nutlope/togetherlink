@@ -10,7 +10,6 @@ import {
   resolveStoredExaApiKey,
   setGlobalExaApiKey,
 } from "../global-config.js";
-import { EXA_API_KEY_ENV_REF } from "../together-core.js";
 import { VERSION } from "../version.js";
 
 export function printHelp() {
@@ -35,8 +34,7 @@ Docs: https://togetherlink.vercel.app/llms.txt
 `);
 }
 
-export async function runConfigure(): Promise<boolean> {
-  const home = os.homedir();
+export async function runConfigure(home = os.homedir()): Promise<boolean> {
   clack.intro("togetherlink configure");
 
   const detected = detectInstalledHarnesses();
@@ -81,13 +79,10 @@ export async function runConfigure(): Promise<boolean> {
     }
     exaApiKey = enteredExa.trim();
   }
-  // If the key came from the environment, store a reference rather than the
-  // literal, so we don't persist a secret that lives in .env.
-  const exaToStore =
-    exaApiKey && process.env.EXA_API_KEY && exaApiKey === process.env.EXA_API_KEY.trim()
-      ? EXA_API_KEY_ENV_REF
-      : exaApiKey;
-  await setGlobalExaApiKey(home, exaToStore);
+  // `configure` is the explicit persistent-credential flow. Store the resolved
+  // Exa key just like the Together key above so it survives a cold start even
+  // when the current shell's EXA_API_KEY does not.
+  await setGlobalExaApiKey(home, exaApiKey);
   if (exaApiKey) {
     clack.log.success("Exa web search enabled.");
   } else {

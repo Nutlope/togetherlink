@@ -107,7 +107,7 @@ togetherlink routes to a curated set of Together AI models. The default for Code
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.1):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.2):
 
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
