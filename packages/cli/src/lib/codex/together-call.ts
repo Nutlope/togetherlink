@@ -14,6 +14,7 @@ import type {
 
 type CodexTogetherOptions = {
   apiKey: string;
+  baseUrl: string;
   debug?: boolean | undefined;
 };
 

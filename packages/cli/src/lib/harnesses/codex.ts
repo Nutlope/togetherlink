@@ -2,7 +2,7 @@ import { resolveCodexModel } from "../codex/defaults.js";
 import { runCodexTogether } from "../codex/core.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
-import { resolveTogetherApiKey } from "../together-core.js";
+import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 
 export default defineHarness({
   id: HARNESS.CODEX,
@@ -20,6 +20,7 @@ export default defineHarness({
     const selectedModel = resolveCodexModel(ctx.main);
     const result = await runCodexTogether({
       apiKey,
+      baseUrl: resolveTogetherBaseUrl(),
       home: ctx.home,
       modelId: selectedModel.id,
       ...(ctx.passthrough ? { args: ctx.passthrough } : {}),

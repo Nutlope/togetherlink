@@ -238,12 +238,13 @@ class SqliteSessionStore implements SessionStore {
     this.db
       .prepare(`
         INSERT INTO sessions (
-          token, agent, pid, started_at, last_seen_at, ended_at, model_label, api_key, auth_token,
+          token, agent, pid, started_at, last_seen_at, ended_at, model_label, api_key, base_url,
+          auth_token,
           model_id, target_model_id, model_name, model_definition_json,
           claude_code_max_output_tokens, claude_code_max_output_tokens_user_set, debug,
           prompt_tokens, cached_tokens, completion_tokens, cost_usd, cost_summary,
           external_summary, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
           agent = excluded.agent,
           pid = excluded.pid,
@@ -252,6 +253,7 @@ class SqliteSessionStore implements SessionStore {
           ended_at = excluded.ended_at,
           model_label = excluded.model_label,
           api_key = excluded.api_key,
+          base_url = excluded.base_url,
           auth_token = excluded.auth_token,
           model_id = excluded.model_id,
           target_model_id = excluded.target_model_id,
@@ -351,6 +353,7 @@ class SqliteSessionStore implements SessionStore {
         ended_at INTEGER,
         model_label TEXT NOT NULL,
         api_key TEXT NOT NULL,
+        base_url TEXT,
         auth_token TEXT,
         model_id TEXT,
         target_model_id TEXT,
@@ -371,6 +374,7 @@ class SqliteSessionStore implements SessionStore {
       CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions(ended_at DESC);
     `);
     this.addColumnIfMissing("sessions", "last_seen_at", "INTEGER");
+    this.addColumnIfMissing("sessions", "base_url", "TEXT");
     this.addColumnIfMissing("sessions", "claude_code_max_output_tokens", "INTEGER");
     this.addColumnIfMissing("sessions", "claude_code_max_output_tokens_user_set", "INTEGER");
   }
@@ -426,6 +430,7 @@ function sessionParams(session: SessionPersistInput, updatedAt: number): unknown
     session.endedAt ?? null,
     session.modelLabel,
     session.apiKey,
+    session.baseUrl ?? null,
     session.authToken ?? null,
     session.modelId ?? null,
     session.targetModelId ?? null,
@@ -457,6 +462,7 @@ type SessionRow = {
   ended_at: number | null;
   model_label: string;
   api_key: string;
+  base_url: string | null;
   auth_token: string | null;
   model_id: string | null;
   target_model_id: string | null;
@@ -479,6 +485,7 @@ function rowToSessionBase(row: SessionRow): StoredSession {
     agent: row.agent as AgentId,
     ...(typeof row.pid === "number" ? { pid: row.pid } : {}),
     apiKey: row.api_key,
+    ...(row.base_url ? { baseUrl: row.base_url } : {}),
     ...(row.auth_token ? { authToken: row.auth_token } : {}),
     modelLabel: row.model_label,
     modelDefinition: parseJson(row.model_definition_json, {}) as StoredSession["modelDefinition"],

@@ -28,6 +28,8 @@ import type {
 
 export type ClaudeProxyOptions = {
   apiKey: string;
+  /** Session-scoped Together API root resolved by the launching process. */
+  baseUrl: string;
   /** Claude-facing model alias, e.g. together-glm-5-2. */
   modelId: string;
   /** Together API model id, e.g. zai-org/GLM-5.2. */

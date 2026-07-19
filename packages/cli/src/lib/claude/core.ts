@@ -35,6 +35,7 @@ const DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS = 32_000;
 
 export type ClaudeLaunchOptions = {
   apiKey: string;
+  baseUrl: string;
   modelId?: string;
   args?: string[];
 };
@@ -134,6 +135,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
   const result: ProxiedSessionResult = await runProxiedSession({
     agent: "claude",
     apiKey: options.apiKey,
+    baseUrl: options.baseUrl,
     modelId: selectedModel.alias,
     registrationModelId: selectedModel.alias,
     targetModelId: selectedModel.definition.id,

@@ -5,9 +5,14 @@ import type { CostTracker } from "../cost.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
-import { createSseIdleWatchdog, sseEventPayload, takeSseEvents } from "../sse.js";
-import { writeResponsesSse } from "./sse.js";
 import { backoffMs, sleep } from "../together-retry.js";
+import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
+import {
+  readTogetherSseWithRetry,
+  TogetherSseIdleTimeoutError,
+  TogetherSseRetryResponseError,
+} from "../together-stream.js";
+import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty } from "./content-format.js";
 import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
 import {
@@ -66,6 +71,7 @@ class SseIdleTimeoutError extends Error {
 
 type CodexStreamOptions = {
   apiKey: string;
+  baseUrl: string;
   modelId: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
@@ -146,8 +152,20 @@ export async function streamResponseFromTogether(
       perf,
     );
   } catch (err) {
-    if (err instanceof SseIdleTimeoutError) {
+    if (
+      err instanceof SseIdleTimeoutError ||
+      err instanceof TogetherSseIdleTimeoutError ||
+      err instanceof TogetherResponseHeaderTimeoutError
+    ) {
       return failStream(res, responseId, 504, err.message);
+    }
+    if (err instanceof TogetherSseRetryResponseError) {
+      return failStream(
+        res,
+        responseId,
+        err.response.status,
+        `Together SSE retry returned ${err.response.status}: ${(await err.response.text()).slice(0, 1000)}`,
+      );
     }
     throw err;
   }
@@ -203,8 +221,40 @@ async function streamTogetherTurn(
   let lastProgressAt = Date.now();
   const progressTimeoutMs = codexStreamIdleTimeoutMs();
   const turnTimeoutMs = codexStreamTurnTimeoutMs();
+  let streamAttempt = 0;
 
-  for await (const chunk of parseSseChunks(upstream.body)) {
+  for await (const eventData of readTogetherSseWithRetry(
+    upstream,
+    async () => {
+      const retried = await fetchTogetherChat(payload, options, modelDefinition, signal);
+      return retried.ok
+        ? retried.response
+        : new Response(retried.text, {
+            status: retried.status,
+            headers: { "content-type": "application/json" },
+          });
+    },
+    {
+      isOutputStarted: () => streamOutputStarted(outputState),
+      onRetry: ({ attempt, maxRetries, timeoutMs }) =>
+        debugLog(options, "retrying together stream after idle timeout", {
+          attempt,
+          maxRetries,
+          model: payload.model,
+          timeoutMs,
+        }),
+    },
+  )) {
+    if (eventData.attempt !== streamAttempt) {
+      streamAttempt = eventData.attempt;
+      toolCalls.clear();
+      usage = undefined;
+      reasoningText = "";
+      text = "";
+      finishReason = undefined;
+      lastProgressAt = Date.now();
+    }
+    const chunk = eventData.data;
     assertStreamTurnDuration(turnStartedAt, turnTimeoutMs);
     if (chunk === "[DONE]") {
       break;
@@ -337,8 +387,20 @@ async function streamResponseWithNativeTools(
         perf,
       );
     } catch (err) {
-      if (err instanceof SseIdleTimeoutError) {
+      if (
+        err instanceof SseIdleTimeoutError ||
+        err instanceof TogetherSseIdleTimeoutError ||
+        err instanceof TogetherResponseHeaderTimeoutError
+      ) {
         return failStream(res, responseId, 504, err.message);
+      }
+      if (err instanceof TogetherSseRetryResponseError) {
+        return failStream(
+          res,
+          responseId,
+          err.response.status,
+          `Together SSE retry returned ${err.response.status}: ${(await err.response.text()).slice(0, 1000)}`,
+        );
       }
       throw err;
     }
@@ -674,55 +736,10 @@ function mergeUsage(
   };
 }
 
-async function* parseSseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const decoder = new TextDecoder();
-  const reader = body.getReader();
-  const idleTimeoutMs = codexStreamIdleTimeoutMs();
-  // One persistent idle-watchdog timer for the whole stream, reset on every
-  // chunk read via timer.refresh() instead of allocating a fresh
-  // Promise.race + setTimeout per chunk. Disposed in finally so the timer
-  // never keeps the event loop open after the stream ends.
-  const watchdog = createSseIdleWatchdog(
-    idleTimeoutMs,
-    () => new SseIdleTimeoutError(idleTimeoutMs),
-  );
-  let buffer = "";
-  try {
-    while (true) {
-      const read = await watchdog.read(reader);
-      if (read.done) {
-        break;
-      }
-      buffer += decoder.decode(read.value, { stream: true });
-      for (const data of takeSseEvents(buffer)) {
-        buffer = data.remaining;
-        if (data.payload) {
-          yield data.payload;
-        }
-      }
-    }
-  } catch (err) {
-    if (err instanceof SseIdleTimeoutError) {
-      await reader.cancel(err).catch(() => undefined);
-    }
-    throw err;
-  } finally {
-    watchdog.dispose();
-    reader.releaseLock();
-  }
-
-  buffer += decoder.decode();
-  const trailing = buffer.trim();
-  if (trailing) {
-    const payload = sseEventPayload(trailing);
-    if (payload) {
-      yield payload;
-    }
-  }
-}
-
 function codexStreamIdleTimeoutMs(): number {
-  const raw = process.env.TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS;
+  const raw =
+    process.env.TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS ??
+    process.env.TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0
     ? Math.max(100, parsed)

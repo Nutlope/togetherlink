@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { ModelDefinition } from "@togetherlink/models";
 import { TOGETHER_BASE_URL } from "./together-core.js";
 import { backoffMs, parseRetryAfter, sleep } from "./together-retry.js";
+import { persistRequestDiagnostic } from "./request-diagnostics.js";
 import {
   CONTEXT_FIT_MAX_ATTEMPTS,
   applyContextFit,
@@ -36,9 +38,39 @@ import type { ContextTrimTelemetryInfo } from "./telemetry.js";
 const RETRYABLE_STATUSES = new Set([429, 503]);
 
 export const MAX_RETRIES = 3;
+const DEFAULT_STREAM_RETRIES = 1;
+const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 30_000;
+
+export type TogetherResponseDiagnostics = {
+  clientRequestId: string;
+  upstreamRequestId?: string | undefined;
+};
+
+const responseDiagnostics = new WeakMap<Response, TogetherResponseDiagnostics>();
+
+export class TogetherResponseHeaderTimeoutError extends Error {
+  constructor(
+    readonly timeoutMs: number,
+    readonly requestId: string,
+  ) {
+    super(
+      `Together returned no response headers within ${timeoutMs}ms ` +
+        `(client request ID: ${requestId}).`,
+    );
+    this.name = "TogetherResponseHeaderTimeoutError";
+  }
+}
+
+export function getTogetherResponseDiagnostics(
+  response: Response,
+): TogetherResponseDiagnostics | undefined {
+  return responseDiagnostics.get(response);
+}
 
 export type TogetherClientOptions = {
   apiKey: string;
+  /** Explicit for proxied sessions; defaults only for direct library callers. */
+  baseUrl?: string;
   debug?: boolean | undefined;
 };
 
@@ -72,7 +104,10 @@ export async function postChatCompletion(
   signal?: AbortSignal,
   fit?: ContextFitConfig,
 ): Promise<Response> {
-  const doFetch = (body: string) => postChatCompletionOnce(body, options, signal);
+  const doFetch = (body: string) =>
+    payload.stream === true
+      ? streamFetchOnce(body, options, signal)
+      : postChatCompletionOnce(body, options, signal);
   if (!fit) {
     return doFetch(JSON.stringify(payload));
   }
@@ -88,20 +123,21 @@ async function postChatCompletionOnce(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     let response: Response;
     try {
-      response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${options.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body,
-        ...(signal ? { signal } : {}),
-      });
+      response = await fetchTogetherResponse(body, options, signal, attempt);
     } catch (err) {
-      // Network-level failure (DNS, connection reset, timeout). The request
-      // never reached Together, so it's safe to retry. After MAX_RETRIES,
-      // synthesize a 503 Response so the caller's error mapping sees a
-      // consistent shape.
+      // Header timeouts get one short, separately configurable retry and keep
+      // their typed error. Other network failures use the legacy transient
+      // retry budget and eventually become a 503 for existing error mapping.
+      if (signal?.aborted) {
+        throw err;
+      }
+      if (err instanceof TogetherResponseHeaderTimeoutError) {
+        if (attempt < responseHeaderRetries()) {
+          await sleep(backoffMs(attempt));
+          continue;
+        }
+        throw err;
+      }
       if (attempt < MAX_RETRIES) {
         await sleep(backoffMs(attempt));
         continue;
@@ -122,10 +158,10 @@ async function postChatCompletionOnce(
 }
 
 /**
- * POST /chat/completions as a streaming request. No 429/503 retry at this layer
- * (transient stream retry lives in the harness idle-retry loops), but it does
- * run the shared context-fit retry when `fit` is provided — that fires on a
- * non-OK 400 *before* any stream bytes flow, so it's transparent to callers.
+ * POST /chat/completions as a streaming request. Response-header failures and
+ * retryable pre-stream HTTP statuses are retried here because no SSE bytes can
+ * have reached a harness yet. It also runs the shared context-fit retry when
+ * `fit` is provided — that fires on a non-OK 400 before stream bytes flow.
  *
  * `body` lets callers that have already serialized the payload (e.g. the
  * native-tool continuation loop) resend identical bytes; in that mode the
@@ -145,20 +181,131 @@ export async function postChatCompletionStream(
   return fetchWithContextFit(payload, fit, doFetch);
 }
 
-function streamFetchOnce(
+async function streamFetchOnce(
   body: string,
   options: TogetherClientOptions,
   signal?: AbortSignal,
 ): Promise<Response> {
-  return fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${options.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body,
-    ...(signal ? { signal } : {}),
-  });
+  const maxRetries = Math.max(streamRetries(), responseHeaderRetries());
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetchTogetherResponse(body, options, signal, attempt);
+    } catch (err) {
+      const allowedRetries =
+        err instanceof TogetherResponseHeaderTimeoutError
+          ? responseHeaderRetries()
+          : streamRetries();
+      if (signal?.aborted || attempt >= allowedRetries) {
+        throw err;
+      }
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+    if (response.ok || !RETRYABLE_STATUSES.has(response.status) || attempt >= maxRetries) {
+      return response;
+    }
+    await response.arrayBuffer().catch(() => undefined);
+    await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoffMs(attempt));
+  }
+  throw new Error("Together stream request failed after retries.");
+}
+
+async function fetchTogetherResponse(
+  body: string,
+  options: TogetherClientOptions,
+  signal: AbortSignal | undefined,
+  attempt: number,
+): Promise<Response> {
+  const clientRequestId = randomUUID();
+  const timeoutMs = responseHeaderTimeoutMs();
+  const controller = new AbortController();
+  let timeoutError: TogetherResponseHeaderTimeoutError | undefined;
+  const abortFromCaller = () => controller.abort(signal?.reason);
+  if (signal?.aborted) {
+    abortFromCaller();
+  } else {
+    signal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
+  const timeout = setTimeout(() => {
+    timeoutError = new TogetherResponseHeaderTimeoutError(timeoutMs, clientRequestId);
+    controller.abort(timeoutError);
+  }, timeoutMs);
+  timeout.unref?.();
+
+  try {
+    const response = await fetch(`${options.baseUrl ?? TOGETHER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        "Content-Type": "application/json",
+        "X-Client-Request-ID": clientRequestId,
+      },
+      body,
+      signal: controller.signal,
+    });
+    const responseRequestId = upstreamRequestId(response);
+    responseDiagnostics.set(response, {
+      clientRequestId,
+      ...(responseRequestId ? { upstreamRequestId: responseRequestId } : {}),
+    });
+    return response;
+  } catch (err) {
+    signal?.removeEventListener("abort", abortFromCaller);
+    const reason = timeoutError ? "timeout" : signal?.aborted ? "caller_abort" : "network_error";
+    const surfaced = timeoutError ?? err;
+    await persistRequestDiagnostic({
+      phase: "response_headers",
+      reason,
+      clientRequestId,
+      model: modelFromSerializedBody(body),
+      attempt,
+      ...(timeoutError ? { timeoutMs } : {}),
+      error: surfaced instanceof Error ? surfaced.message : String(surfaced),
+    }).catch(() => undefined);
+    throw surfaced;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function responseHeaderTimeoutMs(): number {
+  const raw = process.env.TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(100, parsed)
+    : DEFAULT_RESPONSE_HEADER_TIMEOUT_MS;
+}
+
+function streamRetries(): number {
+  const raw = process.env.TOGETHERLINK_STREAM_RETRIES;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_STREAM_RETRIES;
+}
+
+function responseHeaderRetries(): number {
+  const raw =
+    process.env.TOGETHERLINK_RESPONSE_HEADER_RETRIES ?? process.env.TOGETHERLINK_STREAM_RETRIES;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_STREAM_RETRIES;
+}
+
+function upstreamRequestId(response: Response): string | undefined {
+  return (
+    response.headers.get("x-request-id") ??
+    response.headers.get("request-id") ??
+    response.headers.get("cf-ray") ??
+    undefined
+  );
+}
+
+function modelFromSerializedBody(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { model?: unknown };
+    return typeof parsed.model === "string" ? parsed.model : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

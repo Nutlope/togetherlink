@@ -1,4 +1,4 @@
-import { TOGETHER_API_KEY_ENV_REF } from "../together-core.js";
+import { TOGETHER_API_KEY_ENV_REF, TOGETHER_BASE_URL } from "../together-core.js";
 import {
   OPENCODE_PROVIDER_ID,
   OPENCODE_DEFAULT_MODEL,
@@ -36,7 +36,7 @@ type OpencodeConfig = {
 type OpencodeProviderConfig = {
   npm: string;
   name: string;
-  options: { apiKey: string };
+  options: { apiKey: string; baseURL: string };
   models?: Record<string, unknown>;
   /**
    * Restricts the provider so ONLY these model ids appear in /models
@@ -63,11 +63,13 @@ type OpencodeProviderConfig = {
 export function buildOpencodeConfigJson({
   modelId = OPENCODE_DEFAULT_MODEL,
   apiKeyEnvRef = TOGETHER_API_KEY_ENV_REF,
+  baseUrl = TOGETHER_BASE_URL,
   buildPrompt = OPENCODE_BUILD_PROMPT,
   visionPrompt = OPENCODE_VISION_AGENT_PROMPT,
 }: {
   modelId?: string;
   apiKeyEnvRef?: string;
+  baseUrl?: string;
   buildPrompt?: string;
   visionPrompt?: string;
 } = {}): OpencodeConfig {
@@ -84,7 +86,7 @@ export function buildOpencodeConfigJson({
     // full suffix still fits without hitting the picker's truncation width
     // (opencode #20968).
     name: "Together AI",
-    options: { apiKey: apiKeyEnvRef },
+    options: { apiKey: apiKeyEnvRef, baseURL: baseUrl },
     models,
     // Restrict /models to exactly the curated set. Without this, OpenCode also
     // shows Together's full catalog (hundreds of models) because the `models`

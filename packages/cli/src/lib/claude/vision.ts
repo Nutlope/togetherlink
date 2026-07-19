@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { TOGETHER_BASE_URL, VISION_MODELS, VISION_PROMPT } from "@togetherlink/models";
+import { VISION_MODELS, VISION_PROMPT } from "@togetherlink/models";
+import { postChatCompletion } from "../together-client.js";
 
 /**
  * Image interception for the Claude proxy. GLM-5.2 is text-only, so when Claude
@@ -33,6 +34,7 @@ export type UrlBlock = {
 
 export type VisionRequestOptions = {
   apiKey: string;
+  baseUrl: string;
   debug?: boolean | undefined;
 };
 
@@ -83,15 +85,7 @@ async function callVisionModel(
   };
 
   try {
-    const response = await fetch(`${TOGETHER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      ...(signal ? { signal } : {}),
-    });
+    const response = await postChatCompletion(body, options, signal);
     const text = await response.text();
     if (!response.ok) {
       debug(options, "vision error", { model, status: response.status, body: text.slice(0, 500) });

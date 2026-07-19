@@ -52,6 +52,8 @@ export type ProxiedSessionSpec = {
   /** The agent id ("claude" / "codex") — used for registration + telemetry. */
   agent: "claude" | "codex";
   apiKey: string;
+  /** Upstream Together API root, resolved once by the launching CLI process. */
+  baseUrl: string;
   /** Resolved model: the id Together expects + the human name for the banner. */
   modelId: string;
   targetModelId: string;
@@ -108,6 +110,7 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
     authToken,
     agent: spec.agent,
     apiKey: spec.apiKey,
+    baseUrl: spec.baseUrl,
     modelLabel: spec.modelName,
     modelId: spec.registrationModelId ?? spec.modelId,
     targetModelId: spec.targetModelId,

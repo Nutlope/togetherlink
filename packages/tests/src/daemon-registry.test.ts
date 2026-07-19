@@ -33,6 +33,7 @@ function makeRequest(token: string, agent: AgentId = "claude"): RegisterSessionR
     authToken: `auth-${token}`,
     agent,
     apiKey: "test-key",
+    baseUrl: "https://api.together.ai/v1",
     modelLabel: "GLM 5.2",
     modelId: "together-glm-5-2",
     targetModelId: "zai-org/GLM-5.2",
@@ -110,5 +111,18 @@ describe("SessionRegistry (#5 — exported, injectable, testable in isolation)",
     reg.register(state);
     const got = reg.get("codex-1");
     expect(got?.options).toBeDefined();
+  });
+
+  test("keeps different upstream base URLs isolated by daemon session", () => {
+    const reg = new SessionRegistry();
+    const first = makeRequest("first", "claude");
+    first.baseUrl = "http://first.test/together/v1";
+    const second = makeRequest("second", "codex");
+    second.baseUrl = "http://second.test/together/v1";
+    reg.register(buildSession(first));
+    reg.register(buildSession(second));
+
+    expect(reg.get("first")?.options?.baseUrl).toBe("http://first.test/together/v1");
+    expect(reg.get("second")?.options?.baseUrl).toBe("http://second.test/together/v1");
   });
 });

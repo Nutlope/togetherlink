@@ -20,6 +20,8 @@ import type { ResponsesRequest, ResponsesTool } from "./wire-types.js";
 
 export type CodexProxyOptions = {
   apiKey: string;
+  /** Session-scoped Together API root resolved by the launching process. */
+  baseUrl: string;
   modelId: string;
   targetModelId: string;
   modelName: string;

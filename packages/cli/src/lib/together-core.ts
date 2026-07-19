@@ -9,6 +9,19 @@ export const TOGETHER_BASE_URL = SHARED_TOGETHER_BASE_URL;
 export const TOGETHER_API_KEY_ENV_REF = "{env:TOGETHER_API_KEY}";
 export const EXA_API_KEY_ENV_REF = "{env:EXA_API_KEY}";
 
+/**
+ * Resolve the Together API root from the trusted launcher environment.
+ * Repository .env loading intentionally excludes TOGETHER_BASE_URL.
+ */
+export function resolveTogetherBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.TOGETHER_BASE_URL?.trim();
+  if (!override) {
+    return TOGETHER_BASE_URL;
+  }
+  const normalized = override.replace(/\/+$/, "");
+  return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+}
+
 export type JsonObject = Record<string, unknown>;
 
 export async function readJsonIfExists<T extends JsonObject = JsonObject>(

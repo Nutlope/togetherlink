@@ -40,8 +40,8 @@ credentials at `POST /internal/sessions`, and the daemon resolves every
 `/v1/*` request to that session by the presented Bearer token.
 
 **Session** — a registered proxied-harness invocation. A session carries its
-own Together `apiKey`, model, and `CostTracker`; the daemon owns the session
-registry (`SessionRegistry` in `daemon/state.ts`).
+own Together `apiKey`, upstream `baseUrl`, model, and `CostTracker`; the daemon
+owns the session registry (`SessionRegistry` in `daemon/state.ts`).
 
 **SessionRegistry** — the in-memory + sqlite-backed registry of active
 sessions. Exported and injectable into `runDaemon` so it's testable in
@@ -54,9 +54,11 @@ migrations, and resilience behind a 7-method interface.
 ## The Together client seam
 
 **Together client** (`together-client.ts`) — the deep HTTP client for
-`POST /chat/completions`. Owns the fetch + 429/503 retry loop + backoff. Each
-harness's `together-call.ts` maps the response to its own wire-format error
-shape on top (Anthropic vs OpenAI Responses).
+`POST /chat/completions`. Owns the fetch + response-header timeout + 429/503
+retry loop + backoff. **Together stream transport** (`together-stream.ts`)
+owns shared SSE framing, idle watchdog, pre-output retry, cancellation, and
+request diagnostics for Claude and Codex. Each harness maps responses and SSE
+events to its own wire format on top (Anthropic vs OpenAI Responses).
 
 **Wire format** — the request/response shape an agent CLI speaks. Claude speaks
 the Anthropic Messages API (`/v1/messages`); Codex speaks the OpenAI Responses

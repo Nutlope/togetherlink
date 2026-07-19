@@ -37,6 +37,16 @@ togetherlink opencode     # alias: topencode
 
 If no Together API key is configured yet, an interactive launch automatically runs `togetherlink configure` first. You can also run `togetherlink configure` directly, or set `TOGETHER_API_KEY`. The installed binary keeps itself up to date automatically from `togetherlink.vercel.app`.
 
+To route model requests through a compatible credential proxy, set `TOGETHER_BASE_URL` in the launcher environment. TogetherLink appends `/v1` when needed and uses `https://api.together.ai/v1` when it is unset:
+
+```bash
+export TOGETHER_API_KEY=phantom-key
+export TOGETHER_BASE_URL=http://127.0.0.1:1234/together
+togetherlink codex
+```
+
+`TOGETHER_BASE_URL` applies to every coding harness and is intentionally not loaded from repository `.env` files.
+
 If the underlying agent CLI is missing, togetherlink does not install it automatically. It prints the official install command and docs link for the selected tool, then exits.
 
 To disable TogetherLink's anonymous analytics, set:

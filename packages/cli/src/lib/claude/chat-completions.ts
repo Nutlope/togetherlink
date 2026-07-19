@@ -26,6 +26,7 @@ import type { AnthropicMessagesRequest, OpenAIChatResponse } from "./wire-types.
 
 type ClaudeChatOptions = {
   apiKey: string;
+  baseUrl: string;
   modelId: string;
   targetModelId: string;
   modelDefinition: ModelDefinition;

@@ -15,7 +15,7 @@ import {
 import type { RegisterSessionRequest } from "./daemon/state.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
-import { resolveTogetherApiKey } from "./together-core.js";
+import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "./together-core.js";
 import {
   removeManagedBlock as tomlRemoveManagedBlock,
   removeTomlSections,
@@ -83,6 +83,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     authToken,
     agent: "codex-app",
     apiKey,
+    baseUrl: resolveTogetherBaseUrl(),
     modelLabel: `${selectedModel.definition.name} (ChatGPT App alpha)`,
     modelId: selectedModel.definition.id,
     targetModelId: selectedModel.definition.id,

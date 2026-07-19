@@ -9,6 +9,7 @@ import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session
 
 export type CodexLaunchOptions = {
   apiKey: string;
+  baseUrl: string;
   home: string;
   modelId?: string;
   args?: string[];
@@ -32,6 +33,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const result: ProxiedSessionResult = await runProxiedSession({
     agent: "codex",
     apiKey: options.apiKey,
+    baseUrl: options.baseUrl,
     modelId: selectedModel.definition.id,
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,

@@ -49,6 +49,16 @@ togetherlink configure        # stores it (skip prompts with the env present)
 
 The API key is required to actually route traffic; the installer lets you skip it (press Enter) and add it later.
 
+To route model requests through a compatible credential proxy, set `TOGETHER_BASE_URL` in the launcher environment. TogetherLink appends `/v1` when needed and defaults to `https://api.together.ai/v1` when the variable is absent:
+
+```
+export TOGETHER_API_KEY=phantom-key
+export TOGETHER_BASE_URL=http://127.0.0.1:1234/together
+togetherlink codex
+```
+
+This applies to every coding harness. `TOGETHER_BASE_URL` is intentionally not loaded from repository `.env` files.
+
 To disable TogetherLink's anonymous analytics:
 
 ```
@@ -107,7 +117,7 @@ togetherlink routes to a curated set of Together AI models. The default for Code
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.2):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.3):
 
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"

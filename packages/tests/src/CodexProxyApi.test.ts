@@ -7,6 +7,7 @@ const realFetch = globalThis.fetch.bind(globalThis);
 
 const options: CodexProxyOptions = {
   apiKey: "test-together-key",
+  baseUrl: "https://api.together.ai/v1",
   modelId: GLM_5_2.id,
   targetModelId: GLM_5_2.id,
   modelName: GLM_5_2.name,
@@ -48,6 +49,34 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.effective_context_window_percent).toBe(56);
     expect(first?.comp_hash).toBeNull();
     expect(first?.use_responses_lite).toBe(false);
+  });
+
+  test("routes chat completions through the session upstream base URL", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        urls.push(url);
+        return jsonResponse({
+          choices: [{ message: { content: "ROUTED" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        });
+      }),
+    );
+
+    const response = await postResponses(
+      {
+        model: GLM_5_2.id,
+        input: [{ type: "message", role: "user", content: "route me" }],
+      },
+      { ...options, baseUrl: "http://codex-upstream.test/together/v1" },
+    );
+
+    expect(response.status).toBe("completed");
+    expect(urls).toEqual(["http://codex-upstream.test/together/v1/chat/completions"]);
   });
 
   test("all models compact before Together tokenizer rejects (1.8x mismatch)", async () => {
@@ -525,6 +554,48 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(requests).toHaveLength(2);
     expect(response).toContain("response.output_text.delta");
     expect(response).toContain("recovered");
+    expect(response).toContain("response.completed");
+    expect(response).not.toContain("response.failed");
+  });
+
+  test("retries streamed Codex turns when Together never returns response headers", async () => {
+    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    let upstreamCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        upstreamCalls += 1;
+        if (upstreamCalls === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          });
+        }
+        return Promise.resolve(
+          sseResponse([
+            { choices: [{ delta: { content: "recovered after header timeout" } }] },
+            { choices: [{ finish_reason: "stop", delta: {} }] },
+          ]),
+        );
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
+    });
+
+    expect(upstreamCalls).toBe(2);
+    expect(response).toContain("recovered after header timeout");
     expect(response).toContain("response.completed");
     expect(response).not.toContain("response.failed");
   });
@@ -1734,9 +1805,12 @@ async function getModels(): Promise<Record<string, any>> {
   }
 }
 
-async function postResponses(body: unknown): Promise<Record<string, any>> {
+async function postResponses(
+  body: unknown,
+  proxyOptions: CodexProxyOptions = options,
+): Promise<Record<string, any>> {
   const server = http.createServer((req, res) => {
-    handleCodexProxyRequest(req, res, options).catch((error) => {
+    handleCodexProxyRequest(req, res, proxyOptions).catch((error) => {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     });

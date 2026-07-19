@@ -1,7 +1,7 @@
 import { resolveClaudeModel } from "../claude/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness } from "../harness-types.js";
-import { resolveTogetherApiKey } from "../together-core.js";
+import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 import { runClaudeTogether } from "../claude/core.js";
 
 export default defineHarness({
@@ -20,6 +20,7 @@ export default defineHarness({
     const selectedModel = resolveClaudeModel(ctx.main);
     const launchOptions = {
       apiKey,
+      baseUrl: resolveTogetherBaseUrl(),
       modelId: selectedModel.alias,
       ...(ctx.passthrough ? { args: ctx.passthrough } : {}),
     };

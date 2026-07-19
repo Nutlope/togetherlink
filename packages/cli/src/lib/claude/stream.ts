@@ -4,8 +4,16 @@ import { type ModelDefinition } from "@togetherlink/models";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
-import { consumeSseLines, writeSse } from "../sse.js";
-import { postChatCompletionStream } from "../together-client.js";
+import { writeSse } from "../sse.js";
+import {
+  postChatCompletionStream,
+  TogetherResponseHeaderTimeoutError,
+} from "../together-client.js";
+import {
+  readTogetherSseWithRetry,
+  TogetherSseIdleTimeoutError,
+  TogetherSseRetryResponseError,
+} from "../together-stream.js";
 import { CostTracker } from "../cost.js";
 import {
   APPROX_CHARS_PER_TOKEN,
@@ -34,6 +42,7 @@ import type {
 
 type ClaudeStreamOptions = {
   apiKey: string;
+  baseUrl: string;
   modelId: string;
   targetModelId: string;
   modelDefinition: ModelDefinition;
@@ -136,8 +145,14 @@ export async function streamAnthropicFromTogether(
     response = await postTogetherStream(payload, options, signal, perf);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    writeAnthropicError(res, 503, "overloaded_error", message);
-    return { ok: false, status: 503, error: message };
+    const timedOut = err instanceof TogetherResponseHeaderTimeoutError;
+    writeAnthropicError(
+      res,
+      timedOut ? 504 : 503,
+      timedOut ? "timeout_error" : "overloaded_error",
+      message,
+    );
+    return { ok: false, status: timedOut ? 504 : 503, error: message };
   }
 
   if (!response.ok) {
@@ -185,17 +200,33 @@ export async function streamAnthropicFromTogether(
   });
 
   if (nativeTools.length > 0) {
-    return await streamAnthropicNativeToolLoop({
-      res,
-      initialResponse: response,
-      initialPayload: payload,
-      initialMessages: upstreamMessages.slice(),
-      nativeTools,
-      targetModel: targetModel.definition,
-      model,
-      options,
-      ...(signal ? { signal } : {}),
-    });
+    try {
+      return await streamAnthropicNativeToolLoop({
+        res,
+        initialResponse: response,
+        initialPayload: payload,
+        initialMessages: upstreamMessages.slice(),
+        nativeTools,
+        targetModel: targetModel.definition,
+        model,
+        options,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (err) {
+      if (err instanceof TogetherSseIdleTimeoutError) {
+        return failAnthropicStream(res, 504, "timeout_error", err.message);
+      }
+      if (err instanceof TogetherSseRetryResponseError) {
+        const mapped = await mapTogetherError(err.response);
+        return failAnthropicStream(
+          res,
+          mapped.anthropicStatus,
+          mapped.anthropicType,
+          mapped.message,
+        );
+      }
+      throw err;
+    }
   }
 
   const blockManager = new StreamBlockManager(res, new StreamOutputBudget(options));
@@ -204,70 +235,84 @@ export async function streamAnthropicFromTogether(
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedTokens = 0;
+  let streamAttempt = 0;
 
   try {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
+    for await (const eventData of readTogetherSseWithRetry(
+      response,
+      () => postTogetherStream(payload, options, signal, perf, "upstream_fetch_retry"),
+      {
+        isOutputStarted: () => blockManager.hasOutput(),
+        onRetry: ({ attempt, maxRetries, timeoutMs }) =>
+          debugLog(options, "retrying together stream after idle timeout", {
+            attempt,
+            maxRetries,
+            model: payload.model,
+            timeoutMs,
+          }),
+      },
+    )) {
+      if (eventData.attempt !== streamAttempt) {
+        streamAttempt = eventData.attempt;
+        upstreamFinishReason = null;
+        inputTokens = 0;
+        outputTokens = 0;
+        cachedTokens = 0;
       }
-      buffer += decoder.decode(value, { stream: true });
-      buffer = consumeSseLines(buffer, (data) => {
-        if (!data) {
-          return;
-        }
-        const event = parseStreamData(data);
-        if (!event) {
-          return;
-        }
-        const delta = event.delta;
-        if (delta) {
-          const reasoning = delta.reasoning ?? delta.reasoning_content;
-          if (typeof reasoning === "string" && reasoning.length > 0) {
-            if (options.isCompactionRequest) {
-              // Some Together reasoning models still place summarization output
-              // in reasoning_content when reasoning is explicitly disabled.
-              // Claude Code's compactor only accepts assistant text, so expose
-              // that provider-specific channel as text for this request type.
-              perf?.markOnce("first_delta", { kind: "text" });
-              blockManager.emitText(reasoning);
-            } else {
-              perf?.markOnce("first_delta", { kind: "thinking" });
-              blockManager.emitThinking(reasoning);
-            }
-          }
-          if (typeof delta.content === "string" && delta.content.length > 0) {
+      const event = parseStreamData(eventData.data);
+      if (!event) {
+        continue;
+      }
+      const delta = event.delta;
+      if (delta) {
+        const reasoning = delta.reasoning ?? delta.reasoning_content;
+        if (typeof reasoning === "string" && reasoning.length > 0) {
+          if (options.isCompactionRequest) {
+            // Some Together reasoning models still place summarization output
+            // in reasoning_content when reasoning is explicitly disabled.
+            // Claude Code's compactor only accepts assistant text, so expose
+            // that provider-specific channel as text for this request type.
             perf?.markOnce("first_delta", { kind: "text" });
-            blockManager.emitText(delta.content);
-          }
-          if (Array.isArray(delta.tool_calls)) {
-            for (const toolCall of delta.tool_calls) {
-              perf?.markOnce("first_delta", { kind: "tool_call" });
-              blockManager.emitToolCall(toolCall);
-            }
+            blockManager.emitText(reasoning);
+          } else {
+            perf?.markOnce("first_delta", { kind: "thinking" });
+            blockManager.emitThinking(reasoning);
           }
         }
-        if (event.usage) {
-          inputTokens = event.usage.prompt_tokens ?? inputTokens;
-          outputTokens = event.usage.completion_tokens ?? outputTokens;
-          cachedTokens =
-            event.usage.prompt_tokens_details?.cached_tokens ??
-            event.usage.cached_tokens ??
-            cachedTokens;
+        if (typeof delta.content === "string" && delta.content.length > 0) {
+          perf?.markOnce("first_delta", { kind: "text" });
+          blockManager.emitText(delta.content);
         }
-        if (event.finish_reason) {
-          upstreamFinishReason = event.finish_reason;
+        if (Array.isArray(delta.tool_calls)) {
+          for (const toolCall of delta.tool_calls) {
+            perf?.markOnce("first_delta", { kind: "tool_call" });
+            blockManager.emitToolCall(toolCall);
+          }
         }
-      });
+      }
+      if (event.usage) {
+        inputTokens = event.usage.prompt_tokens ?? inputTokens;
+        outputTokens = event.usage.completion_tokens ?? outputTokens;
+        cachedTokens =
+          event.usage.prompt_tokens_details?.cached_tokens ??
+          event.usage.cached_tokens ??
+          cachedTokens;
+      }
+      if (event.finish_reason) {
+        upstreamFinishReason = event.finish_reason;
+      }
     }
   } catch (err) {
     debugLog(options, "together stream read error", {
       error: err instanceof Error ? err.message : String(err),
     });
+    if (err instanceof TogetherSseIdleTimeoutError) {
+      return failAnthropicStream(res, 504, "timeout_error", err.message);
+    }
+    if (err instanceof TogetherSseRetryResponseError) {
+      const mapped = await mapTogetherError(err.response);
+      return failAnthropicStream(res, mapped.anthropicStatus, mapped.anthropicType, mapped.message);
+    }
     // Mid-stream failure: best-effort close whatever block is open, then end.
     // The client already has partial output; we can't retroactively emit an
     // error event in a way Anthropic SSE expects after content has started.
@@ -354,6 +399,7 @@ async function streamAnthropicNativeToolLoop({
   const nativeToolUses = new Map<string, number>();
   const messages = initialMessages.slice();
   let response = initialResponse;
+  let currentPayload = initialPayload;
   let stopReason = "end_turn";
   let inputTokens = 0;
   let outputTokens = 0;
@@ -364,6 +410,8 @@ async function streamAnthropicNativeToolLoop({
       response,
       options,
       initialPayload.max_tokens as number | undefined,
+      () => postTogetherStream(currentPayload, options, signal),
+      () => blockManager.hasOutput(),
     );
     inputTokens += collected.inputTokens;
     outputTokens += collected.outputTokens;
@@ -469,6 +517,7 @@ async function streamAnthropicNativeToolLoop({
       break;
     }
     response = nextResponse;
+    currentPayload = nextPayload;
   }
 
   blockManager.close();
@@ -515,6 +564,8 @@ async function collectTogetherStreamTurn(
   response: Response,
   options: ClaudeStreamOptions,
   requestedMaxTokens?: number | undefined,
+  retry: () => Promise<Response> = async () => response,
+  isOutputStarted: () => boolean = () => false,
 ): Promise<CollectedStreamTurn> {
   const toolCalls = new Map<number, CollectedStreamToolCall>();
   let upstreamFinishReason: string | null = null;
@@ -530,67 +581,74 @@ async function collectTogetherStreamTurn(
   if (!response.body) {
     return turn;
   }
+  let streamAttempt = 0;
   try {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
+    for await (const eventData of readTogetherSseWithRetry(response, retry, {
+      isOutputStarted,
+      onRetry: ({ attempt, maxRetries, timeoutMs }) =>
+        debugLog(options, "retrying together native stream after idle timeout", {
+          attempt,
+          maxRetries,
+          timeoutMs,
+        }),
+    })) {
+      if (eventData.attempt !== streamAttempt) {
+        streamAttempt = eventData.attempt;
+        toolCalls.clear();
+        upstreamFinishReason = null;
+        turn.reasoning = "";
+        turn.text = "";
+        turn.inputTokens = 0;
+        turn.outputTokens = 0;
+        turn.cachedTokens = 0;
       }
-      buffer += decoder.decode(value, { stream: true });
-      buffer = consumeSseLines(buffer, (data) => {
-        if (!data) {
-          return;
+      const event = parseStreamData(eventData.data);
+      if (!event) {
+        continue;
+      }
+      const delta = event.delta;
+      if (delta) {
+        const reasoning = delta.reasoning ?? delta.reasoning_content;
+        if (typeof reasoning === "string") {
+          turn.reasoning += reasoning;
         }
-        const event = parseStreamData(data);
-        if (!event) {
-          return;
+        if (typeof delta.content === "string") {
+          turn.text += delta.content;
         }
-        const delta = event.delta;
-        if (delta) {
-          const reasoning = delta.reasoning ?? delta.reasoning_content;
-          if (typeof reasoning === "string") {
-            turn.reasoning += reasoning;
-          }
-          if (typeof delta.content === "string") {
-            turn.text += delta.content;
-          }
-          if (Array.isArray(delta.tool_calls)) {
-            for (const chunk of delta.tool_calls) {
-              const index = typeof chunk.index === "number" ? chunk.index : 0;
-              const existing = toolCalls.get(index) ?? { index, function: { arguments: "" } };
-              if (chunk.id) {
-                existing.id = chunk.id;
-              }
-              if (chunk.function?.name) {
-                existing.function.name = chunk.function.name;
-              }
-              if (chunk.function?.arguments) {
-                existing.function.arguments += chunk.function.arguments;
-              }
-              toolCalls.set(index, existing);
+        if (Array.isArray(delta.tool_calls)) {
+          for (const chunk of delta.tool_calls) {
+            const index = typeof chunk.index === "number" ? chunk.index : 0;
+            const existing = toolCalls.get(index) ?? { index, function: { arguments: "" } };
+            if (chunk.id) {
+              existing.id = chunk.id;
             }
+            if (chunk.function?.name) {
+              existing.function.name = chunk.function.name;
+            }
+            if (chunk.function?.arguments) {
+              existing.function.arguments += chunk.function.arguments;
+            }
+            toolCalls.set(index, existing);
           }
         }
-        if (event.usage) {
-          turn.inputTokens = event.usage.prompt_tokens ?? turn.inputTokens;
-          turn.outputTokens = event.usage.completion_tokens ?? turn.outputTokens;
-          turn.cachedTokens =
-            event.usage.prompt_tokens_details?.cached_tokens ??
-            event.usage.cached_tokens ??
-            turn.cachedTokens;
-        }
-        if (event.finish_reason) {
-          upstreamFinishReason = event.finish_reason;
-        }
-      });
+      }
+      if (event.usage) {
+        turn.inputTokens = event.usage.prompt_tokens ?? turn.inputTokens;
+        turn.outputTokens = event.usage.completion_tokens ?? turn.outputTokens;
+        turn.cachedTokens =
+          event.usage.prompt_tokens_details?.cached_tokens ??
+          event.usage.cached_tokens ??
+          turn.cachedTokens;
+      }
+      if (event.finish_reason) {
+        upstreamFinishReason = event.finish_reason;
+      }
     }
   } catch (err) {
     debugLog(options, "together native stream read error", {
       error: err instanceof Error ? err.message : String(err),
     });
+    throw err;
   }
   turn.stopReason = mapStopReason(upstreamFinishReason, {
     outputTokens: turn.outputTokens,
@@ -845,6 +903,10 @@ class StreamBlockManager {
     this.closeOpenBlock();
   }
 
+  hasOutput(): boolean {
+    return this.blockCount > 0;
+  }
+
   summary(): string {
     return `${this.blockCount} block(s)`;
   }
@@ -852,6 +914,17 @@ class StreamBlockManager {
   outputSummary(): Record<string, unknown> {
     return this.outputBudget.summary();
   }
+}
+
+function failAnthropicStream(
+  res: ServerResponse,
+  status: number,
+  type: string,
+  message: string,
+): StreamProxyResult {
+  writeSse(res, "error", { type: "error", error: { type, message } });
+  res.end();
+  return { ok: false, status, error: message };
 }
 
 class StreamOutputBudget {

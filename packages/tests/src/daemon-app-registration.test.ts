@@ -1,4 +1,5 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
@@ -21,6 +22,7 @@ function registration(): RegisterSessionRequest {
     authToken: TOKEN,
     agent: "codex-app",
     apiKey: "fake-key-never-sent-upstream",
+    baseUrl: "https://api.together.ai/v1",
     modelLabel: `${GLM_5_2.name} (Codex App alpha)`,
     modelId: GLM_5_2.id,
     targetModelId: GLM_5_2.id,
@@ -104,6 +106,48 @@ describe("daemon lazy codex-app session restore", () => {
   test("still 401s for tokens that do not match the persisted registration", async () => {
     const response = await fetch(`${daemon.url}/session/some-other-token/v1/models`);
     expect(response.status).toBe(401);
+  });
+
+  test("routes restored codex-app requests through its persisted upstream base URL", async () => {
+    let upstreamPath = "";
+    const upstream = http.createServer((req, res) => {
+      upstreamPath = req.url ?? "";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: "ROUTED" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (typeof address !== "object" || address === null) {
+      throw new Error("test upstream did not bind");
+    }
+
+    try {
+      const restoredRegistration = registration();
+      restoredRegistration.baseUrl = `http://127.0.0.1:${address.port}/together/v1`;
+      await writeAppRegistration(restoredRegistration, daemon.home);
+      await fetch(`${daemon.url}/internal/sessions/${encodeURIComponent(TOKEN)}`, {
+        method: "DELETE",
+      });
+
+      const response = await fetch(`${daemon.url}/session/${TOKEN}/v1/responses`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: GLM_5_2.id,
+          input: [{ type: "message", role: "user", content: "route me" }],
+        }),
+      });
+
+      expect(response.ok).toBe(true);
+      expect(upstreamPath).toBe("/together/v1/chat/completions");
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
   });
 
   test("stops resurrecting the session after restore clears the registration", async () => {

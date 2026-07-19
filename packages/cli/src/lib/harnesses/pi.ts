@@ -5,7 +5,11 @@ import { CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js"
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import { resolveTogetherApiKey } from "../together-core.js";
+import {
+  resolveTogetherApiKey,
+  resolveTogetherBaseUrl,
+  TOGETHER_BASE_URL,
+} from "../together-core.js";
 
 const PI_PROVIDER_ID = "together";
 const PI_SUPPORTED_MODELS = CODEX_SUPPORTED_MODELS.map((model) => model.id).join(",");
@@ -36,7 +40,7 @@ function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
   return sanitized;
 }
 
-function writePiModelsJson(agentDir: string, apiKey: string): void {
+export function buildPiModelsJson(apiKey: string, baseUrl = TOGETHER_BASE_URL): string {
   const models = CODEX_SUPPORTED_MODELS.map(({ definition }) => ({
     id: definition.id,
     name: definition.name,
@@ -52,22 +56,23 @@ function writePiModelsJson(agentDir: string, apiKey: string): void {
     },
   }));
 
-  writeFileSync(
-    join(agentDir, "models.json"),
-    `${JSON.stringify(
-      {
-        providers: {
-          [PI_PROVIDER_ID]: {
-            apiKey,
-            models,
-          },
+  return `${JSON.stringify(
+    {
+      providers: {
+        [PI_PROVIDER_ID]: {
+          apiKey,
+          baseUrl,
+          models,
         },
       },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function writePiModelsJson(agentDir: string, apiKey: string, baseUrl: string): void {
+  writeFileSync(join(agentDir, "models.json"), buildPiModelsJson(apiKey, baseUrl), "utf8");
 }
 
 export default defineHarness({
@@ -87,7 +92,8 @@ export default defineHarness({
     const sessionDir =
       process.env.PI_CODING_AGENT_SESSION_DIR ??
       join(ctx.home || homedir(), ".pi", "agent", "sessions");
-    writePiModelsJson(agentDir, apiKey);
+    const baseUrl = resolveTogetherBaseUrl();
+    writePiModelsJson(agentDir, apiKey, baseUrl);
     const selectedModel = resolveCodexModel(ctx.main);
     const args = [
       "--provider",

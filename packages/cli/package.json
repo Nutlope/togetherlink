@@ -1,6 +1,6 @@
 {
   "name": "@togetherlink/cli",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "CLI for routing Claude Code, OpenCode, Codex, Grok Build, and Pi Code through Together AI",
   "license": "MIT",
   "bin": {

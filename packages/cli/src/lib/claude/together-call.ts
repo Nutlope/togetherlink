@@ -8,6 +8,7 @@ import type { OpenAIChatResponse, TogetherApiError, TogetherFetchResult } from "
 
 type TogetherCallOptions = {
   apiKey: string;
+  baseUrl: string;
   debug?: boolean | undefined;
 };
 

@@ -20,7 +20,10 @@ describe("Claude vision description", () => {
     );
 
     const started = performance.now();
-    const result = await describeImage(testImage(), { apiKey: "test-key" });
+    const result = await describeImage(testImage(), {
+      apiKey: "test-key",
+      baseUrl: "https://api.together.ai/v1",
+    });
     const elapsedMs = performance.now() - started;
 
     expect(result.description).toBe("primary description");
@@ -46,12 +49,56 @@ describe("Claude vision description", () => {
     );
 
     const started = performance.now();
-    const result = await describeImage(testImage(), { apiKey: "test-key" });
+    const result = await describeImage(testImage(), {
+      apiKey: "test-key",
+      baseUrl: "https://api.together.ai/v1",
+    });
     const elapsedMs = performance.now() - started;
 
     expect(result.description).toBe("fast fallback description");
     expect(requests).toHaveLength(2);
     expect(elapsedMs).toBeLessThan(30);
+  });
+
+  test("uses the session upstream base URL for direct vision requests", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return visionResponse("proxied vision description");
+      }),
+    );
+
+    await describeImage(testImage(), {
+      apiKey: "test-key",
+      baseUrl: "http://vision-upstream.test/together/v1",
+    });
+
+    expect(urls).toEqual(["http://vision-upstream.test/together/v1/chat/completions"]);
+  });
+
+  test("bounds vision requests that never return response headers", async () => {
+    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_RETRIES", "0");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await describeImage(testImage(), {
+      apiKey: "test-key",
+      baseUrl: "http://vision-upstream.test/together/v1",
+    });
+
+    expect(result.description).toContain("all vision models failed");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

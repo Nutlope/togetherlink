@@ -12,6 +12,7 @@ import type { AnthropicContentBlock, AnthropicMessagesRequest } from "./wire-typ
 
 type ClaudeVisionOptions = {
   apiKey: string;
+  baseUrl: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
 };
@@ -126,6 +127,7 @@ export async function resolveImageBlocks(
       debugLog(options, "vision describe start", { key });
       const result = await describeImage(block as ImageBlock | UrlBlock, {
         apiKey: options.apiKey,
+        baseUrl: options.baseUrl,
         debug: options.debug,
       });
       debugLog(options, "vision describe done", {

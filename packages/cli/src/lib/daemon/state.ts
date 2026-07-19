@@ -1,5 +1,6 @@
 import { CostTracker } from "../cost.js";
 import type { ModelDefinition } from "@togetherlink/models";
+import { TOGETHER_BASE_URL } from "../together-core.js";
 import type { ClaudeProxyOptions } from "../claude/proxy.js";
 import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyPerfPayload } from "../proxy-perf.js";
@@ -72,6 +73,8 @@ export type SessionState = {
   /** Real Together API key the daemon uses upstream (proxied) or that the
    *  self-reporting agent used direct. Never returned by any read endpoint. */
   apiKey: string;
+  /** Session-scoped upstream API root. Never derived from the daemon environment. */
+  baseUrl: string;
   modelDefinition: ModelDefinition;
   costTracker: CostTracker;
   debug?: boolean;
@@ -124,6 +127,8 @@ export type RegisterSessionRequest = {
   agent?: AgentId;
   pid?: number;
   apiKey: string;
+  /** Resolved by the launcher. Optional only for persisted/older registrations. */
+  baseUrl?: string;
   modelLabel: string;
   modelDefinition: ModelDefinition;
   /** Proxied-agent model alias/target for proxy routing. */
@@ -362,6 +367,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
   const agent: AgentId = req.agent ?? "claude";
   const costTracker = new CostTracker(req.modelDefinition);
   const now = Date.now();
+  const baseUrl = req.baseUrl ?? TOGETHER_BASE_URL;
   const state: SessionState = {
     token: req.token,
     agent,
@@ -370,6 +376,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
     lastSeenPersistedAt: now,
     modelLabel: req.modelLabel,
     apiKey: req.apiKey,
+    baseUrl,
     modelDefinition: req.modelDefinition,
     costTracker,
     ...(typeof req.pid === "number" ? { pid: req.pid } : {}),
@@ -378,6 +385,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
   if (isProxiedAgent(agent)) {
     state.options = {
       apiKey: req.apiKey,
+      baseUrl,
       modelId: req.modelId ?? req.modelLabel,
       targetModelId: req.targetModelId ?? req.modelDefinition.id,
       modelName: req.modelName ?? req.modelLabel,
@@ -453,6 +461,7 @@ function toPersistedSession(state: SessionState): PersistedSession {
     token: state.token,
     agent: state.agent,
     apiKey: state.apiKey,
+    baseUrl: state.baseUrl,
     ...(state.options?.authToken !== undefined && state.options.authToken !== state.token
       ? { authToken: state.options.authToken }
       : {}),

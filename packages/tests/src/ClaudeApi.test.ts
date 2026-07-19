@@ -83,6 +83,37 @@ describe("Claude proxy compatibility API", () => {
     expect(response.body.input_tokens).toBeGreaterThan(0);
   });
 
+  test("routes chat completions through the session upstream base URL", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ROUTED" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 16,
+        messages: [{ role: "user", content: "route me" }],
+      }),
+      options: { baseUrl: "http://claude-upstream.test/together/v1" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(urls).toEqual(["http://claude-upstream.test/together/v1/chat/completions"]);
+  });
+
   test("count_tokens does not hide prompts that exceed the advertised safe input limit", async () => {
     const hugePrompt = "oversized context ".repeat(70_000);
     const response = await callClaudeProxy({
@@ -226,6 +257,9 @@ describe("Claude proxy compatibility API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
+        if (typeof _url === "string" && _url.includes("/api/telemetry")) {
+          return new Response(null, { status: 204 });
+        }
         upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         return new Response(
           JSON.stringify({
@@ -1312,6 +1346,90 @@ describe("Claude proxy compatibility API", () => {
     expect(streamed.status).toBe(200);
     expect(upstreamBodies.map((body) => body.stop)).toEqual([["</done>"], ["</done>"]]);
   });
+
+  test("retries a streamed Claude turn when Together returns headers but emits no SSE", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (String(_url).includes("/api/telemetry") || init?.body === undefined) {
+          return new Response(null, { status: 204 });
+        }
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return upstreamBodies.length === 1
+          ? hangingSseResponse()
+          : sseResponse([
+              { choices: [{ delta: { content: "recovered" } }] },
+              { choices: [{ finish_reason: "stop", delta: {} }] },
+            ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 64,
+        stream: true,
+        messages: [{ role: "user", content: "Say hi." }],
+      }),
+    });
+
+    expect(upstreamBodies).toHaveLength(2);
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("recovered");
+    expect(response.body).toContain("message_stop");
+    expect(response.body).not.toContain("event: error");
+  }, 2_500);
+
+  test("retries a streamed Claude turn when Together never returns response headers", async () => {
+    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    let upstreamCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (String(_url).includes("/api/telemetry") || init?.body === undefined) {
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        upstreamCalls += 1;
+        if (upstreamCalls === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          });
+        }
+        return Promise.resolve(
+          sseResponse([
+            { choices: [{ delta: { content: "recovered after header timeout" } }] },
+            { choices: [{ finish_reason: "stop", delta: {} }] },
+          ]),
+        );
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 64,
+        stream: true,
+        messages: [{ role: "user", content: "Say hi." }],
+      }),
+    });
+
+    expect(upstreamCalls).toBe(2);
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("recovered after header timeout");
+    expect(response.body).toContain("message_stop");
+  }, 2_500);
 });
 
 function claudeCompactionPrompt(prefix: string): string {
@@ -1472,9 +1590,24 @@ function sseResponse(events: unknown[]): Response {
   );
 }
 
+function hangingSseResponse(): Response {
+  return new Response(
+    new ReadableStream({
+      cancel() {
+        // The shared transport should cancel this body before retrying.
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    },
+  );
+}
+
 function proxyOptions(overrides: Partial<ClaudeProxyOptions> = {}): ClaudeProxyOptions {
   return {
     apiKey: "test-together-key",
+    baseUrl: "https://api.together.ai/v1",
     modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
     targetModelId: GLM_5_2.id,
     modelName: GLM_5_2.name,

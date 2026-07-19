@@ -1,7 +1,7 @@
 import { OPENCODE_DEFAULT_MODEL } from "../opencode/defaults.js";
 import { buildOpencodeConfigJson, buildOpencodeEnv } from "../opencode/core.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import { resolveTogetherApiKey } from "../together-core.js";
+import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 import { defineHarness } from "../harness-types.js";
 import { HARNESS } from "../harness.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
@@ -44,7 +44,8 @@ export default defineHarness({
     }
 
     const modelId = ctx.main ?? OPENCODE_DEFAULT_MODEL;
-    const configJson = buildOpencodeConfigJson({ modelId });
+    const baseUrl = resolveTogetherBaseUrl();
+    const configJson = buildOpencodeConfigJson({ modelId, baseUrl });
     const env = buildOpencodeEnv({ apiKey, configJson });
 
     if (process.env.TOGETHERLINK_DEBUG === "1") {

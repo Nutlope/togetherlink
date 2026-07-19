@@ -12,7 +12,7 @@ import {
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import { resolveTogetherApiKey } from "../together-core.js";
+import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 
 export default defineHarness({
   id: HARNESS.GROK,
@@ -29,10 +29,12 @@ export default defineHarness({
     const temporaryHome = mkdtempSync(join(tmpdir(), "togetherlink-grok-"));
     const configuredGrokHome = process.env.GROK_HOME?.trim();
     const persistentHome = configuredGrokHome || join(ctx.home || homedir(), ".grok");
+    const baseUrl = resolveTogetherBaseUrl();
     populateTemporaryGrokHome({
       temporaryHome,
       persistentHome,
       selectedModel: selectedModel.definition,
+      baseUrl,
     });
 
     const args = [
