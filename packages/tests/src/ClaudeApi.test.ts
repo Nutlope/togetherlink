@@ -1207,6 +1207,95 @@ describe("Claude proxy compatibility API", () => {
     expect(String(toolMessage?.content)).toContain("[described by");
   });
 
+  test("returns Anthropic native web-search blocks from buffered requests", async () => {
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    let togetherCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("api.exa.ai/search")) {
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  title: "Buffered native result",
+                  url: "https://example.com/buffered-native",
+                  text: "Buffered result text from Exa.",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        togetherCalls += 1;
+        return new Response(
+          JSON.stringify(
+            togetherCalls === 1
+              ? {
+                  choices: [
+                    {
+                      message: {
+                        tool_calls: [
+                          {
+                            id: "call_buffered_native_search",
+                            function: {
+                              name: "web_search",
+                              arguments: '{"query":"buffered native search"}',
+                            },
+                          },
+                        ],
+                      },
+                      finish_reason: "tool_calls",
+                    },
+                  ],
+                  usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+                }
+              : {
+                  choices: [{ message: { content: "NATIVE_BUFFERED_OK" }, finish_reason: "stop" }],
+                  usage: { prompt_tokens: 40, completion_tokens: 3, total_tokens: 43 },
+                },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [{ role: "user", content: "Use native search." }],
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const content = response.body.content as Array<Record<string, unknown>>;
+    expect(content[0]).toMatchObject({
+      type: "server_tool_use",
+      name: "web_search",
+      input: { query: "buffered native search" },
+    });
+    expect(content[1]).toMatchObject({
+      type: "web_search_tool_result",
+      tool_use_id: content[0]?.id,
+      content: [
+        {
+          type: "web_search_result",
+          title: "Buffered native result",
+          url: "https://example.com/buffered-native",
+        },
+      ],
+    });
+    expect(content[2]).toEqual({ type: "text", text: "NATIVE_BUFFERED_OK" });
+    expect(response.body.usage).toMatchObject({
+      server_tool_use: { web_search_requests: 1 },
+    });
+  });
+
   test("executes streamed native web_search server tools inside the proxy", async () => {
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     const upstreamBodies: Array<Record<string, unknown>> = [];
@@ -1282,7 +1371,12 @@ describe("Claude proxy compatibility API", () => {
     expect(urls.some((url) => url.includes("api.exa.ai/search"))).toBe(true);
     expect(upstreamBodies).toHaveLength(2);
     expect(String(response.body)).toContain("NATIVE_STREAM_OK");
-    expect(String(response.body)).not.toContain('"name":"web_search"');
+    expect(String(response.body)).toContain('"type":"server_tool_use"');
+    expect(String(response.body)).toContain('"name":"web_search"');
+    expect(String(response.body)).toContain('"type":"web_search_tool_result"');
+    expect(String(response.body)).toContain('"type":"web_search_result"');
+    expect(String(response.body)).toContain('"url":"https://example.com/native"');
+    expect(String(response.body)).toContain('"web_search_requests":1');
     const secondMessages = upstreamMessages(upstreamBodies[1]);
     expect(
       secondMessages.some(

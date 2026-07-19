@@ -1,9 +1,10 @@
 import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
-  runExaSearch as runSharedExaSearch,
+  runExaSearchDetailed as runSharedExaSearchDetailed,
   stringArray,
   withNativeToolSystemPrompt as withSharedNativeToolSystemPrompt,
+  type ExaSearchOutcome,
 } from "../exa-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import {
@@ -159,8 +160,8 @@ export async function runClaudeExaSearch(
   input: unknown,
   tool: AnthropicTool,
   options: DebugOptions,
-): Promise<string> {
-  return runSharedExaSearch({
+): Promise<ExaSearchOutcome> {
+  return runSharedExaSearchDetailed({
     query: input,
     queryKeys: ["query", "q"],
     allowedDomains: stringArray(tool.allowed_domains, { requireTrimmed: false }),

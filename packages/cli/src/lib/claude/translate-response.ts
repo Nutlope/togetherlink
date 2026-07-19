@@ -4,6 +4,7 @@ import { stableHash } from "../stable-hash.js";
 import { CLAUDE_SUPPORTED_MODELS } from "./defaults.js";
 import { APPROX_CHARS_PER_TOKEN, jsonByteLength, safeClaudeInputLimit } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
+import { nativeWebSearchBlocks } from "./native-web-search-response.js";
 import type { TokenEstimator } from "../cost.js";
 import { toOpenAIMessages } from "./translate-request.js";
 import type {
@@ -114,6 +115,7 @@ export function toAnthropicMessage(
   const message = choice?.message ?? {};
   const requestedMaxTokens = (response as OpenAIChatResponseWithTogetherlinkMeta)
     ._togetherlinkRequestedMaxTokens;
+  const nativeWebSearches = response._togetherlinkNativeWebSearches ?? [];
   const content: Array<Record<string, unknown>> = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
@@ -122,6 +124,9 @@ export function toAnthropicMessage(
       thinking: reasoning,
       signature: thinkingSignature(reasoning),
     });
+  }
+  for (const search of nativeWebSearches) {
+    content.push(...nativeWebSearchBlocks(search));
   }
   if (message.content) {
     content.push({ type: "text", text: message.content });
@@ -151,6 +156,9 @@ export function toAnthropicMessage(
     usage: {
       input_tokens: response.usage?.prompt_tokens ?? 0,
       output_tokens: response.usage?.completion_tokens ?? 0,
+      ...(nativeWebSearches.length > 0
+        ? { server_tool_use: { web_search_requests: nativeWebSearches.length } }
+        : {}),
     },
   };
 }

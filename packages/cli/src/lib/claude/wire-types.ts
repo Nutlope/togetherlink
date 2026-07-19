@@ -74,6 +74,15 @@ export type OpenAIMessage = {
   }>;
 };
 
+export type ClaudeNativeWebSearchRecord = {
+  id: string;
+  name: "web_search";
+  input: unknown;
+  result:
+    | Array<{ type: "web_search_result"; title: string; url: string }>
+    | { type: "web_search_tool_result_error"; error_code: string };
+};
+
 export type OpenAIChatResponse = {
   id?: string;
   model?: string;
@@ -96,6 +105,7 @@ export type OpenAIChatResponse = {
       cached_tokens?: number;
     };
   };
+  _togetherlinkNativeWebSearches?: ClaudeNativeWebSearchRecord[];
 };
 
 export type ResolvedClaudeModel = {

@@ -1,8 +1,17 @@
-type ExaSearchResult = {
+export type ExaSearchResult = {
   title?: string;
   url?: string;
   text?: string;
   publishedDate?: string;
+};
+
+export type ExaSearchErrorCode = "invalid_tool_input" | "too_many_requests" | "unavailable";
+
+export type ExaSearchOutcome = {
+  query: string;
+  text: string;
+  results: ExaSearchResult[];
+  errorCode?: ExaSearchErrorCode;
 };
 
 type ExaSearchResponse = {
@@ -56,9 +65,13 @@ export function nativeToolMaxUses(tool: { max_uses?: unknown }): number {
 }
 
 export async function runExaSearch(params: ExaSearchParams): Promise<string> {
+  return (await runExaSearchDetailed(params)).text;
+}
+
+export async function runExaSearchDetailed(params: ExaSearchParams): Promise<ExaSearchOutcome> {
   const query = webSearchQuery(params.query, params.queryKeys);
   if (!query) {
-    return "Web search error: missing query.";
+    return failedSearch("", "Web search error: missing query.", "invalid_tool_input");
   }
 
   const body = exaSearchBody({
@@ -68,8 +81,10 @@ export async function runExaSearch(params: ExaSearchParams): Promise<string> {
   });
   const exaApiKey = params.exaApiKey?.trim();
   if (!exaApiKey) {
-    return (
-      params.missingApiKeyMessage ?? "Web search error: EXA_API_KEY is not set. Set it and retry."
+    return failedSearch(
+      query,
+      params.missingApiKeyMessage ?? "Web search error: EXA_API_KEY is not set. Set it and retry.",
+      "unavailable",
     );
   }
 
@@ -85,19 +100,31 @@ export async function runExaSearch(params: ExaSearchParams): Promise<string> {
   const text = await response.text();
   if (!response.ok) {
     params.debugLog?.("exa search error", { status: response.status, body: text.slice(0, 1000) });
-    return `Web search error from Exa (${response.status}): ${text.slice(0, 1200)}`;
+    return failedSearch(
+      query,
+      `Web search error from Exa (${response.status}): ${text.slice(0, 1200)}`,
+      response.status === 429 ? "too_many_requests" : "unavailable",
+    );
   }
 
   let json: ExaSearchResponse;
   try {
     json = JSON.parse(text) as ExaSearchResponse;
   } catch {
-    return `Web search error: Exa returned non-JSON content: ${text.slice(0, 1200)}`;
+    return failedSearch(
+      query,
+      `Web search error: Exa returned non-JSON content: ${text.slice(0, 1200)}`,
+      "unavailable",
+    );
   }
 
   const results = (json.results ?? []).slice(0, 5);
   if (results.length === 0) {
-    return `Web search completed for "${query}" but returned no results.${json.autopromptString ? ` Autoprompt: ${json.autopromptString}` : ""}`;
+    return {
+      query,
+      results,
+      text: `Web search completed for "${query}" but returned no results.${json.autopromptString ? ` Autoprompt: ${json.autopromptString}` : ""}`,
+    };
   }
 
   const lines = [`Web search results for "${query}" via Exa:`];
@@ -118,7 +145,15 @@ export async function runExaSearch(params: ExaSearchParams): Promise<string> {
   if (json.autopromptString) {
     lines.push(`Autoprompt: ${json.autopromptString}`);
   }
-  return lines.join("\n\n");
+  return { query, results, text: lines.join("\n\n") };
+}
+
+function failedSearch(
+  query: string,
+  text: string,
+  errorCode: ExaSearchErrorCode,
+): ExaSearchOutcome {
+  return { query, text, results: [], errorCode };
 }
 
 export function exaSearchBody(params: {

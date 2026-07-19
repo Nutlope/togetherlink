@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type ServerResponse } from "node:http";
 import { type ModelDefinition } from "@togetherlink/models";
+import type { ExaSearchOutcome } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
@@ -21,6 +22,7 @@ import {
   clampClaudeClientMaxTokens,
 } from "./context-budget.js";
 import { mapStopReason, parseJsonOrEmpty } from "./content-format.js";
+import { createClaudeNativeWebSearchRecord } from "./native-web-search-response.js";
 import {
   nativeServerTools,
   claudeNativeToolMaxUses,
@@ -35,6 +37,7 @@ import { resolveTargetModel, thinkingSignature } from "./translate-response.js";
 import { mapTogetherError, writeAnthropicError } from "./together-call.js";
 import type {
   AnthropicMessagesRequest,
+  ClaudeNativeWebSearchRecord,
   NativeServerTool,
   OpenAIMessage,
   StreamProxyResult,
@@ -404,6 +407,7 @@ async function streamAnthropicNativeToolLoop({
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedTokens = 0;
+  let nativeWebSearchCount = 0;
 
   for (let turn = 0; turn < 5; turn += 1) {
     const collected = await collectTogetherStreamTurn(
@@ -457,19 +461,33 @@ async function streamAnthropicNativeToolLoop({
         const input = parseJsonOrEmpty(toolCall.function.arguments);
         const priorUses = nativeToolUses.get(name) ?? 0;
         const maxUses = nativeTool ? claudeNativeToolMaxUses(nativeTool.definition) : 0;
+        let searchOutcome: ExaSearchOutcome | undefined;
         const result = await runNativeWebSearchCall({
           name,
           priorUses,
           maxUses,
           isWebSearch: nativeTool?.kind === "web_search",
           recordUse: () => nativeToolUses.set(name, priorUses + 1),
-          runSearch: () => runClaudeExaSearch(input, nativeTool!.definition, options),
+          runSearch: async () => {
+            searchOutcome = await runClaudeExaSearch(input, nativeTool!.definition, options);
+            return searchOutcome.text;
+          },
         });
-        return { id, result };
+        return {
+          id,
+          result,
+          search: createClaudeNativeWebSearchRecord({
+            input,
+            outcome: searchOutcome,
+            fallbackErrorCode: priorUses >= maxUses ? "max_uses_exceeded" : "unavailable",
+          }),
+        };
       }),
     );
-    for (const { id, result } of toolResults) {
+    for (const { id, result, search } of toolResults) {
       messages.push({ role: "tool", tool_call_id: id, content: result });
+      blockManager.emitNativeWebSearch(search);
+      nativeWebSearchCount += 1;
     }
 
     const nextPayload: Record<string, unknown> = {
@@ -534,7 +552,13 @@ async function streamAnthropicNativeToolLoop({
   writeSse(res, "message_delta", {
     type: "message_delta",
     delta: { stop_reason: stopReason, stop_sequence: null },
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    usage: {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      ...(nativeWebSearchCount > 0
+        ? { server_tool_use: { web_search_requests: nativeWebSearchCount } }
+        : {}),
+    },
   });
   writeSse(res, "message_stop", { type: "message_stop" });
   res.end();
@@ -872,6 +896,49 @@ class StreamBlockManager {
         delta: { type: "input_json_delta", partial_json: argsFragment },
       });
     }
+  }
+
+  emitNativeWebSearch(search: ClaudeNativeWebSearchRecord): void {
+    this.closeOpenBlock();
+    const toolIndex = this.nextIndex;
+    writeSse(this.res, "content_block_start", {
+      type: "content_block_start",
+      index: toolIndex,
+      content_block: {
+        type: "server_tool_use",
+        id: search.id,
+        name: search.name,
+        input: {},
+      },
+    });
+    writeSse(this.res, "content_block_delta", {
+      type: "content_block_delta",
+      index: toolIndex,
+      delta: { type: "input_json_delta", partial_json: JSON.stringify(search.input ?? {}) },
+    });
+    writeSse(this.res, "content_block_stop", {
+      type: "content_block_stop",
+      index: toolIndex,
+    });
+    this.nextIndex += 1;
+    this.blockCount += 1;
+
+    const resultIndex = this.nextIndex;
+    writeSse(this.res, "content_block_start", {
+      type: "content_block_start",
+      index: resultIndex,
+      content_block: {
+        type: "web_search_tool_result",
+        tool_use_id: search.id,
+        content: search.result,
+      },
+    });
+    writeSse(this.res, "content_block_stop", {
+      type: "content_block_stop",
+      index: resultIndex,
+    });
+    this.nextIndex += 1;
+    this.blockCount += 1;
   }
 
   private currentToolCallIndex = -1;

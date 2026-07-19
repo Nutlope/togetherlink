@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type ModelDefinition } from "@togetherlink/models";
+import type { ExaSearchOutcome } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
@@ -10,6 +11,7 @@ import {
   clampClaudeClientMaxTokens,
 } from "./context-budget.js";
 import { parseJsonOrEmpty } from "./content-format.js";
+import { createClaudeNativeWebSearchRecord } from "./native-web-search-response.js";
 import {
   nativeServerTools,
   claudeNativeToolMaxUses,
@@ -22,7 +24,11 @@ import {
 } from "./translate-request.js";
 import { resolveTargetModel } from "./translate-response.js";
 import { fetchTogether } from "./together-call.js";
-import type { AnthropicMessagesRequest, OpenAIChatResponse } from "./wire-types.js";
+import type {
+  AnthropicMessagesRequest,
+  ClaudeNativeWebSearchRecord,
+  OpenAIChatResponse,
+} from "./wire-types.js";
 
 type ClaudeChatOptions = {
   apiKey: string;
@@ -63,6 +69,7 @@ export async function callTogetherChatCompletions(
   const { targetModel, nativeTools, messages, tools } = translated;
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
+  const nativeWebSearches: ClaudeNativeWebSearchRecord[] = [];
 
   for (let turn = 0; turn < 5; turn += 1) {
     const reasoningEffort = options.isCompactionRequest
@@ -158,6 +165,9 @@ export async function callTogetherChatCompletions(
       nativeToolNames.has(toolCall.function?.name ?? ""),
     );
     if (nativeToolCalls.length === 0) {
+      if (nativeWebSearches.length > 0) {
+        json._togetherlinkNativeWebSearches = nativeWebSearches;
+      }
       return json;
     }
 
@@ -184,24 +194,34 @@ export async function callTogetherChatCompletions(
       const input = parseJsonOrEmpty(toolCall.function?.arguments);
       const priorUses = nativeToolUses.get(name) ?? 0;
       const maxUses = nativeTool ? claudeNativeToolMaxUses(nativeTool.definition) : 0;
+      let searchOutcome: ExaSearchOutcome | undefined;
       const result = await runNativeWebSearchCall({
         name,
         priorUses,
         maxUses,
         isWebSearch: nativeTool?.kind === "web_search",
         recordUse: () => nativeToolUses.set(name, priorUses + 1),
-        runSearch: () =>
-          perf?.span(
+        runSearch: async () => {
+          searchOutcome = await (perf?.span(
             "native_tool",
             () => runClaudeExaSearch(input, nativeTool!.definition, options),
             { name },
-          ) ?? runClaudeExaSearch(input, nativeTool!.definition, options),
+          ) ?? runClaudeExaSearch(input, nativeTool!.definition, options));
+          return searchOutcome.text;
+        },
       });
+      nativeWebSearches.push(
+        createClaudeNativeWebSearchRecord({
+          input,
+          outcome: searchOutcome,
+          fallbackErrorCode: priorUses >= maxUses ? "max_uses_exceeded" : "unavailable",
+        }),
+      );
       messages.push({ role: "tool", tool_call_id: id, content: result });
     }
   }
 
-  return {
+  const exhaustedResponse: OpenAIChatResponse = {
     id: `msg_${randomUUID().replaceAll("-", "")}`,
     choices: [
       {
@@ -213,6 +233,10 @@ export async function callTogetherChatCompletions(
       },
     ],
   };
+  if (nativeWebSearches.length > 0) {
+    exhaustedResponse._togetherlinkNativeWebSearches = nativeWebSearches;
+  }
+  return exhaustedResponse;
 }
 
 function debugLog(
