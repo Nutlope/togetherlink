@@ -2,7 +2,7 @@
 
 [![Live Agent Gauntlet](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml/badge.svg?branch=main)](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml)
 
-![TogetherLink hero](assets/togetherlink-hero.png)
+![TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code](site/public/togetherlink-cover.png)
 
 Use [Together AI](https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app) models from local coding-agent CLIs.
 

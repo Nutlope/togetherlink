@@ -146,11 +146,24 @@ export const Route = createFileRoute("/")({
       { property: "og:title", content: pageTitle },
       { property: "og:description", content: pageDescription },
       { property: "og:url", content: siteUrl },
-      { property: "og:image", content: `${siteUrl}togetherlink-logo.png` },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: `${siteUrl}togetherlink-cover.png` },
+      { property: "og:image:type", content: "image/png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      {
+        property: "og:image:alt",
+        content:
+          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code",
+      },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: pageTitle },
       { name: "twitter:description", content: pageDescription },
-      { name: "twitter:image", content: `${siteUrl}togetherlink-logo.png` },
+      { name: "twitter:image", content: `${siteUrl}togetherlink-cover.png` },
+      {
+        name: "twitter:image:alt",
+        content:
+          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code",
+      },
     ],
     links: [{ rel: "canonical", href: siteUrl }],
   }),
