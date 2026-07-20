@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 
 const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | sh";
 const githubUrl = "https://github.com/Nutlope/togetherlink";
+const siteUrl = "https://togetherlink.vercel.app/";
+const pageTitle = "Use Together AI Models in Claude Code, Codex & ChatGPT";
+const pageDescription =
+  "Run GLM 5.2 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, and the ChatGPT desktop app with togetherlink.";
 const togetherReferralUrl =
   "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
@@ -131,6 +135,25 @@ const codexAppCommands = [
 ];
 
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: pageTitle },
+      { name: "description", content: pageDescription },
+      { name: "robots", content: "index, follow, max-image-preview:large" },
+      { name: "googlebot", content: "index, follow, max-image-preview:large" },
+      { property: "og:type", content: "website" },
+      { property: "og:site_name", content: "togetherlink" },
+      { property: "og:title", content: pageTitle },
+      { property: "og:description", content: pageDescription },
+      { property: "og:url", content: siteUrl },
+      { property: "og:image", content: `${siteUrl}togetherlink-logo.png` },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: pageTitle },
+      { name: "twitter:description", content: pageDescription },
+      { name: "twitter:image", content: `${siteUrl}togetherlink-logo.png` },
+    ],
+    links: [{ rel: "canonical", href: siteUrl }],
+  }),
   component: Home,
 });
 

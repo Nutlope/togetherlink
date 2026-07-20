@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard
+
+Sitemap: https://togetherlink.vercel.app/sitemap.xml

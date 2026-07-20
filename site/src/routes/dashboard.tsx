@@ -124,6 +124,9 @@ const saveInstallNickname = createServerFn({ method: "POST" })
   });
 
 export const Route = createFileRoute("/dashboard")({
+  head: () => ({
+    meta: [{ title: "togetherlink analytics" }, { name: "robots", content: "noindex, nofollow" }],
+  }),
   loader: async () => checkDashboardAuth(),
   component: DashboardRoute,
 });
