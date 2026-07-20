@@ -68,6 +68,13 @@ export function buildClaudeEnv({
   env.ANTHROPIC_AUTH_TOKEN = authToken;
   env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1";
   env.ANTHROPIC_MODEL = modelId;
+  // Claude Code disables tool search automatically when ANTHROPIC_BASE_URL is
+  // customized unless the feature is explicitly enabled. TogetherLink forwards
+  // the required tool_reference blocks, so opt in by default. Preserve
+  // true/false/auto:N overrides from the user.
+  if (!env.ENABLE_TOOL_SEARCH?.trim()) {
+    env.ENABLE_TOOL_SEARCH = "true";
+  }
   if (env.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined) {
     env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS);
   }
@@ -131,6 +138,7 @@ function setTierModelEnv(
 }
 
 export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<ClaudeLaunchResult> {
+  const args = options.args ?? [];
   const selectedModel = resolveClaudeModel(options.modelId);
   const result: ProxiedSessionResult = await runProxiedSession({
     agent: "claude",
@@ -147,9 +155,10 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
       ),
       claudeCodeMaxOutputTokensUserSet: process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS !== undefined,
     },
-    args: options.args ?? [],
+    args,
     binary: "claude",
     keepaliveLabel: "Claude session",
+    preserveSessionAfterExit: claudeRunsInBackground(args),
     banner: (modelName) =>
       `togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`,
     buildEnv: ({ proxyUrl, authToken, modelId, modelName }) =>
@@ -161,6 +170,10 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     ],
   });
   return result;
+}
+
+export function claudeRunsInBackground(args: string[]): boolean {
+  return args.some((arg) => arg === "--bg" || arg === "--background");
 }
 
 function claudeCodeMaxOutputTokensFromEnv(value: string | undefined): number {

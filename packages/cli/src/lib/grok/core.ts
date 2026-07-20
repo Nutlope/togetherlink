@@ -6,7 +6,7 @@ import type { ModelDefinition } from "@togetherlink/models";
 export const GROK_API_KEY_ENV = "TOGETHER_API_KEY";
 export const GROK_MAX_COMPLETION_TOKENS = 8192;
 export const GROK_IDENTITY_RULE =
-  "You are a Together AI model via togetherlink, not xAI. Keep identity answers brief.";
+  "Grok Build is only the terminal harness. You are the selected Together AI model via togetherlink, not Grok or an xAI model. For identity questions, name the selected backend and Together AI; never claim xAI built or serves you.";
 
 const GROK_PERSISTENT_DIRECTORIES = [
   "sessions",
@@ -30,6 +30,10 @@ export function grokModelAlias(model: ModelDefinition): string {
 }
 
 export const GROK_VISION_MODEL_ALIAS = grokModelAlias(VISION_PRIMARY);
+
+export function buildGrokIdentityRule(model: ModelDefinition): string {
+  return `Grok Build is only the terminal harness. You are ${model.name} (${model.id}), served by Together AI via togetherlink. You are not Grok or an xAI model. For identity questions, name this backend and Together AI; never claim xAI built or serves you.`;
+}
 
 export function buildGrokConfigToml(
   selectedModel: ModelDefinition,
@@ -132,7 +136,10 @@ export function grokArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
   return sanitized;
 }
 
-export function grokArgsWithTogetherlinkIdentity(args: string[]): string[] {
+export function grokArgsWithTogetherlinkIdentity(
+  args: string[],
+  identityRule = GROK_IDENTITY_RULE,
+): string[] {
   const sanitized = grokArgsWithoutTogetherlinkOverrides(args);
   const passthrough: string[] = [];
   const userRules: string[] = [];
@@ -178,7 +185,7 @@ export function grokArgsWithTogetherlinkIdentity(args: string[]): string[] {
   if (systemPromptOverride !== undefined) {
     return [
       "--disable-web-search",
-      `--system-prompt-override=${joinPromptRules(systemPromptOverride, GROK_IDENTITY_RULE)}`,
+      `--system-prompt-override=${joinPromptRules(systemPromptOverride, identityRule)}`,
       ...passthrough,
     ];
   }
@@ -186,7 +193,7 @@ export function grokArgsWithTogetherlinkIdentity(args: string[]): string[] {
   return [
     "--disable-web-search",
     "--rules",
-    joinPromptRules(GROK_IDENTITY_RULE, ...userRules),
+    joinPromptRules(identityRule, ...userRules),
     ...passthrough,
   ];
 }

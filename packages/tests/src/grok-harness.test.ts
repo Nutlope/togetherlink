@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { GLM_5_2, SELECTABLE_MODELS } from "@togetherlink/models";
 import {
   buildGrokConfigToml,
+  buildGrokIdentityRule,
   grokArgsWithoutTogetherlinkOverrides,
   grokArgsWithTogetherlinkIdentity,
   grokModelAlias,
@@ -12,6 +13,7 @@ import {
   GROK_VISION_MODEL_ALIAS,
   populateTemporaryGrokHome,
 } from "../../cli/src/lib/grok/core.js";
+import { claimsXaiIdentity } from "./harnesses/grok.js";
 
 const cleanup: string[] = [];
 
@@ -20,9 +22,21 @@ afterEach(() => {
 });
 
 describe("Grok harness", () => {
-  test("keeps the injected identity rule compact and asks for brief identity answers", () => {
+  test("does not mistake an explicit xAI denial for an xAI identity claim", () => {
+    expect(claimsXaiIdentity("I'm a Together AI model via togetherlink, not xAI.")).toBe(false);
+    expect(claimsXaiIdentity("I am not an xAI model; Together AI serves this session.")).toBe(
+      false,
+    );
+    expect(claimsXaiIdentity("I am an xAI model.")).toBe(true);
+    expect(claimsXaiIdentity("I was built by xAI and served by Together AI.")).toBe(true);
+  });
+
+  test("makes the selected Together backend distinct from the Grok terminal harness", () => {
     expect(GROK_IDENTITY_RULE).toBe(
-      "You are a Together AI model via togetherlink, not xAI. Keep identity answers brief.",
+      "Grok Build is only the terminal harness. You are the selected Together AI model via togetherlink, not Grok or an xAI model. For identity questions, name the selected backend and Together AI; never claim xAI built or serves you.",
+    );
+    expect(buildGrokIdentityRule(GLM_5_2)).toContain(
+      `You are ${GLM_5_2.name} (${GLM_5_2.id}), served by Together AI via togetherlink.`,
     );
   });
 

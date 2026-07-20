@@ -169,7 +169,23 @@ function toChatMessages(
         type: "function",
         function: {
           name: toChatHistoryToolName(item, toolTranslation, "function"),
-          arguments: sanitizeToolCallArguments(item.arguments),
+          arguments: sanitizeToolCallArguments(
+            typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments),
+          ),
+        },
+      });
+      continue;
+    }
+    if (item.type === "tool_search_call") {
+      pendingToolCalls.push({
+        id: item.call_id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: toChatHistoryToolName(item, toolTranslation, "tool_search"),
+          arguments:
+            typeof item.arguments === "string"
+              ? item.arguments
+              : JSON.stringify(item.arguments ?? {}),
         },
       });
       continue;
@@ -186,6 +202,19 @@ function toChatMessages(
       continue;
     }
     flushPendingToolCalls();
+    if (item.type === "tool_search_output") {
+      messages.push({
+        role: "tool",
+        tool_call_id: item.call_id ?? "",
+        content: `Loaded tools: ${
+          (item.tools ?? [])
+            .map((tool) => tool.name)
+            .filter(Boolean)
+            .join(", ") || "none"
+        }`,
+      });
+      continue;
+    }
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       messages.push({
         role: "tool",
@@ -211,9 +240,9 @@ function toChatMessages(
 function toChatHistoryToolName(
   item: ResponsesInputItem,
   toolTranslation: CodexToolTranslation,
-  preferredKind: "function" | "custom",
+  preferredKind: "function" | "custom" | "tool_search",
 ): string {
-  const sourceName = item.name ?? "tool";
+  const sourceName = item.name ?? (preferredKind === "tool_search" ? "tool_search" : "tool");
   for (const mapping of toolTranslation.mappings.values()) {
     if (
       item.namespace &&
@@ -250,6 +279,26 @@ export function translateCodexTools(tools: ResponsesTool[] | undefined): CodexTo
   };
 
   for (const tool of tools ?? []) {
+    if (tool.type === "tool_search") {
+      const sourceName = tool.name ?? "tool_search";
+      const modelName = uniqueName(sourceName);
+      const mapping: CodexToolMapping = {
+        kind: "tool_search",
+        sourceName,
+        modelName,
+        execution: tool.execution ?? "client",
+      };
+      mappings.set(modelName, mapping);
+      translated.push(
+        toChatFunctionTool(
+          modelName,
+          tool.description ?? "Search for tools relevant to the current task.",
+          tool.parameters,
+        ),
+      );
+      continue;
+    }
+
     if (isWebSearchTool(tool)) {
       const sourceName = tool.name ?? "web_search";
       const modelName = uniqueName(sourceName);
@@ -322,6 +371,30 @@ export function translateCodexTools(tools: ResponsesTool[] | undefined): CodexTo
   }
 
   return { tools: translated, mappings, nativeTools };
+}
+
+export function translateCodexRequestTools(body: ResponsesRequest): CodexToolTranslation {
+  const visibleTools = (body.tools ?? []).filter((tool) => tool.defer_loading !== true);
+  const discoveredTools =
+    typeof body.input === "string"
+      ? []
+      : (body.input ?? []).flatMap((item) =>
+          item.type === "tool_search_output" ? (item.tools ?? []) : [],
+        );
+  const combined = [...visibleTools];
+  const seen = new Set(combined.map(toolIdentity));
+  for (const tool of discoveredTools) {
+    const identity = toolIdentity(tool);
+    if (!seen.has(identity)) {
+      combined.push(tool);
+      seen.add(identity);
+    }
+  }
+  return combined.length > 0 ? translateCodexTools(combined) : EMPTY_CODEX_TOOL_TRANSLATION;
+}
+
+function toolIdentity(tool: ResponsesTool): string {
+  return `${tool.type ?? ""}:${tool.name ?? ""}`;
 }
 
 function toChatFunctionTool(

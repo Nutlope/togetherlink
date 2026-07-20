@@ -149,6 +149,17 @@ export function responseToolCallOutputItem(
   toolTranslation: CodexToolTranslation,
 ): Record<string, unknown> {
   const mapping = toolTranslation.mappings.get(toolCall.name);
+  if (mapping?.kind === "tool_search") {
+    return {
+      id: `tsc_${randomUUID().replaceAll("-", "")}`,
+      type: "tool_search_call",
+      status: "completed",
+      call_id: toolCall.id,
+      execution: mapping.execution,
+      arguments: parseJsonOrEmpty(toolCall.arguments),
+    };
+  }
+
   if (mapping?.kind === "custom") {
     const parsed = parseJsonOrEmpty(toolCall.arguments);
     return {

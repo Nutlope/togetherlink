@@ -49,6 +49,9 @@ function formatContentBlockForToolResult(block: unknown): string {
   if (record.type === "url" && typeof record.url === "string") {
     return `[url in tool result] ${record.url}`;
   }
+  if (record.type === "tool_reference" && typeof record.tool_name === "string") {
+    return `Loaded deferred tool: ${record.tool_name}`;
+  }
   return stringifyUnknown(block);
 }
 

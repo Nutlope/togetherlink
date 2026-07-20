@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { GLM_5_2, type ModelDefinition } from "../../models/src/index.js";
-import { buildClaudeEnv } from "../../cli/src/lib/claude/core.js";
+import { buildClaudeEnv, claudeRunsInBackground } from "../../cli/src/lib/claude/core.js";
 import { isClaudeCompactionRequest } from "../../cli/src/lib/claude/compaction.js";
 import { CLAUDE_HAIKU_MODEL } from "../../cli/src/lib/claude/defaults.js";
 import { handleProxyRequest } from "../../cli/src/lib/claude/proxy.js";
@@ -66,6 +66,40 @@ describe("Claude proxy compatibility API", () => {
     });
 
     expect(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("24000");
+  });
+
+  test("explicitly enables Claude tool search for the custom proxy", () => {
+    vi.stubEnv("ENABLE_TOOL_SEARCH", "");
+
+    const env = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+
+    expect(env.ENABLE_TOOL_SEARCH).toBe("true");
+  });
+
+  test("preserves an explicit Claude tool search override", () => {
+    vi.stubEnv("ENABLE_TOOL_SEARCH", "false");
+
+    const env = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+
+    expect(env.ENABLE_TOOL_SEARCH).toBe("false");
+  });
+
+  test("keeps detached Claude background sessions registered after the launcher exits", () => {
+    expect(claudeRunsInBackground(["--bg", "do work"])).toBe(true);
+    expect(claudeRunsInBackground(["--background", "do work"])).toBe(true);
+    expect(claudeRunsInBackground(["--print", "do work"])).toBe(false);
   });
 
   test("counts tokens without calling the upstream model", async () => {
@@ -1205,6 +1239,59 @@ describe("Claude proxy compatibility API", () => {
     expect(String(toolMessage?.content)).toContain("Async agent launched successfully.");
     expect(String(toolMessage?.content)).toMatch(/image|Image description/);
     expect(String(toolMessage?.content)).toContain("[described by");
+  });
+
+  test("formats Claude deferred tool references without leaking protocol JSON", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_tool_reference",
+            choices: [{ message: { content: "REFERENCE_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool_search_1",
+                content: [
+                  {
+                    type: "tool_reference",
+                    tool_name: "mcp__context7__resolve-library-id",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const toolMessage = upstreamMessages(upstreamBodies[0]).find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage).toMatchObject({
+      tool_call_id: "tool_search_1",
+      content: "Loaded deferred tool: mcp__context7__resolve-library-id",
+    });
   });
 
   test("returns Anthropic native web-search blocks from buffered requests", async () => {

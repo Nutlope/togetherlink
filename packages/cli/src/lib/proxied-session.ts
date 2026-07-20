@@ -92,6 +92,12 @@ export type ProxiedSessionSpec = {
   banner: (modelName: string) => string;
   /** Label for keepalive logging (e.g. "Claude session"). */
   keepaliveLabel: string;
+  /**
+   * Keep the daemon route after the launched process exits successfully.
+   * Claude's `--bg` launcher hands work to a detached process, so tying the
+   * route to the short-lived launcher pid would make that worker 401.
+   */
+  preserveSessionAfterExit?: boolean;
   /** Optional post-deregister hook (Codex uses it to clean up the catalog). */
   afterDeregister?: () => Promise<void> | void;
 };
@@ -166,7 +172,7 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
     },
   );
 
-  if (typeof child.pid === "number") {
+  if (!spec.preserveSessionAfterExit && typeof child.pid === "number") {
     try {
       await updateDaemonSessionPid(proxyUrl, sessionId, child.pid);
     } catch {
@@ -174,7 +180,7 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
     }
   }
   const keepalive = startDaemonSessionKeepalive(registration, {
-    ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
+    ...(!spec.preserveSessionAfterExit && typeof child.pid === "number" ? { pid: child.pid } : {}),
     debug,
     label: spec.keepaliveLabel,
   });
@@ -187,8 +193,17 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
     child.on("exit", (status, signal) => resolve({ status, signal }));
   });
 
-  const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
+  const detachedSessionActive =
+    spec.preserveSessionAfterExit && result.status === 0 && result.signal === null;
   keepalive.stop();
+  if (detachedSessionActive) {
+    process.stderr.write(
+      "togetherlink ▸ Background Claude session remains routed through Together AI.\n",
+    );
+    return result;
+  }
+
+  const { usage, usageByModel } = await printSessionCost(proxyUrl, sessionId);
   try {
     await daemonFetch(`${proxyUrl}/internal/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",

@@ -14,9 +14,12 @@ export type ResponsesInputItem = {
   call_id?: string;
   name?: string;
   namespace?: string;
-  arguments?: string;
+  arguments?: unknown;
   input?: string;
   output?: unknown;
+  status?: string;
+  execution?: string;
+  tools?: ResponsesTool[];
 };
 
 export type ResponsesTool = {
@@ -24,6 +27,8 @@ export type ResponsesTool = {
   name?: string;
   description?: string;
   parameters?: unknown;
+  execution?: string;
+  defer_loading?: boolean;
   strict?: boolean;
   format?: { type?: string; syntax?: string; definition?: string };
   tools?: ResponsesTool[];
@@ -125,6 +130,7 @@ export type PendingToolCall = {
 export type CodexToolMapping =
   | { kind: "function"; sourceName: string; modelName: string; namespace?: string }
   | { kind: "custom"; sourceName: string; modelName: string }
+  | { kind: "tool_search"; sourceName: string; modelName: string; execution: string }
   | { kind: "namespace"; sourceName: string; modelName: string; namespace: string }
   | { kind: "web_search"; sourceName: string; modelName: string; definition: ResponsesTool };
 

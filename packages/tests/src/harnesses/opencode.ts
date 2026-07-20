@@ -74,6 +74,7 @@ export function opencodeScenarios(): Scenario[] {
         const prompt = [
           "You are testing long-context handling. Read the repeated records below and answer with only the checksum token from the final record.",
           makeLongRecords(250, "OPENCODE_FINAL_CHECKSUM_4185"),
+          "End of records. The final record is record 249. Return that record's token only.",
         ].join("\n\n");
         const result = await runCommand(
           context,

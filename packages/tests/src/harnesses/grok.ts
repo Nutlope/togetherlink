@@ -118,7 +118,7 @@ export function grokScenarios(): Scenario[] {
           .map((event) => String(event.data ?? ""))
           .join("");
         assert(/Together AI/i.test(streamedText), "missing Together AI identity");
-        assert(!/\bxAI\b/i.test(streamedText), "incorrectly claimed xAI model identity");
+        assert(!claimsXaiIdentity(streamedText), "incorrectly claimed xAI model identity");
       },
     },
     {
@@ -142,6 +142,11 @@ export function grokScenarios(): Scenario[] {
       },
     },
   ];
+}
+
+export function claimsXaiIdentity(text: string): boolean {
+  const withoutExplicitDenials = text.replace(/\bnot\s+(?:an?\s+)?xAI(?:\s+model)?\b/gi, "");
+  return /\bxAI\b/i.test(withoutExplicitDenials);
 }
 
 function grokEvents(stdout: string): Array<Record<string, unknown>> {

@@ -7,10 +7,9 @@ import { readJsonBodyWithSize, requestPath, writeJson } from "../http-util.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { objectKeys } from "./content-format.js";
 import {
-  EMPTY_CODEX_TOOL_TRANSLATION,
   resolveCodexRequestModel,
   toChatPayload,
-  translateCodexTools,
+  translateCodexRequestTools,
 } from "./translate-request.js";
 import { toResponsesResponse } from "./translate-response.js";
 import { callTogetherWithNativeTools } from "./together-call.js";
@@ -88,10 +87,7 @@ export async function handleCodexProxyRequest(
   const estimatedInputTokens =
     options.costTracker?.tokenEstimator.estimate(rawBytes) ?? Math.ceil(rawBytes / 4);
   const translated = perf.spanSync("translate_request", () => {
-    const toolTranslation =
-      body.tools && body.tools.length > 0
-        ? translateCodexTools(body.tools)
-        : EMPTY_CODEX_TOOL_TRANSLATION;
+    const toolTranslation = translateCodexRequestTools(body);
     const nativeToolCount = toolTranslation.nativeTools.length;
     const requestModel = resolveCodexRequestModel(body, options);
     const translatedPayload = toChatPayload(

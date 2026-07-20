@@ -40,6 +40,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     );
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
+    expect(first?.supports_search_tool).toBe(true);
     const expectedLimit = Math.floor(GLM_5_2.limit.context / 1.8);
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
@@ -193,6 +194,183 @@ describe("Codex Responses proxy tool compatibility", () => {
       },
     ]);
     expect(firstToolName(requests)).toBe("apply_patch");
+  });
+
+  test("bridges client-executed tool search through Together function calling", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "search-1",
+                    type: "function",
+                    function: {
+                      name: "tool_search",
+                      arguments: JSON.stringify({ query: "calendar create", limit: 1 }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }),
+    );
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      tools: [
+        {
+          type: "tool_search",
+          execution: "client",
+          description: "Search deferred tools.",
+          parameters: {
+            type: "object",
+            properties: { query: { type: "string" }, limit: { type: "number" } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Create it." }] },
+      ],
+    });
+
+    expect(firstToolName(requests)).toBe("tool_search");
+    expect(response.output).toEqual([
+      {
+        id: expect.stringMatching(/^tsc_/),
+        type: "tool_search_call",
+        status: "completed",
+        call_id: "search-1",
+        execution: "client",
+        arguments: { query: "calendar create", limit: 1 },
+      },
+    ]);
+  });
+
+  test("loads only tools returned by Codex tool search on the continuation turn", async () => {
+    const requests: Array<{
+      tools?: Array<{ function?: { name?: string } }>;
+      messages?: Array<Record<string, unknown>>;
+    }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    id: "calendar-1",
+                    type: "function",
+                    function: {
+                      name: "calendar_create",
+                      arguments: JSON.stringify({ title: "Demo" }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }),
+    );
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      tools: [
+        {
+          type: "tool_search",
+          execution: "client",
+          description: "Search deferred tools.",
+          parameters: { type: "object", properties: { query: { type: "string" } } },
+        },
+        {
+          type: "function",
+          name: "never_selected",
+          description: "A deferred tool that should stay out of context.",
+          defer_loading: true,
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      input: [
+        { type: "message", role: "user", content: "Create it." },
+        {
+          type: "tool_search_call",
+          call_id: "search-1",
+          execution: "client",
+          arguments: { query: "calendar create", limit: 1 },
+        },
+        {
+          type: "tool_search_output",
+          call_id: "search-1",
+          execution: "client",
+          status: "completed",
+          tools: [
+            {
+              type: "function",
+              name: "calendar_create",
+              description: "Create a calendar event.",
+              defer_loading: true,
+              parameters: {
+                type: "object",
+                properties: { title: { type: "string" } },
+                required: ["title"],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(requests[0]?.tools?.map((tool) => tool.function?.name)).toEqual([
+      "tool_search",
+      "calendar_create",
+    ]);
+    expect(requests[0]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          tool_calls: [
+            expect.objectContaining({
+              id: "search-1",
+              function: {
+                name: "tool_search",
+                arguments: JSON.stringify({ query: "calendar create", limit: 1 }),
+              },
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          role: "tool",
+          tool_call_id: "search-1",
+          content: "Loaded tools: calendar_create",
+        }),
+      ]),
+    );
+    expect(response.output).toEqual([
+      expect.objectContaining({
+        type: "function_call",
+        call_id: "calendar-1",
+        name: "calendar_create",
+      }),
+    ]);
   });
 
   test("flattens namespace tools for Together and restores namespace in Codex output", async () => {
@@ -456,6 +634,59 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).not.toContain("response.function_call_arguments.done");
     expect(response).toContain('"arguments":"{\\"task\\":\\"Say alpha\\"}"');
     expect(response).toContain('"arguments":"{\\"task\\":\\"Say beta\\"}"');
+  });
+
+  test("streams tool search as a completed client-executed Codex item", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return sseResponse([
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "search-stream-1",
+                      type: "function",
+                      function: {
+                        name: "tool_search",
+                        arguments: '{"query":"calendar create","limit":1}',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ finish_reason: "tool_calls", delta: {} }] },
+        ]);
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      tools: [
+        {
+          type: "tool_search",
+          execution: "client",
+          description: "Search deferred tools.",
+          parameters: { type: "object", properties: { query: { type: "string" } } },
+        },
+      ],
+      input: [{ type: "message", role: "user", content: "Create an event." }],
+    });
+
+    expect(response).toContain('"type":"tool_search_call"');
+    expect(response).toContain('"call_id":"search-stream-1"');
+    expect(response).toContain('"execution":"client"');
+    expect(response).toContain('"arguments":{"query":"calendar create","limit":1}');
+    expect(response).toContain("response.completed");
   });
 
   test("parses CRLF-delimited upstream SSE streams", async () => {

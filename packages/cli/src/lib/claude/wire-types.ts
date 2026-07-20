@@ -7,6 +7,7 @@ export type AnthropicContentBlock =
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "server_tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean }
+  | { type: "tool_reference"; tool_name: string }
   | { type: "web_search_tool_result"; tool_use_id?: string; content?: unknown; error_code?: string }
   | {
       type: "web_search_tool_result_error";

@@ -131,19 +131,18 @@ Needed:
 
 ## Medium Priority
 
-### `tool_search_tool_regex_*` and `tool_search_tool_bm25_*`
+### Tool search follow-ups
 
-Why:
+Current support:
 
-- Useful for huge tool catalogs.
-- Probably not needed for current Claude Code flows unless Claude Code starts sending deferred tool catalogs.
+- Claude Code owns MCP catalog search and sends `ToolSearch`, `DeferredToolPlaceholder`, `tool_reference` blocks, and selected `defer_loading` definitions through the normal Messages protocol.
+- TogetherLink opts custom-base-url sessions into this path and preserves the envelopes the Claude client needs. It does not reimplement Anthropic's BM25/regex search server-side.
 
-Needed:
+Possible follow-ups:
 
-- Detect native tool search types.
-- Understand `defer_loading` tool definitions if Claude Code sends them.
-- Implement local BM25/regex search over deferred tool schemas.
-- Return matching tool references or expand matching tools.
+- Benchmark `true` against `auto:N` as tool catalogs and model context limits change.
+- Add live coverage with a much larger MCP catalog.
+- Revisit only if Claude Code starts sending native server-side `tool_search_tool_regex_*` or `tool_search_tool_bm25_*` definitions instead of executing search locally.
 
 ### `advisor_*`
 

@@ -94,7 +94,7 @@ export function toCodexModelCatalogEntry(
     effective_context_window_percent: Math.round(100 / CODEX_TOKENIZER_MISMATCH_RATIO),
     experimental_supported_tools: [],
     input_modalities: model.definition.modalities.input,
-    supports_search_tool: false,
+    supports_search_tool: model.definition.tool_call,
     use_responses_lite: false,
   };
 }

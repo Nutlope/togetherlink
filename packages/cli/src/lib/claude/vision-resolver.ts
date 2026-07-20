@@ -192,6 +192,7 @@ export function extractImageBlocks(body: AnthropicMessagesRequest): Array<Record
     "tool_use",
     "server_tool_use",
     "tool_result",
+    "tool_reference",
     "web_search_tool_result",
     "web_search_tool_result_error",
   ]);
