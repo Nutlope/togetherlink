@@ -9,6 +9,10 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       {
+        name: "google-site-verification",
+        content: "hw2T7bF1pTb1gIVdn0dudbJ-RdGyOkp6hYt8LH5kaeA",
+      },
+      {
         title: "togetherlink - Together AI models in OpenCode, Claude Code, Codex & Pi Code",
       },
       {
