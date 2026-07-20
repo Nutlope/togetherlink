@@ -50,7 +50,7 @@ export function buildClaudeEnv({
   modelId,
   proxyUrl,
   authToken,
-}: ClaudeLaunchOptions & {
+}: Pick<ClaudeLaunchOptions, "apiKey"> & {
   modelId: string;
   modelName: string;
   proxyUrl: string;
