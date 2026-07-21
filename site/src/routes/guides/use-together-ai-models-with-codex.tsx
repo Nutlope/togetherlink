@@ -131,7 +131,7 @@ function TogetherCodexGuide() {
                 Responses protocol bridge and leaves your normal Codex setup alone.
               </p>
               <div className="mt-8 max-w-[600px]">
-                <CommandBlock command="togetherlink codex" label="Default: GLM 5.2" />
+                <CommandBlock command="tcodex" label="Default shortcut: GLM 5.2" />
               </div>
             </div>
             <GuideCover variant="together-codex" className="mt-12" />
@@ -205,9 +205,11 @@ function TogetherCodexGuide() {
                 <CommandBlock command="togetherlink configure" label="2. Save Together API key" />
               </div>
               <p className="mt-4 text-[13.5px] leading-relaxed text-muted">
-                You can skip local storage in automation and set{" "}
-                <code className="text-ink">TOGETHER_API_KEY</code> through your secret manager
-                instead.
+                The installer also adds <code className="text-ink">tclaude</code>,{" "}
+                <code className="text-ink">tgrok</code>, <code className="text-ink">tpi</code>, and{" "}
+                <code className="text-ink">topencode</code>. In automation, you can skip local
+                storage and set <code className="text-ink">TOGETHER_API_KEY</code> through your
+                secret manager instead.
               </p>
             </section>
 

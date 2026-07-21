@@ -156,9 +156,11 @@ function GlmGrokGuide() {
                 <CommandBlock command="togetherlink configure" />
               </NumberedStep>
               <NumberedStep number="4" title="Launch Grok Build on GLM 5.2">
-                <CommandBlock command="togetherlink --model zai-org/GLM-5.2 grok" />
+                <CommandBlock command="tgrok" />
                 <p className="m-0 mt-4">
-                  Because GLM 5.2 is the current default, <code>tgrok</code> is the short form.
+                  The installer also adds <code>tcodex</code>, <code>tclaude</code>,{" "}
+                  <code>tpi</code>, and <code>topencode</code>. Use the full model command only when
+                  overriding the default.
                 </p>
               </NumberedStep>
             </section>

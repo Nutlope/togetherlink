@@ -162,11 +162,14 @@ function TogetherClaudeGuide() {
               <div className="mt-6 space-y-4">
                 <CommandBlock command={INSTALL_COMMAND} label="Install TogetherLink" />
                 <CommandBlock command="togetherlink configure" label="Save the Together API key" />
-                <CommandBlock command="togetherlink claude" label="Launch Claude Code on GLM 5.2" />
+                <CommandBlock command="tclaude" label="Launch Claude Code on GLM 5.2" />
               </div>
               <p className="mt-4 text-[13px] leading-relaxed text-faint">
-                The shortcut <code className="text-ink">tclaude</code> launches the same default
-                route. Use the full command in scripts when you want the intent to be obvious.
+                The installer also adds <code className="text-ink">tcodex</code>,{" "}
+                <code className="text-ink">tgrok</code>, <code className="text-ink">tpi</code>, and{" "}
+                <code className="text-ink">topencode</code>. Use the full{" "}
+                <code className="text-ink">togetherlink claude</code> command in scripts when you
+                want the intent to be explicit.
               </p>
             </section>
 

@@ -148,7 +148,9 @@ function GlmCodexGuide() {
                 <NumberedStep number="1" title="Install TogetherLink">
                   <p className="m-0 mb-4">
                     This installs the self-updating <code>togetherlink</code> binary on macOS or
-                    Linux. Codex CLI must also be installed on the machine.
+                    Linux, plus the <code>tcodex</code>, <code>tclaude</code>, <code>tgrok</code>,{" "}
+                    <code>tpi</code>, and <code>topencode</code> shortcuts. Codex CLI must also be
+                    installed on the machine.
                   </p>
                   <CommandBlock command={INSTALL_COMMAND} />
                 </NumberedStep>
@@ -164,7 +166,7 @@ function GlmCodexGuide() {
                     Use the full model ID when you want the command to be explicit. GLM 5.2 is also
                     the current default, so <code>togetherlink codex</code> is the short form.
                   </p>
-                  <CommandBlock command="togetherlink --model zai-org/GLM-5.2 codex" />
+                  <CommandBlock command="tcodex" />
                 </NumberedStep>
               </section>
 
