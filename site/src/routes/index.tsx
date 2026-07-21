@@ -139,7 +139,7 @@ const guideLinks = [
   {
     href: "/guides/use-together-ai-models-with-codex",
     label: "Codex CLI",
-    title: "Run open models in Codex without editing config",
+    title: "Run open models in Codex without replacing config",
     body: "Route Codex through Together and switch between six current open models.",
     icon: <CodexMark className="size-6" />,
   },

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import type { GuideOgKey } from "../lib/guide-og";
+import { guideOgPath, type GuideOgKey } from "../lib/guide-og";
 import { GuideOgArtwork } from "./guide-og-artwork";
 
 export const SITE_URL = "https://togetherlink.vercel.app";
@@ -13,6 +13,53 @@ export type Faq = {
   answer: string;
 };
 
+export type GuideDefinition = {
+  path: `/guides/${string}`;
+  title: string;
+  description: string;
+  breadcrumbLabel: string;
+  ogKey: GuideOgKey;
+  ogAlt: string;
+  datePublished: string;
+  dateModified: string;
+  faqs: Faq[];
+};
+
+export function defineGuide<const T extends GuideDefinition>(guide: T): T {
+  return guide;
+}
+
+export function buildGuideHead(guide: GuideDefinition) {
+  const url = SITE_URL + guide.path;
+  const image = SITE_URL + guideOgPath(guide.ogKey);
+
+  return {
+    meta: [
+      { title: guide.title },
+      { name: "description", content: guide.description },
+      { name: "robots", content: "index, follow, max-image-preview:large" },
+      { name: "googlebot", content: "index, follow, max-image-preview:large" },
+      { property: "og:type", content: "article" },
+      { property: "og:site_name", content: "TogetherLink" },
+      { property: "og:title", content: guide.title },
+      { property: "og:description", content: guide.description },
+      { property: "og:url", content: url },
+      { property: "og:image", content: image },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { property: "og:image:alt", content: guide.ogAlt },
+      { property: "article:published_time", content: guide.datePublished },
+      { property: "article:modified_time", content: guide.dateModified },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: guide.title },
+      { name: "twitter:description", content: guide.description },
+      { name: "twitter:image", content: image },
+      { name: "twitter:image:alt", content: guide.ogAlt },
+    ],
+    links: [{ rel: "canonical", href: url }],
+  };
+}
+
 export function GuideShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-white text-ink">
@@ -20,6 +67,23 @@ export function GuideShell({ children }: { children: ReactNode }) {
       {children}
       <GuideFooter />
     </div>
+  );
+}
+
+export function GuideArticlePage({
+  guide,
+  children,
+}: {
+  guide: GuideDefinition;
+  children: ReactNode;
+}) {
+  return (
+    <GuideShell>
+      <main>
+        <article>{children}</article>
+        <GuideStructuredData guide={guide} />
+      </main>
+    </GuideShell>
   );
 }
 
@@ -74,7 +138,7 @@ export function GuideFooter() {
   );
 }
 
-export function Breadcrumbs({ current }: { current: string }) {
+export function Breadcrumbs({ guide }: { guide: GuideDefinition }) {
   return (
     <nav aria-label="Breadcrumb" className="mb-7 text-[13px] font-medium text-faint">
       <ol className="m-0 flex list-none items-center gap-2 p-0">
@@ -91,11 +155,45 @@ export function Breadcrumbs({ current }: { current: string }) {
         </li>
         <li aria-hidden="true">/</li>
         <li className="truncate text-muted" aria-current="page">
-          {current}
+          {guide.breadcrumbLabel}
         </li>
       </ol>
     </nav>
   );
+}
+
+export function GuideByline({
+  guide,
+  className = "",
+}: {
+  guide: GuideDefinition;
+  className?: string;
+}) {
+  const published = formatGuideDate(guide.datePublished);
+  const modified = formatGuideDate(guide.dateModified);
+
+  return (
+    <p className={`m-0 mt-5 text-pretty text-[13px] leading-relaxed text-faint ${className}`}>
+      By <span className="font-medium text-muted">TogetherLink</span>
+      <span aria-hidden="true"> · </span>
+      <time dateTime={guide.datePublished}>Published {published}</time>
+      {guide.dateModified !== guide.datePublished ? (
+        <>
+          <span aria-hidden="true"> · </span>
+          <time dateTime={guide.dateModified}>Updated {modified}</time>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+function formatGuideDate(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
 }
 
 export type GuideCoverVariant = GuideOgKey;
@@ -268,37 +366,31 @@ export function FaqSection({ faqs }: { faqs: Faq[] }) {
   );
 }
 
-export function GuideStructuredData({
-  title,
-  description,
-  path,
-  image,
-  datePublished,
-  dateModified,
-  faqs,
-}: {
-  title: string;
-  description: string;
-  path: string;
-  image: string;
-  datePublished: string;
-  dateModified: string;
-  faqs: Faq[];
-}) {
-  const url = `${SITE_URL}${path}`;
+export function GuideStructuredData({ guide }: { guide: GuideDefinition }) {
+  const url = `${SITE_URL}${guide.path}`;
   const graph = {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "TechArticle",
-        headline: title,
-        description,
+        "@type": "Article",
+        headline: guide.title,
+        description: guide.description,
         url,
-        image: `${SITE_URL}${image}`,
-        datePublished,
-        dateModified,
+        image: `${SITE_URL}${guideOgPath(guide.ogKey)}`,
+        datePublished: guide.datePublished,
+        dateModified: guide.dateModified,
         author: { "@type": "Organization", name: "TogetherLink", url: SITE_URL },
-        publisher: { "@type": "Organization", name: "TogetherLink", url: SITE_URL },
+        publisher: {
+          "@type": "Organization",
+          name: "TogetherLink",
+          url: SITE_URL,
+          logo: {
+            "@type": "ImageObject",
+            url: `${SITE_URL}/togetherlink-logo.png`,
+            width: 1024,
+            height: 1024,
+          },
+        },
         mainEntityOfPage: { "@type": "WebPage", "@id": url },
       },
       {
@@ -306,12 +398,12 @@ export function GuideStructuredData({
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
           { "@type": "ListItem", position: 2, name: "Guides", item: `${SITE_URL}/guides` },
-          { "@type": "ListItem", position: 3, name: title, item: url },
+          { "@type": "ListItem", position: 3, name: guide.breadcrumbLabel, item: url },
         ],
       },
       {
         "@type": "FAQPage",
-        mainEntity: faqs.map((faq) => ({
+        mainEntity: guide.faqs.map((faq) => ({
           "@type": "Question",
           name: faq.question,
           acceptedAnswer: { "@type": "Answer", text: faq.answer },
@@ -352,5 +444,26 @@ export function ArticleLink({
       </h3>
       <p className="m-0 mt-2 text-[13.5px] leading-relaxed text-muted">{body}</p>
     </a>
+  );
+}
+
+export function RelatedGuides({
+  title = "Related guides",
+  links,
+  className = "mt-20",
+}: {
+  title?: string;
+  links: Array<{ href: string; eyebrow: string; title: string; body: string }>;
+  className?: string;
+}) {
+  return (
+    <section className={className} aria-label={title}>
+      <h2 className="m-0 text-[24px] font-semibold">{title}</h2>
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        {links.map((link) => (
+          <ArticleLink key={link.href} {...link} />
+        ))}
+      </div>
+    </section>
   );
 }

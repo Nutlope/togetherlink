@@ -1,4 +1,4 @@
-export const GUIDE_OG_VERSION = "6";
+export const GUIDE_OG_VERSION = "7";
 
 export const guideOgContent = {
   "glm-codex": {
@@ -17,8 +17,8 @@ export const guideOgContent = {
   },
   "together-codex": {
     eyebrow: "Config-safe Codex routing",
-    title: "Run open models in Codex CLI without editing config",
-    titleLines: ["Run open models in Codex", "without editing config"],
+    title: "Run open models in Codex CLI without replacing your config",
+    titleLines: ["Run open models in Codex", "without replacing config"],
     titleSize: 56,
     harness: "codex",
     harnessLabel: "Codex CLI",
@@ -58,10 +58,10 @@ export const guideOgContent = {
     tint: "#f4f4f3",
   },
   "together-chatgpt": {
-    eyebrow: "Desktop provider setup",
-    title: "Add open models to the ChatGPT Desktop app",
-    titleLines: ["Add open models to", "ChatGPT Desktop"],
-    titleSize: 57,
+    eyebrow: "Codex desktop provider",
+    title: "Use open models in Codex for the ChatGPT Desktop app",
+    titleLines: ["Use open models in Codex", "for ChatGPT Desktop"],
+    titleSize: 54,
     harness: "chatgpt",
     harnessLabel: "ChatGPT Desktop",
     command: "togetherlink chatgpt",

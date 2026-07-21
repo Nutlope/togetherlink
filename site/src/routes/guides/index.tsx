@@ -9,9 +9,9 @@ const guides = [
   {
     href: "/guides/use-together-ai-models-with-codex",
     cover: "together-codex" as GuideCoverVariant,
-    title: "Run open models in Codex CLI without editing config",
+    title: "Run open models in Codex CLI without replacing your config",
     description:
-      "Connect Codex to Together AI, choose between six current open models, and keep your normal OpenAI login and Codex configuration untouched.",
+      "Connect Codex to Together AI, choose between six current open models, and keep provider and model settings scoped to each run.",
     meta: "Codex CLI · model picker · 10 min",
   },
   {
@@ -25,10 +25,10 @@ const guides = [
   {
     href: "/guides/use-together-ai-models-with-chatgpt-desktop",
     cover: "together-chatgpt" as GuideCoverVariant,
-    title: "Add open models to the ChatGPT Desktop app",
+    title: "Use open models in Codex for the ChatGPT Desktop app",
     description:
-      "Configure the ChatGPT desktop app for Together models, understand what the alpha integration changes, and restore your OpenAI profile safely.",
-    meta: "ChatGPT Desktop · alpha · 8 min",
+      "Configure the Codex coding experience for open models, inspect the exact file changed, and restore your previous app configuration safely.",
+    meta: "Codex in ChatGPT Desktop · alpha · 8 min",
   },
   {
     href: "/guides/use-glm-5-2-with-codex",
