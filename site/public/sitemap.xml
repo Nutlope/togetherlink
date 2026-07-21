@@ -2,5 +2,30 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://togetherlink.vercel.app/</loc>
+    <lastmod>2026-07-21</lastmod>
+  </url>
+  <url>
+    <loc>https://togetherlink.vercel.app/guides</loc>
+    <lastmod>2026-07-21</lastmod>
+  </url>
+  <url>
+    <loc>https://togetherlink.vercel.app/guides/use-glm-5-2-with-codex</loc>
+    <lastmod>2026-07-21</lastmod>
+  </url>
+  <url>
+    <loc>https://togetherlink.vercel.app/guides/use-together-ai-models-with-codex</loc>
+    <lastmod>2026-07-21</lastmod>
+  </url>
+  <url>
+    <loc>https://togetherlink.vercel.app/guides/use-together-ai-models-with-claude-code</loc>
+    <lastmod>2026-07-21</lastmod>
+  </url>
+  <url>
+    <loc>https://togetherlink.vercel.app/guides/use-glm-5-2-with-grok-build</loc>
+    <lastmod>2026-07-21</lastmod>
+  </url>
+  <url>
+    <loc>https://togetherlink.vercel.app/guides/use-together-ai-models-with-chatgpt-desktop</loc>
+    <lastmod>2026-07-21</lastmod>
   </url>
 </urlset>

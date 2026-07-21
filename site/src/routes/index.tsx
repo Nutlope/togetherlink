@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { ChatGPTMark, ClaudeMark, CodexMark, GrokMark } from "../components/harness-marks";
 
 const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | sh";
 const githubUrl = "https://github.com/Nutlope/togetherlink";
@@ -131,6 +132,30 @@ const codexAppCommands = [
     label: "Restore",
     description:
       "Brings back your OpenAI / ChatGPT subscription profile and removes the togetherlink config.",
+  },
+];
+
+const guideLinks = [
+  {
+    href: "/guides/use-together-ai-models-with-codex",
+    label: "Codex CLI",
+    title: "How to use open source models in Codex",
+    body: "Route Codex through Together and switch between six current open models.",
+    icon: <CodexMark className="size-6" />,
+  },
+  {
+    href: "/guides/use-glm-5-2-with-grok-build",
+    label: "Grok Build",
+    title: "How to use GLM 5.2 with Grok Build",
+    body: "Keep the Grok Build terminal harness while Together AI serves GLM 5.2.",
+    icon: <GrokMark className="size-6" />,
+  },
+  {
+    href: "/guides/use-together-ai-models-with-chatgpt-desktop",
+    label: "ChatGPT Desktop",
+    title: "How to use open source models in ChatGPT Desktop",
+    body: "Configure the desktop app, understand the persistent change, and restore safely.",
+    icon: <ChatGPTMark className="size-6 rounded-md" />,
   },
 ];
 
@@ -524,8 +549,49 @@ function Home() {
         </Step>
       </section>
 
+      <section className="mx-auto mb-20 max-w-[880px]" aria-labelledby="guides-heading">
+        <div className="mb-5 flex items-end justify-between gap-4">
+          <div>
+            <span className="text-[12px] font-semibold tracking-[.07em] text-[#c2410c] uppercase">
+              Step-by-step
+            </span>
+            <h2 id="guides-heading" className="m-0 mt-2 text-xl font-semibold text-ink">
+              TogetherLink guides
+            </h2>
+          </div>
+          <a className="text-sm font-medium text-muted hover:text-ink" href="/guides">
+            View all →
+          </a>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {guideLinks.map((guide) => (
+            <a
+              key={guide.href}
+              href={guide.href}
+              className="group flex min-h-[190px] flex-col rounded-[14px] border border-line-strong bg-white p-[22px] transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)] active:scale-[0.96]"
+            >
+              <span className="inline-flex size-10 items-center justify-center rounded-[10px] bg-code text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
+                {guide.icon}
+              </span>
+              <span className="mt-4 font-mono text-[10.5px] text-faint uppercase">
+                {guide.label}
+              </span>
+              <h3 className="m-0 mt-2 text-[16px] font-semibold text-balance group-hover:underline group-hover:underline-offset-4">
+                {guide.title}
+              </h3>
+              <p className="m-0 mt-2 text-pretty text-[13px] leading-relaxed text-muted">
+                {guide.body}
+              </p>
+            </a>
+          ))}
+        </div>
+      </section>
+
       <footer className="border-t border-line py-8 pb-14 text-sm text-faint">
         <div className="mb-2.5 flex flex-wrap gap-[22px] text-muted">
+          <a className="transition-colors hover:text-ink" href="/guides">
+            Guides
+          </a>
           <a className="transition-colors hover:text-ink" href={githubUrl}>
             GitHub
           </a>
@@ -716,62 +782,6 @@ function ChatGPTHeroMark() {
   );
 }
 
-function ClaudeMark() {
-  return (
-    <svg className="size-[26px]" viewBox="0 0 1200 1200" aria-hidden="true">
-      <path
-        fill="#d97757"
-        d="M233.96 800.215 468.644 668.537l3.947-11.436-3.947-6.363h-11.436l-39.221-2.416-134.094-3.624-116.296-4.832-112.671-6.04-28.349-6.041L0 592.752l2.738-17.477 23.839-16.027 34.148 2.98 75.463 5.155 113.235 7.812 82.148 4.832 121.691 12.644h19.329l2.738-7.812-6.604-4.832-5.154-4.832-117.182-79.41-126.846-83.919-66.442-48.322-35.92-24.483-18.12-22.953-7.813-50.094 32.617-35.92 43.812 2.98 11.195 2.98 44.376 34.148 94.792 73.369 123.785 91.168 18.121 15.06 7.248-5.154.886-3.624-8.134-13.611-67.329-121.691-71.839-123.785-31.973-51.302-8.456-30.765c-2.98-12.644-5.154-23.275-5.154-36.241L312.322 13.208l20.537-6.604 49.53 6.604 20.859 18.121 30.765 70.389 49.852 110.819 77.316 150.684 22.631 44.698 12.08 41.396 4.511 12.645h7.812v-7.248l6.362-84.886 11.759-104.215 11.436-134.094 3.946-37.772 18.685-45.262L697.53 24l28.993 13.852L750.363 72l-3.302 22.067-14.175 92.134-27.785 144.322-18.121 96.645h10.55l12.081-12.081 48.886-64.912 82.148-102.685 36.241-40.752 42.282-45.02 27.141-21.423h51.302l37.772 56.134-16.913 57.987-52.832 67.007-43.812 56.778-62.819 84.564-39.221 67.651 3.624 5.396 9.342-.886 141.906-30.201 76.671-13.852 91.49-15.705 41.396 19.329 4.51 19.651-16.268 40.188-97.852 24.161-114.765 22.953-170.899 40.429-2.094 1.53 2.416 2.98 76.993 7.248 32.94 1.772h80.617l150.121 11.195 39.221 25.933 23.517 31.732-3.946 24.161-60.403 30.765-81.503-19.329-190.228-45.262-65.235-16.268h-9.02v5.396l54.362 53.154 99.624 89.96 124.752 115.973 6.362 28.671-16.027 22.631-16.912-2.416-109.611-82.47-42.282-37.127-95.758-80.618h-6.363v8.456l22.067 32.295 116.537 175.168 6.04 53.718-8.456 17.476-30.201 10.55-33.181-6.04-68.215-95.758-70.389-107.839-56.779-96.644-6.926 3.946-33.503 360.886-15.705 18.443L565.53 1200l-30.201-22.953-16.027-37.127 16.027-73.369 19.329-95.758 15.705-76.107 14.174-94.55 8.456-31.41-.563-2.095-6.927.886-71.275 97.852-108.402 146.497-85.772 91.812-20.537 8.134-35.597-18.443 3.302-32.939 19.893-29.316 118.711-151.007 71.597-93.583 46.228-54.04-.323-7.812h-2.738L205.289 929.396l-56.135 7.248-24.161-22.63 2.98-37.128 11.436-12.081 94.792-65.234-.322.322Z"
-      />
-    </svg>
-  );
-}
-
-function CodexMark() {
-  return (
-    <svg
-      className="size-[30px]"
-      height="1em"
-      style={{ flex: "none", lineHeight: 1 }}
-      viewBox="2 2.7 20 18.7"
-      width="1em"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <title>Codex</title>
-      <path
-        d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z"
-        fill="url(#codex-mark-gradient)"
-      />
-      <defs>
-        <linearGradient
-          gradientUnits="userSpaceOnUse"
-          id="codex-mark-gradient"
-          x1="12"
-          x2="12"
-          y1="3"
-          y2="21"
-        >
-          <stop stopColor="#B1A7FF" />
-          <stop offset=".5" stopColor="#7A9DFF" />
-          <stop offset="1" stopColor="#3941FF" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
-function ChatGPTMark() {
-  return (
-    <img
-      src="/chatgpt-icon.png"
-      alt="ChatGPT"
-      className="size-[44px] rounded-[7px] object-contain"
-      draggable={false}
-    />
-  );
-}
-
 function PiMark() {
   return (
     <svg className="size-[26px]" viewBox="0 0 800 800" aria-hidden="true">
@@ -782,12 +792,6 @@ function PiMark() {
       />
       <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
     </svg>
-  );
-}
-
-function GrokMark() {
-  return (
-    <img className="block size-[27px]" src="/grok-logomark-dark.svg" alt="" aria-hidden="true" />
   );
 }
 

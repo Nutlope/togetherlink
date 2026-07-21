@@ -11,7 +11,14 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as GuidesIndexRouteImport } from './routes/guides/index'
+import { Route as GuidesUseTogetherAiModelsWithCodexRouteImport } from './routes/guides/use-together-ai-models-with-codex'
+import { Route as GuidesUseTogetherAiModelsWithClaudeCodeRouteImport } from './routes/guides/use-together-ai-models-with-claude-code'
+import { Route as GuidesUseTogetherAiModelsWithChatgptDesktopRouteImport } from './routes/guides/use-together-ai-models-with-chatgpt-desktop'
+import { Route as GuidesUseGlm52WithGrokBuildRouteImport } from './routes/guides/use-glm-5-2-with-grok-build'
+import { Route as GuidesUseGlm52WithCodexRouteImport } from './routes/guides/use-glm-5-2-with-codex'
 import { Route as ApiTelemetryRouteImport } from './routes/api/telemetry'
+import { Route as ApiOgRouteImport } from './routes/api/og'
 
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
@@ -23,40 +30,138 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuidesIndexRoute = GuidesIndexRouteImport.update({
+  id: '/guides/',
+  path: '/guides/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuidesUseTogetherAiModelsWithCodexRoute =
+  GuidesUseTogetherAiModelsWithCodexRouteImport.update({
+    id: '/guides/use-together-ai-models-with-codex',
+    path: '/guides/use-together-ai-models-with-codex',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GuidesUseTogetherAiModelsWithClaudeCodeRoute =
+  GuidesUseTogetherAiModelsWithClaudeCodeRouteImport.update({
+    id: '/guides/use-together-ai-models-with-claude-code',
+    path: '/guides/use-together-ai-models-with-claude-code',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GuidesUseTogetherAiModelsWithChatgptDesktopRoute =
+  GuidesUseTogetherAiModelsWithChatgptDesktopRouteImport.update({
+    id: '/guides/use-together-ai-models-with-chatgpt-desktop',
+    path: '/guides/use-together-ai-models-with-chatgpt-desktop',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GuidesUseGlm52WithGrokBuildRoute =
+  GuidesUseGlm52WithGrokBuildRouteImport.update({
+    id: '/guides/use-glm-5-2-with-grok-build',
+    path: '/guides/use-glm-5-2-with-grok-build',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GuidesUseGlm52WithCodexRoute = GuidesUseGlm52WithCodexRouteImport.update({
+  id: '/guides/use-glm-5-2-with-codex',
+  path: '/guides/use-glm-5-2-with-codex',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTelemetryRoute = ApiTelemetryRouteImport.update({
   id: '/api/telemetry',
   path: '/api/telemetry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiOgRoute = ApiOgRouteImport.update({
+  id: '/api/og',
+  path: '/api/og',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/api/og': typeof ApiOgRoute
   '/api/telemetry': typeof ApiTelemetryRoute
+  '/guides/use-glm-5-2-with-codex': typeof GuidesUseGlm52WithCodexRoute
+  '/guides/use-glm-5-2-with-grok-build': typeof GuidesUseGlm52WithGrokBuildRoute
+  '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
+  '/guides/use-together-ai-models-with-claude-code': typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
+  '/guides/use-together-ai-models-with-codex': typeof GuidesUseTogetherAiModelsWithCodexRoute
+  '/guides/': typeof GuidesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/api/og': typeof ApiOgRoute
   '/api/telemetry': typeof ApiTelemetryRoute
+  '/guides/use-glm-5-2-with-codex': typeof GuidesUseGlm52WithCodexRoute
+  '/guides/use-glm-5-2-with-grok-build': typeof GuidesUseGlm52WithGrokBuildRoute
+  '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
+  '/guides/use-together-ai-models-with-claude-code': typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
+  '/guides/use-together-ai-models-with-codex': typeof GuidesUseTogetherAiModelsWithCodexRoute
+  '/guides': typeof GuidesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/api/og': typeof ApiOgRoute
   '/api/telemetry': typeof ApiTelemetryRoute
+  '/guides/use-glm-5-2-with-codex': typeof GuidesUseGlm52WithCodexRoute
+  '/guides/use-glm-5-2-with-grok-build': typeof GuidesUseGlm52WithGrokBuildRoute
+  '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
+  '/guides/use-together-ai-models-with-claude-code': typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
+  '/guides/use-together-ai-models-with-codex': typeof GuidesUseTogetherAiModelsWithCodexRoute
+  '/guides/': typeof GuidesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/api/telemetry'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/api/og'
+    | '/api/telemetry'
+    | '/guides/use-glm-5-2-with-codex'
+    | '/guides/use-glm-5-2-with-grok-build'
+    | '/guides/use-together-ai-models-with-chatgpt-desktop'
+    | '/guides/use-together-ai-models-with-claude-code'
+    | '/guides/use-together-ai-models-with-codex'
+    | '/guides/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/api/telemetry'
-  id: '__root__' | '/' | '/dashboard' | '/api/telemetry'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/api/og'
+    | '/api/telemetry'
+    | '/guides/use-glm-5-2-with-codex'
+    | '/guides/use-glm-5-2-with-grok-build'
+    | '/guides/use-together-ai-models-with-chatgpt-desktop'
+    | '/guides/use-together-ai-models-with-claude-code'
+    | '/guides/use-together-ai-models-with-codex'
+    | '/guides'
+  id:
+    | '__root__'
+    | '/'
+    | '/dashboard'
+    | '/api/og'
+    | '/api/telemetry'
+    | '/guides/use-glm-5-2-with-codex'
+    | '/guides/use-glm-5-2-with-grok-build'
+    | '/guides/use-together-ai-models-with-chatgpt-desktop'
+    | '/guides/use-together-ai-models-with-claude-code'
+    | '/guides/use-together-ai-models-with-codex'
+    | '/guides/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  ApiOgRoute: typeof ApiOgRoute
   ApiTelemetryRoute: typeof ApiTelemetryRoute
+  GuidesUseGlm52WithCodexRoute: typeof GuidesUseGlm52WithCodexRoute
+  GuidesUseGlm52WithGrokBuildRoute: typeof GuidesUseGlm52WithGrokBuildRoute
+  GuidesUseTogetherAiModelsWithChatgptDesktopRoute: typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
+  GuidesUseTogetherAiModelsWithClaudeCodeRoute: typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
+  GuidesUseTogetherAiModelsWithCodexRoute: typeof GuidesUseTogetherAiModelsWithCodexRoute
+  GuidesIndexRoute: typeof GuidesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,11 +180,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guides/': {
+      id: '/guides/'
+      path: '/guides'
+      fullPath: '/guides/'
+      preLoaderRoute: typeof GuidesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-together-ai-models-with-codex': {
+      id: '/guides/use-together-ai-models-with-codex'
+      path: '/guides/use-together-ai-models-with-codex'
+      fullPath: '/guides/use-together-ai-models-with-codex'
+      preLoaderRoute: typeof GuidesUseTogetherAiModelsWithCodexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-together-ai-models-with-claude-code': {
+      id: '/guides/use-together-ai-models-with-claude-code'
+      path: '/guides/use-together-ai-models-with-claude-code'
+      fullPath: '/guides/use-together-ai-models-with-claude-code'
+      preLoaderRoute: typeof GuidesUseTogetherAiModelsWithClaudeCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-together-ai-models-with-chatgpt-desktop': {
+      id: '/guides/use-together-ai-models-with-chatgpt-desktop'
+      path: '/guides/use-together-ai-models-with-chatgpt-desktop'
+      fullPath: '/guides/use-together-ai-models-with-chatgpt-desktop'
+      preLoaderRoute: typeof GuidesUseTogetherAiModelsWithChatgptDesktopRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-glm-5-2-with-grok-build': {
+      id: '/guides/use-glm-5-2-with-grok-build'
+      path: '/guides/use-glm-5-2-with-grok-build'
+      fullPath: '/guides/use-glm-5-2-with-grok-build'
+      preLoaderRoute: typeof GuidesUseGlm52WithGrokBuildRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-glm-5-2-with-codex': {
+      id: '/guides/use-glm-5-2-with-codex'
+      path: '/guides/use-glm-5-2-with-codex'
+      fullPath: '/guides/use-glm-5-2-with-codex'
+      preLoaderRoute: typeof GuidesUseGlm52WithCodexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/telemetry': {
       id: '/api/telemetry'
       path: '/api/telemetry'
       fullPath: '/api/telemetry'
       preLoaderRoute: typeof ApiTelemetryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/og': {
+      id: '/api/og'
+      path: '/api/og'
+      fullPath: '/api/og'
+      preLoaderRoute: typeof ApiOgRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -88,7 +242,17 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  ApiOgRoute: ApiOgRoute,
   ApiTelemetryRoute: ApiTelemetryRoute,
+  GuidesUseGlm52WithCodexRoute: GuidesUseGlm52WithCodexRoute,
+  GuidesUseGlm52WithGrokBuildRoute: GuidesUseGlm52WithGrokBuildRoute,
+  GuidesUseTogetherAiModelsWithChatgptDesktopRoute:
+    GuidesUseTogetherAiModelsWithChatgptDesktopRoute,
+  GuidesUseTogetherAiModelsWithClaudeCodeRoute:
+    GuidesUseTogetherAiModelsWithClaudeCodeRoute,
+  GuidesUseTogetherAiModelsWithCodexRoute:
+    GuidesUseTogetherAiModelsWithCodexRoute,
+  GuidesIndexRoute: GuidesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
