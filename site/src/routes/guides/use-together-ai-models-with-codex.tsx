@@ -16,7 +16,7 @@ import { guideOgPath } from "../../lib/guide-og";
 
 const path = "/guides/use-together-ai-models-with-codex";
 const ogImage = guideOgPath("together-codex");
-const title = "How to use open source coding models in Codex CLI";
+const title = "Run Open Models in Codex CLI Without Editing Config";
 const description =
   "Connect OpenAI Codex CLI to Together AI models with TogetherLink. Learn the local proxy architecture, switch models safely, and run Codex interactively or headlessly.";
 
@@ -118,13 +118,13 @@ function TogetherCodexGuide() {
       <main>
         <article>
           <header className="mx-auto max-w-[1120px] px-6 pt-16 max-[520px]:px-[18px] max-[520px]:pt-12">
-            <Breadcrumbs current="Open source coding models in Codex" />
+            <Breadcrumbs current="Open models in Codex without config edits" />
             <div className="max-w-[800px]">
               <div className="text-[12px] font-semibold tracking-[.09em] text-muted uppercase">
                 Open model guide · 10 min
               </div>
               <h1 className="m-0 mt-4 text-balance text-[clamp(40px,6vw,64px)] font-semibold leading-[1.03] tracking-[-.05em]">
-                How to use open source coding models in Codex CLI
+                Run open models in Codex CLI without editing config
               </h1>
               <p className="m-0 mt-6 max-w-[650px] text-[18px] leading-relaxed text-muted">
                 Switch the model behind Codex for one run at a time. TogetherLink handles the
@@ -203,6 +203,7 @@ function TogetherCodexGuide() {
               <div className="mt-7 grid gap-4">
                 <CommandBlock command={INSTALL_COMMAND} label="1. Install" />
                 <CommandBlock command="togetherlink configure" label="2. Save Together API key" />
+                <CommandBlock command="tcodex" label="3. Launch Codex on the default model" />
               </div>
               <p className="mt-4 text-[13.5px] leading-relaxed text-muted">
                 The installer also adds <code className="text-ink">tclaude</code>,{" "}
@@ -211,49 +212,6 @@ function TogetherCodexGuide() {
                 storage and set <code className="text-ink">TOGETHER_API_KEY</code> through your
                 secret manager instead.
               </p>
-            </section>
-
-            <section className="mt-20" aria-labelledby="models-heading">
-              <div className="max-w-[680px]">
-                <div className="text-[12px] font-semibold tracking-[.08em] text-muted uppercase">
-                  Curated catalog
-                </div>
-                <h2
-                  id="models-heading"
-                  className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]"
-                >
-                  Choose a Together model for the task
-                </h2>
-                <p className="mt-3 text-[15px] leading-relaxed text-muted">
-                  TogetherLink ships a deliberately small model catalog. Use the exact Together
-                  model ID and place it before <code className="text-ink">codex</code>.
-                </p>
-              </div>
-              <div className="mt-7 border-t border-line-strong">
-                {models.map((model, index) => (
-                  <div
-                    key={model.id}
-                    className="grid gap-3 border-b border-line-strong py-5 md:grid-cols-[38px_160px_1fr]"
-                  >
-                    <span className="font-mono text-[11px] text-faint">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <div className="text-[14px] font-semibold">{model.name}</div>
-                    <div>
-                      <code className="text-[12px] text-ink">{model.id}</code>
-                      <p className="m-0 mt-1.5 text-[13px] leading-relaxed text-muted">
-                        {model.note}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6">
-                <CommandBlock
-                  command="togetherlink --model moonshotai/Kimi-K2.6 codex"
-                  label="Example: switch to Kimi K2.6"
-                />
-              </div>
             </section>
 
             <section
@@ -334,6 +292,50 @@ function TogetherCodexGuide() {
               </ol>
             </section>
 
+            <section className="mt-20" aria-labelledby="models-heading">
+              <div className="max-w-[680px]">
+                <div className="text-[12px] font-semibold tracking-[.08em] text-muted uppercase">
+                  Optional model choice
+                </div>
+                <h2
+                  id="models-heading"
+                  className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]"
+                >
+                  Choose another model after the first run
+                </h2>
+                <p className="mt-3 text-[15px] leading-relaxed text-muted">
+                  Start with <code className="text-ink">tcodex</code>. When the task needs a
+                  different model, use its exact Together ID before{" "}
+                  <code className="text-ink">codex</code>.
+                </p>
+              </div>
+              <div className="mt-7 border-t border-line-strong">
+                {models.map((model, index) => (
+                  <div
+                    key={model.id}
+                    className="grid gap-3 border-b border-line-strong py-5 md:grid-cols-[38px_160px_1fr]"
+                  >
+                    <span className="font-mono text-[11px] text-faint">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="text-[14px] font-semibold">{model.name}</div>
+                    <div>
+                      <code className="text-[12px] text-ink">{model.id}</code>
+                      <p className="m-0 mt-1.5 text-[13px] leading-relaxed text-muted">
+                        {model.note}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-6">
+                <CommandBlock
+                  command="togetherlink --model moonshotai/Kimi-K2.6 codex"
+                  label="Example: switch to Kimi K2.6"
+                />
+              </div>
+            </section>
+
             <div className="mt-20">
               <FaqSection faqs={faqs} />
             </div>
@@ -346,13 +348,13 @@ function TogetherCodexGuide() {
                 <ArticleLink
                   href="/guides/use-glm-5-2-with-codex"
                   eyebrow="Focused quickstart"
-                  title="Use GLM 5.2 with Codex"
+                  title="GLM 5.2 in Codex: install, launch, verify"
                   body="Follow one model from install to a verified edit in a real sample repository."
                 />
                 <ArticleLink
                   href="/guides/use-together-ai-models-with-claude-code"
                   eyebrow="Claude workflow"
-                  title="How to use open source models in Claude Code"
+                  title="Connect Claude Code to GLM 5.2, Kimi, and MiniMax"
                   body="See how the same Together models fit Claude Code's Anthropic Messages workflow."
                 />
               </div>

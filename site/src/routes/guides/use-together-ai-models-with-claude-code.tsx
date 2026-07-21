@@ -18,7 +18,7 @@ import { guideOgPath } from "../../lib/guide-og";
 
 const path = "/guides/use-together-ai-models-with-claude-code";
 const ogImage = guideOgPath("together-claude");
-const title = "How to use open source models in Claude Code";
+const title = "Connect Claude Code to GLM 5.2, Kimi, and MiniMax";
 const description =
   "Run Claude Code with GLM 5.2 and other Together AI models. Configure a Together API key, preserve your Claude login and settings, and understand optional Exa web search.";
 
@@ -97,13 +97,13 @@ function TogetherClaudeGuide() {
       <main>
         <article>
           <header className="mx-auto max-w-[1000px] px-6 pt-16 max-[520px]:px-[18px] max-[520px]:pt-12">
-            <Breadcrumbs current="Claude Code and open source models" />
+            <Breadcrumbs current="Claude Code with GLM 5.2, Kimi, and MiniMax" />
             <div className="mx-auto max-w-[780px] text-center">
               <div className="text-[12px] font-semibold tracking-[.09em] text-muted uppercase">
                 Claude Code compatibility guide · 10 min
               </div>
               <h1 className="m-0 mt-4 text-balance text-[clamp(40px,7vw,68px)] font-semibold leading-[1.02] tracking-[-.05em]">
-                How to use open source models in Claude Code
+                Connect Claude Code to GLM 5.2, Kimi, and MiniMax
               </h1>
               <p className="mx-auto mt-6 mb-0 max-w-[700px] text-[18px] leading-relaxed text-muted">
                 Keep the Claude Code terminal experience and route model calls to GLM 5.2, Kimi,
@@ -246,43 +246,6 @@ function TogetherClaudeGuide() {
               </p>
             </section>
 
-            <section className="mt-18" aria-labelledby="models-heading">
-              <h2 id="models-heading" className="m-0 text-[30px] font-semibold tracking-[-.03em]">
-                Switch models before the Claude command
-              </h2>
-              <p className="mt-4 text-[15px] leading-relaxed text-muted">
-                TogetherLink options are parsed before the harness name. Claude Code arguments come
-                after <code className="text-ink">claude</code>. That split matters when combining a
-                model choice with Claude's print mode.
-              </p>
-              <div className="mt-6 space-y-4">
-                <CommandBlock
-                  command="togetherlink --model moonshotai/Kimi-K2.6 claude"
-                  label="Interactive session on Kimi K2.6"
-                />
-                <CommandBlock
-                  command={
-                    'togetherlink --model zai-org/GLM-5.2 claude -p "Summarize the current diff"'
-                  }
-                  label="One-shot GLM 5.2 prompt"
-                />
-              </div>
-              <div className="mt-7 grid gap-4 sm:grid-cols-2">
-                <div className="border-l-2 border-emerald-500 py-1 pl-4">
-                  <span className="text-[12px] font-semibold text-ink uppercase">Correct</span>
-                  <code className="mt-2 block text-[12px] leading-relaxed">
-                    togetherlink --model MODEL claude -p "..."
-                  </code>
-                </div>
-                <div className="border-l-2 border-rose-500 py-1 pl-4">
-                  <span className="text-[12px] font-semibold text-ink uppercase">Wrong order</span>
-                  <code className="mt-2 block text-[12px] leading-relaxed">
-                    togetherlink claude --model MODEL
-                  </code>
-                </div>
-              </div>
-            </section>
-
             <section className="mt-18" aria-labelledby="verify-heading">
               <h2 id="verify-heading" className="m-0 text-[28px] font-semibold tracking-[-.03em]">
                 Verify the route before trusting the result
@@ -327,6 +290,49 @@ function TogetherClaudeGuide() {
               </div>
             </section>
 
+            <section className="mt-18" aria-labelledby="models-heading">
+              <div className="text-[12px] font-semibold tracking-[.08em] text-muted uppercase">
+                Optional model choice
+              </div>
+              <h2
+                id="models-heading"
+                className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]"
+              >
+                Switch models after the first Claude run
+              </h2>
+              <p className="mt-4 text-[15px] leading-relaxed text-muted">
+                Start with <code className="text-ink">tclaude</code>. For an override, TogetherLink
+                options go before the harness name, while Claude Code arguments go after{" "}
+                <code className="text-ink">claude</code>.
+              </p>
+              <div className="mt-6 space-y-4">
+                <CommandBlock
+                  command="togetherlink --model moonshotai/Kimi-K2.6 claude"
+                  label="Interactive session on Kimi K2.6"
+                />
+                <CommandBlock
+                  command={
+                    'togetherlink --model zai-org/GLM-5.2 claude -p "Summarize the current diff"'
+                  }
+                  label="One-shot GLM 5.2 prompt"
+                />
+              </div>
+              <div className="mt-7 grid gap-4 sm:grid-cols-2">
+                <div className="border-l-2 border-emerald-500 py-1 pl-4">
+                  <span className="text-[12px] font-semibold text-ink uppercase">Correct</span>
+                  <code className="mt-2 block text-[12px] leading-relaxed">
+                    togetherlink --model MODEL claude -p "..."
+                  </code>
+                </div>
+                <div className="border-l-2 border-rose-500 py-1 pl-4">
+                  <span className="text-[12px] font-semibold text-ink uppercase">Wrong order</span>
+                  <code className="mt-2 block text-[12px] leading-relaxed">
+                    togetherlink claude --model MODEL
+                  </code>
+                </div>
+              </div>
+            </section>
+
             <div className="mt-20">
               <FaqSection faqs={faqs} />
             </div>
@@ -339,13 +345,13 @@ function TogetherClaudeGuide() {
                 <ArticleLink
                   href="/guides/use-together-ai-models-with-codex"
                   eyebrow="Responses protocol"
-                  title="How to use open source models in Codex"
+                  title="Run open models in Codex without editing config"
                   body="See the Codex-specific proxy, model catalog, and headless exec workflow."
                 />
                 <ArticleLink
                   href="/guides/use-glm-5-2-with-codex"
                   eyebrow="GLM quickstart"
-                  title="Use GLM 5.2 with Codex"
+                  title="GLM 5.2 in Codex: install, launch, verify"
                   body="Follow the shortest route to a verified GLM 5.2 coding edit."
                 />
               </div>

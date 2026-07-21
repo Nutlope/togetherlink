@@ -9,7 +9,7 @@ const guides = [
   {
     href: "/guides/use-together-ai-models-with-codex",
     cover: "together-codex" as GuideCoverVariant,
-    title: "How to use open source coding models in Codex CLI",
+    title: "Run open models in Codex CLI without editing config",
     description:
       "Connect Codex to Together AI, choose between six current open models, and keep your normal OpenAI login and Codex configuration untouched.",
     meta: "Codex CLI · model picker · 10 min",
@@ -17,7 +17,7 @@ const guides = [
   {
     href: "/guides/use-glm-5-2-with-grok-build",
     cover: "glm-grok" as GuideCoverVariant,
-    title: "How to use GLM 5.2 with Grok Build",
+    title: "Launch Grok Build with GLM 5.2",
     description:
       "Run the Grok Build terminal harness on GLM 5.2 through Together AI, with temporary model configuration and persistent local sessions.",
     meta: "Grok Build · GLM 5.2 · 8 min",
@@ -25,7 +25,7 @@ const guides = [
   {
     href: "/guides/use-together-ai-models-with-chatgpt-desktop",
     cover: "together-chatgpt" as GuideCoverVariant,
-    title: "How to use open source models in ChatGPT Desktop",
+    title: "Add open models to the ChatGPT Desktop app",
     description:
       "Configure the ChatGPT desktop app for Together models, understand what the alpha integration changes, and restore your OpenAI profile safely.",
     meta: "ChatGPT Desktop · alpha · 8 min",
@@ -33,7 +33,7 @@ const guides = [
   {
     href: "/guides/use-glm-5-2-with-codex",
     cover: "glm-codex" as GuideCoverVariant,
-    title: "How to use GLM 5.2 in Codex CLI",
+    title: "GLM 5.2 in Codex CLI: Install, launch, verify",
     description:
       "A focused quickstart with a real coding run, provider verification, headless Codex exec examples, and GLM-specific troubleshooting.",
     meta: "Codex CLI · GLM 5.2 · 8 min",
@@ -41,7 +41,7 @@ const guides = [
   {
     href: "/guides/use-together-ai-models-with-claude-code",
     cover: "together-claude" as GuideCoverVariant,
-    title: "How to use open source models in Claude Code",
+    title: "Connect Claude Code to GLM 5.2, Kimi, and MiniMax",
     description:
       "Route Claude Code through Together, keep your Claude login and settings, and optionally add web search with Exa.",
     meta: "Claude Code · model picker · 10 min",

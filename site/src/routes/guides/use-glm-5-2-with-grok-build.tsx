@@ -17,7 +17,7 @@ import { guideOgPath } from "../../lib/guide-og";
 
 const path = "/guides/use-glm-5-2-with-grok-build";
 const ogImage = guideOgPath("glm-grok");
-const title = "How to use GLM 5.2 with Grok Build";
+const title = "Launch Grok Build with GLM 5.2";
 const description =
   "Run GLM 5.2 inside the Grok Build coding CLI through Together AI. Install TogetherLink, add your Together API key, launch Grok Build, and verify the model boundary.";
 
@@ -82,13 +82,13 @@ function GlmGrokGuide() {
       <main>
         <article>
           <header className="mx-auto max-w-[960px] px-6 pt-16 max-[520px]:px-[18px] max-[520px]:pt-12">
-            <Breadcrumbs current="GLM 5.2 with Grok Build" />
+            <Breadcrumbs current="Launch Grok Build with GLM 5.2" />
             <div className="max-w-[780px]">
               <div className="text-[12px] font-semibold tracking-[.09em] text-muted uppercase">
                 Grok Build harness · GLM 5.2 model · 8 min
               </div>
               <h1 className="m-0 mt-4 text-balance text-[clamp(40px,7vw,68px)] font-semibold leading-[1.02] tracking-[-.05em]">
-                How to use GLM 5.2 with Grok Build
+                Launch Grok Build with GLM 5.2
               </h1>
               <p className="m-0 mt-6 max-w-[720px] text-pretty text-[18px] leading-relaxed text-muted">
                 Keep Grok Build's terminal workflow, tools, and sessions while GLM 5.2 handles the
@@ -215,13 +215,13 @@ function GlmGrokGuide() {
                 <ArticleLink
                   href="/guides/use-together-ai-models-with-codex"
                   eyebrow="Codex CLI"
-                  title="How to use open source models in Codex"
+                  title="Run open models in Codex without editing config"
                   body="Keep Codex and switch between Together's curated open models."
                 />
                 <ArticleLink
                   href="/guides/use-together-ai-models-with-chatgpt-desktop"
                   eyebrow="Desktop app"
-                  title="How to use open source models in ChatGPT Desktop"
+                  title="Add open models to the ChatGPT Desktop app"
                   body="Configure the app and learn how to restore your OpenAI profile."
                 />
               </div>

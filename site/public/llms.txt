@@ -13,14 +13,6 @@ This is the LLM-readable documentation file for the project. If you are an AI ag
 - README: https://github.com/Nutlope/togetherlink#readme
 - This file: https://togetherlink.vercel.app/llms.txt
 
-## Guides
-
-- How to use open source coding models in Codex CLI: https://togetherlink.vercel.app/guides/use-together-ai-models-with-codex
-- How to use GLM 5.2 in Codex CLI: https://togetherlink.vercel.app/guides/use-glm-5-2-with-codex
-- How to use GLM 5.2 with Grok Build: https://togetherlink.vercel.app/guides/use-glm-5-2-with-grok-build
-- How to use open source models in ChatGPT Desktop: https://togetherlink.vercel.app/guides/use-together-ai-models-with-chatgpt-desktop
-- How to use open source models in Claude Code: https://togetherlink.vercel.app/guides/use-together-ai-models-with-claude-code
-
 ## Install
 
 One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, and `tpi` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:

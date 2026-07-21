@@ -17,7 +17,7 @@ import { guideOgPath } from "../../lib/guide-og";
 
 const path = "/guides/use-together-ai-models-with-chatgpt-desktop";
 const ogImage = guideOgPath("together-chatgpt");
-const title = "How to use open source models in ChatGPT Desktop";
+const title = "Add Open Models to the ChatGPT Desktop App";
 const description =
   "Configure the ChatGPT desktop app to use open models from Together AI with TogetherLink, then safely restore your normal OpenAI profile when you are done.";
 
@@ -82,13 +82,13 @@ function ChatGptDesktopGuide() {
       <main>
         <article>
           <header className="mx-auto max-w-[960px] px-6 pt-16 max-[520px]:px-[18px] max-[520px]:pt-12">
-            <Breadcrumbs current="Open source models in ChatGPT Desktop" />
+            <Breadcrumbs current="Add open models to ChatGPT Desktop" />
             <div className="max-w-[820px]">
               <div className="text-[12px] font-semibold tracking-[.09em] text-muted uppercase">
                 ChatGPT Desktop · alpha · 8 min
               </div>
               <h1 className="m-0 mt-4 text-balance text-[clamp(40px,7vw,68px)] font-semibold leading-[1.02] tracking-[-.05em]">
-                How to use open source models in the ChatGPT desktop app
+                Add open models to the ChatGPT Desktop app
               </h1>
               <p className="m-0 mt-6 max-w-[740px] text-pretty text-[18px] leading-relaxed text-muted">
                 Add Together's open models to the desktop coding experience, with a local proxy, an
@@ -149,32 +149,6 @@ function ChatGptDesktopGuide() {
               </NumberedStep>
             </section>
 
-            <section className="mt-16" aria-labelledby="model-heading">
-              <div className="text-[12px] font-semibold tracking-[.08em] text-muted uppercase">
-                Choose a model
-              </div>
-              <h2
-                id="model-heading"
-                className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]"
-              >
-                Start on GLM 5.2 or pick another Together model
-              </h2>
-              <p className="mt-4 text-[15px] leading-relaxed text-muted">
-                The plain setup command uses the current TogetherLink default. To make the choice
-                explicit during configuration, put the model flag after <code>chatgpt</code>.
-              </p>
-              <div className="mt-5 space-y-4">
-                <CommandBlock
-                  command="togetherlink chatgpt --model zai-org/GLM-5.2"
-                  label="GLM 5.2"
-                />
-                <CommandBlock
-                  command="togetherlink chatgpt --model Qwen/Qwen3.7-Max"
-                  label="Qwen 3.7 Max"
-                />
-              </div>
-            </section>
-
             <section className="mt-16" aria-labelledby="changes-heading">
               <h2 id="changes-heading" className="m-0 text-[30px] font-semibold tracking-[-.03em]">
                 What gets changed
@@ -232,6 +206,32 @@ function ChatGptDesktopGuide() {
               </div>
             </section>
 
+            <section className="mt-16" aria-labelledby="model-heading">
+              <div className="text-[12px] font-semibold tracking-[.08em] text-muted uppercase">
+                Optional model choice
+              </div>
+              <h2
+                id="model-heading"
+                className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]"
+              >
+                Pick another model after setup
+              </h2>
+              <p className="mt-4 text-[15px] leading-relaxed text-muted">
+                Start with <code>togetherlink chatgpt</code> and the default GLM 5.2 profile. To
+                override it later, put the model flag after <code>chatgpt</code>.
+              </p>
+              <div className="mt-5 space-y-4">
+                <CommandBlock
+                  command="togetherlink chatgpt --model zai-org/GLM-5.2"
+                  label="GLM 5.2"
+                />
+                <CommandBlock
+                  command="togetherlink chatgpt --model Qwen/Qwen3.7-Max"
+                  label="Qwen 3.7 Max"
+                />
+              </div>
+            </section>
+
             <div className="mt-16">
               <FaqSection faqs={faqs} />
             </div>
@@ -244,13 +244,13 @@ function ChatGptDesktopGuide() {
                 <ArticleLink
                   href="/guides/use-together-ai-models-with-codex"
                   eyebrow="Codex CLI"
-                  title="How to use open source models in Codex"
+                  title="Run open models in Codex without editing config"
                   body="Use the same model catalog with per-run CLI configuration."
                 />
                 <ArticleLink
                   href="/guides/use-glm-5-2-with-grok-build"
                   eyebrow="Grok Build"
-                  title="Use GLM 5.2 with Grok Build"
+                  title="Launch Grok Build with GLM 5.2"
                   body="Keep a terminal coding harness and use temporary model configuration."
                 />
               </div>

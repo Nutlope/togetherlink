@@ -19,7 +19,7 @@ import { guideOgPath } from "../../lib/guide-og";
 
 const path = "/guides/use-glm-5-2-with-codex";
 const ogImage = guideOgPath("glm-codex");
-const title = "How to use GLM 5.2 in Codex CLI";
+const title = "GLM 5.2 in Codex CLI: Install, Launch, Verify";
 const description =
   "Run GLM 5.2 in OpenAI Codex CLI through Together AI. Install TogetherLink, add a Together API key, verify the provider, and try a real coding task.";
 
@@ -93,14 +93,14 @@ function GlmCodexGuide() {
       <main>
         <article>
           <header className="mx-auto max-w-[960px] px-6 pt-16 max-[520px]:px-[18px] max-[520px]:pt-12">
-            <Breadcrumbs current="GLM 5.2 with Codex" />
+            <Breadcrumbs current="GLM 5.2 Codex quickstart" />
             <div className="grid items-end gap-8 md:grid-cols-[1fr_auto]">
               <div>
                 <div className="text-[12px] font-semibold tracking-[.09em] text-muted uppercase">
                   GLM 5.2 quickstart · 8 min
                 </div>
                 <h1 className="m-0 mt-4 text-balance text-[clamp(40px,7vw,68px)] font-semibold leading-[1.02] tracking-[-.05em]">
-                  How to use GLM 5.2 in Codex CLI
+                  GLM 5.2 in Codex CLI: install, launch, verify
                 </h1>
                 <p className="m-0 mt-6 max-w-[720px] text-[18px] leading-relaxed text-muted">
                   Keep the Codex interface and tools, but run the coding model on Together AI. This
@@ -163,8 +163,9 @@ function GlmCodexGuide() {
                 </NumberedStep>
                 <NumberedStep number="3" title="Start Codex on GLM 5.2">
                   <p className="m-0 mb-4">
-                    Use the full model ID when you want the command to be explicit. GLM 5.2 is also
-                    the current default, so <code>togetherlink codex</code> is the short form.
+                    GLM 5.2 is the current default, so the memorable <code>tcodex</code> shortcut is
+                    all you need for the first run. The full model command appears later for
+                    explicit overrides.
                   </p>
                   <CommandBlock command="tcodex" />
                 </NumberedStep>
@@ -294,13 +295,13 @@ function GlmCodexGuide() {
               <ArticleLink
                 href="/guides/use-together-ai-models-with-codex"
                 eyebrow="Multiple models"
-                title="How to use open source models in Codex"
+                title="Run open models in Codex without editing config"
                 body="Switch among GLM, Kimi, Qwen, MiniMax, and DeepSeek without editing Codex config."
               />
               <ArticleLink
                 href="/guides/use-together-ai-models-with-claude-code"
                 eyebrow="Different harness"
-                title="How to use open source models in Claude Code"
+                title="Connect Claude Code to GLM 5.2, Kimi, and MiniMax"
                 body="Keep Claude Code's interface while running the model through Together AI."
               />
             </div>
