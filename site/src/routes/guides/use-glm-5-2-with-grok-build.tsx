@@ -56,8 +56,8 @@ const guide = defineGuide({
   breadcrumbLabel: "Launch Grok Build with GLM 5.2",
   ogKey: "glm-grok",
   ogAlt: "Grok Build using GLM 5.2 through TogetherLink and Together AI",
-  datePublished: "2026-07-21",
-  dateModified: "2026-07-21",
+  datePublished: "2026-07-21T12:00:00+02:00",
+  dateModified: "2026-07-21T12:00:00+02:00",
   faqs,
 });
 

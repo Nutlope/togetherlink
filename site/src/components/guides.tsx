@@ -193,7 +193,7 @@ function formatGuideDate(value: string): string {
     day: "numeric",
     year: "numeric",
     timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+  }).format(new Date(value));
 }
 
 export type GuideCoverVariant = GuideOgKey;
@@ -400,14 +400,6 @@ export function GuideStructuredData({ guide }: { guide: GuideDefinition }) {
           { "@type": "ListItem", position: 2, name: "Guides", item: `${SITE_URL}/guides` },
           { "@type": "ListItem", position: 3, name: guide.breadcrumbLabel, item: url },
         ],
-      },
-      {
-        "@type": "FAQPage",
-        mainEntity: guide.faqs.map((faq) => ({
-          "@type": "Question",
-          name: faq.question,
-          acceptedAnswer: { "@type": "Answer", text: faq.answer },
-        })),
       },
     ],
   };

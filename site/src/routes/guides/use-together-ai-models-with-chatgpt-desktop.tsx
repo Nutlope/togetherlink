@@ -51,8 +51,8 @@ const guide = defineGuide({
   breadcrumbLabel: "Use open models in Codex for ChatGPT Desktop",
   ogKey: "together-chatgpt",
   ogAlt: "TogetherLink connecting open models to Codex in the ChatGPT Desktop app",
-  datePublished: "2026-07-21",
-  dateModified: "2026-07-21",
+  datePublished: "2026-07-21T12:00:00+02:00",
+  dateModified: "2026-07-21T12:00:00+02:00",
   faqs,
 });
 

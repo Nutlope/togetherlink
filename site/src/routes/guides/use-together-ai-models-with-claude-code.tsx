@@ -61,8 +61,8 @@ const guide = defineGuide({
   breadcrumbLabel: "Claude Code with GLM 5.2, Kimi, and MiniMax",
   ogKey: "together-claude",
   ogAlt: "Claude Code routed through TogetherLink to open models on Together AI",
-  datePublished: "2026-07-20",
-  dateModified: "2026-07-21",
+  datePublished: "2026-07-20T12:00:00+02:00",
+  dateModified: "2026-07-21T12:00:00+02:00",
   faqs,
 });
 

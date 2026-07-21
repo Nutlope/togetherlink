@@ -88,8 +88,8 @@ const guide = defineGuide({
   breadcrumbLabel: "Open models in Codex without replacing config",
   ogKey: "together-codex",
   ogAlt: "Together AI models in Codex CLI with TogetherLink",
-  datePublished: "2026-07-20",
-  dateModified: "2026-07-21",
+  datePublished: "2026-07-20T12:00:00+02:00",
+  dateModified: "2026-07-21T12:00:00+02:00",
   faqs,
 });
 

@@ -58,8 +58,8 @@ const guide = defineGuide({
   breadcrumbLabel: "GLM 5.2 in Codex CLI",
   ogKey: "glm-codex",
   ogAlt: "Codex CLI routed through TogetherLink and Together AI to GLM 5.2",
-  datePublished: "2026-07-20",
-  dateModified: "2026-07-21",
+  datePublished: "2026-07-20T12:00:00+02:00",
+  dateModified: "2026-07-21T12:00:00+02:00",
   faqs,
 });
 
