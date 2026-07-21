@@ -26,7 +26,7 @@ const faqs: Faq[] = [
   {
     question: "Can Claude Code run Together AI models?",
     answer:
-      "Yes. TogetherLink launches Claude Code against a local Anthropic Messages-compatible proxy, then sends model work to the selected Together AI model.",
+      "Yes. TogetherLink launches Claude Code against a local Anthropic Messages-compatible proxy, then sends each request to the selected Together AI model.",
   },
   {
     question: "Do I still need Claude Code installed?",
@@ -36,7 +36,7 @@ const faqs: Faq[] = [
   {
     question: "Will TogetherLink log me out of Claude Code?",
     answer:
-      "No. The Together route is injected for the launched process. Your Claude Code login and normal settings remain available when you launch Claude Code normally.",
+      "No. The Together provider is injected only for the launched process. Your Claude Code login and normal settings remain available when you launch Claude Code normally.",
   },
   {
     question: "Why do I need a Together API key if I pay for Claude?",
@@ -56,7 +56,7 @@ const faqs: Faq[] = [
   {
     question: "Can I use Claude Code's non-interactive -p mode?",
     answer:
-      "Yes. Arguments after claude go to Claude Code, so togetherlink --model zai-org/GLM-5.2 claude -p followed by a prompt uses the same local route.",
+      "Yes. Arguments after claude go to Claude Code, so togetherlink --model zai-org/GLM-5.2 claude -p followed by a prompt uses the same local proxy.",
   },
 ];
 
@@ -169,7 +169,7 @@ function TogetherClaudeGuide() {
                 <code className="text-ink">tgrok</code>, <code className="text-ink">tpi</code>, and{" "}
                 <code className="text-ink">topencode</code>. Use the full{" "}
                 <code className="text-ink">togetherlink claude</code> command in scripts when you
-                want the intent to be explicit.
+                want the target tool to be explicit.
               </p>
             </section>
 
@@ -248,11 +248,11 @@ function TogetherClaudeGuide() {
 
             <section className="mt-18" aria-labelledby="verify-heading">
               <h2 id="verify-heading" className="m-0 text-[28px] font-semibold tracking-[-.03em]">
-                Verify the route before trusting the result
+                Verify the provider before trusting the result
               </h2>
               <p className="mt-4 text-[15px] leading-relaxed text-muted">
-                At startup, read the sentence before Claude Code opens. For the default route it
-                should say:
+                At startup, read the line printed before Claude Code opens. With the default model,
+                it should say:
               </p>
               <blockquote className="m-0 mt-5 rounded-[12px] bg-code px-5 py-4 font-mono text-[13px] leading-relaxed shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
                 togetherlink ▸ Routing Claude Code → Together AI (GLM 5.2 · default). Not Anthropic.
@@ -272,7 +272,7 @@ function TogetherClaudeGuide() {
               <div className="flex flex-wrap items-center justify-between gap-6">
                 <div className="max-w-[470px]">
                   <h2 id="ready-heading" className="m-0 text-[25px] font-semibold">
-                    Ready to try the Claude route?
+                    Ready to try Claude Code on GLM 5.2?
                   </h2>
                   <p className="m-0 mt-2 text-[14px] leading-relaxed text-muted">
                     Create the required Together key first, then configure and launch from your
@@ -302,8 +302,8 @@ function TogetherClaudeGuide() {
               </h2>
               <p className="mt-4 text-[15px] leading-relaxed text-muted">
                 Start with <code className="text-ink">tclaude</code>. For an override, TogetherLink
-                options go before the harness name, while Claude Code arguments go after{" "}
-                <code className="text-ink">claude</code>.
+                options go before <code className="text-ink">claude</code>, while Claude Code
+                arguments go after it.
               </p>
               <div className="mt-6 space-y-4">
                 <CommandBlock
@@ -339,7 +339,7 @@ function TogetherClaudeGuide() {
 
             <section className="mt-20" aria-labelledby="related-heading">
               <h2 id="related-heading" className="m-0 text-[24px] font-semibold">
-                Compare the Codex route
+                Compare with Codex
               </h2>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
                 <ArticleLink
@@ -352,7 +352,7 @@ function TogetherClaudeGuide() {
                   href="/guides/use-glm-5-2-with-codex"
                   eyebrow="GLM quickstart"
                   title="GLM 5.2 in Codex: install, launch, verify"
-                  body="Follow the shortest route to a verified GLM 5.2 coding edit."
+                  body="Follow the shortest path to a verified GLM 5.2 coding edit."
                 />
               </div>
             </section>

@@ -62,7 +62,7 @@ const faqs: Faq[] = [
   {
     question: "Where does the --model flag go?",
     answer:
-      "Put TogetherLink flags before the harness name: togetherlink --model moonshotai/Kimi-K2.6 codex. Arguments after codex are passed to the Codex CLI.",
+      "Put TogetherLink flags before the tool name (`codex`): togetherlink --model moonshotai/Kimi-K2.6 codex. Arguments after codex are passed to the Codex CLI.",
   },
   {
     question: "Will this overwrite ~/.codex/config.toml?",
@@ -77,7 +77,7 @@ const faqs: Faq[] = [
   {
     question: "Can I use Together AI with codex exec in CI?",
     answer:
-      "Yes. Codex exec uses the same per-run route. Provide TOGETHER_API_KEY through your CI secret store and launch togetherlink with the model flag before codex exec.",
+      "Yes. Codex exec uses the same temporary provider. Provide TOGETHER_API_KEY through your CI secret store and launch togetherlink with the model flag before codex exec.",
   },
 ];
 
@@ -156,13 +156,13 @@ function TogetherCodexGuide() {
                 <div className="text-[15px] leading-relaxed text-muted">
                   <p className="m-0">
                     Codex expects an OpenAI Responses-style endpoint. TogetherLink starts a local
-                    daemon that accepts that protocol, preserves the tool loop Codex expects, and
-                    sends the model work to Together AI.
+                    proxy that accepts that protocol, preserves the tool loop it relies on, and
+                    sends each model request to Together AI.
                   </p>
                   <p className="mt-4 mb-0">
                     That provider exists only inside the Codex process TogetherLink launches. A
                     later plain <code className="text-ink">codex</code> command follows your normal
-                    OpenAI configuration as before.
+                    OpenAI configuration.
                   </p>
                 </div>
               </div>
@@ -230,8 +230,9 @@ function TogetherCodexGuide() {
                     Keep Codex exec in the loop
                   </h2>
                   <p className="m-0 mt-3 text-[14px] leading-relaxed text-muted">
-                    The same provider route works for one-shot repository checks. The final session
-                    line reports Together token cost, which is useful in automation logs.
+                    The same temporary provider works for one-shot repository checks. The final
+                    session line reports the Together AI token cost, which is useful in automation
+                    logs.
                   </p>
                 </div>
                 <pre className="m-0 overflow-x-auto rounded-[12px] bg-code p-4 font-mono text-[12px] leading-relaxed text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
@@ -247,7 +248,7 @@ function TogetherCodexGuide() {
 
             <section className="mt-20" aria-labelledby="decision-heading">
               <h2 id="decision-heading" className="m-0 text-[30px] font-semibold tracking-[-.03em]">
-                When this route is useful
+                When this setup is useful
               </h2>
               <div className="mt-7 grid gap-4 sm:grid-cols-3">
                 {[
@@ -260,7 +261,7 @@ function TogetherCodexGuide() {
                     "Select a model with a larger advertised context window when the task needs broader repository context.",
                   ],
                   [
-                    "Keep the harness",
+                    "Keep Codex",
                     "Retain Codex tools, approvals, and exec workflow while changing only the model provider for that run.",
                   ],
                 ].map(([heading, body]) => (

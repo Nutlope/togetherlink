@@ -19,7 +19,7 @@ const guides = [
     cover: "glm-grok" as GuideCoverVariant,
     title: "Launch Grok Build with GLM 5.2",
     description:
-      "Run the Grok Build terminal harness on GLM 5.2 through Together AI, with temporary model configuration and persistent local sessions.",
+      "Run the Grok Build command-line tool on GLM 5.2 through Together AI, with temporary model configuration and persistent local sessions.",
     meta: "Grok Build · GLM 5.2 · 8 min",
   },
   {
@@ -80,7 +80,7 @@ function GuidesIndex() {
           <p className="m-0 mt-6 max-w-[680px] text-pretty text-[18px] leading-relaxed text-muted">
             Start with the tool you want to keep. Each guide shows the exact TogetherLink command,
             where to get the required Together API key, what changes locally, and how to verify the
-            model route.
+            active model.
           </p>
         </div>
 

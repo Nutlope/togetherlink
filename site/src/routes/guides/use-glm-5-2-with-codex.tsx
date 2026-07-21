@@ -47,7 +47,7 @@ const faqs: Faq[] = [
   {
     question: "Can I run GLM 5.2 with codex exec?",
     answer:
-      "Yes. Put the Together model flag before the codex harness, then use Codex normally: togetherlink --model zai-org/GLM-5.2 codex exec followed by your prompt.",
+      "Yes. Put the Together model flag before the codex command, then use Codex normally: togetherlink --model zai-org/GLM-5.2 codex exec followed by your prompt.",
   },
   {
     question: "Does GLM 5.2 support images in this setup?",
@@ -150,14 +150,23 @@ function GlmCodexGuide() {
                     This installs the self-updating <code>togetherlink</code> binary on macOS or
                     Linux, plus the <code>tcodex</code>, <code>tclaude</code>, <code>tgrok</code>,{" "}
                     <code>tpi</code>, and <code>topencode</code> shortcuts. Codex CLI must also be
-                    installed on the machine.
+                    installed; use the{" "}
+                    <a
+                      className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+                      href="https://learn.chatgpt.com/docs/codex/cli"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      official Codex CLI setup
+                    </a>{" "}
+                    if needed.
                   </p>
                   <CommandBlock command={INSTALL_COMMAND} />
                 </NumberedStep>
                 <NumberedStep number="2" title="Save your Together API key">
                   <p className="m-0 mb-4">
-                    Create the key in Together's dashboard first. The configuration command stores
-                    it locally so you do not paste a secret into every run.
+                    Run the configuration command and paste the Together API key you created. It
+                    stores the key locally so you do not paste it into every run.
                   </p>
                   <CommandBlock command="togetherlink configure" />
                 </NumberedStep>
@@ -202,8 +211,8 @@ function GlmCodexGuide() {
                   Use it for a one-shot coding task
                 </h2>
                 <p className="mt-4 text-[15px] leading-relaxed text-muted">
-                  Codex's <code>exec</code> mode works through the same route. Run it from the
-                  repository you want Codex to inspect. The model flag belongs before{" "}
+                  Codex's <code>exec</code> mode works through the same TogetherLink proxy. Run it
+                  from the repository you want Codex to inspect. The model flag belongs before{" "}
                   <code>codex</code>; everything after <code>codex</code> is passed to the Codex
                   CLI.
                 </p>
@@ -229,7 +238,7 @@ function GlmCodexGuide() {
                     <ul className="mt-3 space-y-2 pl-5 text-[14px] leading-relaxed text-muted">
                       <li>Starts a local Responses-compatible proxy.</li>
                       <li>Injects a temporary Together model catalog.</li>
-                      <li>Reports Together token cost when the session ends.</li>
+                      <li>Reports the Together AI token cost when the session ends.</li>
                     </ul>
                   </div>
                   <div>
@@ -256,7 +265,7 @@ function GlmCodexGuide() {
                     key. You can also provide <code>TOGETHER_API_KEY</code> in the environment.
                   </TroubleshootingItem>
                   <TroubleshootingItem title="The output says provider: openai">
-                    Stop the process and launch through <code>togetherlink ... codex</code>. A plain{" "}
+                    Stop the process and relaunch with <code>tcodex</code>. A plain{" "}
                     <code>codex</code> command intentionally uses your normal provider.
                   </TroubleshootingItem>
                   <TroubleshootingItem title="Codex does not recognize an option">
@@ -300,7 +309,7 @@ function GlmCodexGuide() {
               />
               <ArticleLink
                 href="/guides/use-together-ai-models-with-claude-code"
-                eyebrow="Different harness"
+                eyebrow="Different tool"
                 title="Connect Claude Code to GLM 5.2, Kimi, and MiniMax"
                 body="Keep Claude Code's interface while running the model through Together AI."
               />

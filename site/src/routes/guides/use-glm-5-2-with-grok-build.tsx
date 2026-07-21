@@ -19,7 +19,7 @@ const path = "/guides/use-glm-5-2-with-grok-build";
 const ogImage = guideOgPath("glm-grok");
 const title = "Launch Grok Build with GLM 5.2";
 const description =
-  "Run GLM 5.2 inside the Grok Build coding CLI through Together AI. Install TogetherLink, add your Together API key, launch Grok Build, and verify the model boundary.";
+  "Run GLM 5.2 inside the Grok Build coding CLI through Together AI. Install TogetherLink, add your Together API key, launch Grok Build, and confirm GLM 5.2 is the active model.";
 
 const faqs: Faq[] = [
   {
@@ -30,17 +30,17 @@ const faqs: Faq[] = [
   {
     question: "Is the model still Grok?",
     answer:
-      "No. Grok Build is the terminal coding harness in this setup. GLM 5.2 is the model, and Together AI serves the inference request.",
+      "No. Grok Build is the command-line coding tool in this setup. GLM 5.2 is the model, and Together AI serves the request.",
   },
   {
     question: "Do I need an xAI API key?",
     answer:
-      "No xAI key is used for this route. You need a Together API key because the selected model runs on Together AI.",
+      "No xAI key is used for this setup. You need a Together API key because the selected model runs on Together AI.",
   },
   {
     question: "Does TogetherLink overwrite my Grok Build config?",
     answer:
-      "No. It creates a temporary Grok home for the launch, writes the Together model catalog there, and leaves your normal Grok config.toml untouched. Sessions and other supported local state remain persistent.",
+      "No. It creates a temporary Grok home for the launch, writes the Together model catalog there, and leaves your normal Grok config.toml untouched. Sessions and other supported local state are preserved.",
   },
   {
     question: "Can I run Grok Build headlessly with GLM 5.2?",
@@ -85,15 +85,15 @@ function GlmGrokGuide() {
             <Breadcrumbs current="Launch Grok Build with GLM 5.2" />
             <div className="max-w-[780px]">
               <div className="text-[12px] font-semibold tracking-[.09em] text-muted uppercase">
-                Grok Build harness · GLM 5.2 model · 8 min
+                Grok Build CLI · GLM 5.2 model · 8 min
               </div>
               <h1 className="m-0 mt-4 text-balance text-[clamp(40px,7vw,68px)] font-semibold leading-[1.02] tracking-[-.05em]">
                 Launch Grok Build with GLM 5.2
               </h1>
               <p className="m-0 mt-6 max-w-[720px] text-pretty text-[18px] leading-relaxed text-muted">
                 Keep Grok Build's terminal workflow, tools, and sessions while GLM 5.2 handles the
-                model work on Together AI. The harness and the model are separate parts of the
-                stack.
+                model requests on Together AI. The command-line tool and the model are separate
+                parts of the stack.
               </p>
             </div>
             <GuideCover variant="glm-grok" className="mt-12" />
@@ -119,7 +119,7 @@ function GlmGrokGuide() {
               </p>
               <dl className="mt-7 grid border-y border-line-strong sm:grid-cols-3">
                 {[
-                  ["Harness", "Grok Build"],
+                  ["Tool", "Grok Build"],
                   ["Model", "GLM 5.2"],
                   ["Inference", "Together AI"],
                 ].map(([term, value]) => (
@@ -159,8 +159,8 @@ function GlmGrokGuide() {
                 <CommandBlock command="tgrok" />
                 <p className="m-0 mt-4">
                   The installer also adds <code>tcodex</code>, <code>tclaude</code>,{" "}
-                  <code>tpi</code>, and <code>topencode</code>. Use the full model command only when
-                  overriding the default.
+                  <code>tpi</code>, and <code>topencode</code>. Use the full{" "}
+                  <code>togetherlink --model ... grok</code> form only when overriding the default.
                 </p>
               </NumberedStep>
             </section>
@@ -174,9 +174,10 @@ function GlmGrokGuide() {
               </h2>
               <p className="mt-4 text-[15px] leading-relaxed text-muted">
                 For each launch, TogetherLink creates a temporary Grok home and writes the Together
-                model catalog there. It copies supported non-model preferences at lower priority,
-                links persistent sessions and state, then deletes the temporary home when the
-                process exits. Your real <code>~/.grok/config.toml</code> is never rewritten.
+                model catalog there. It copies supported non-model preferences while its temporary
+                model settings take precedence, links persistent sessions and state, then deletes
+                the temporary home when the process exits. Your real{" "}
+                <code>~/.grok/config.toml</code> is never rewritten.
               </p>
             </section>
 

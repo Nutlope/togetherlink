@@ -25,7 +25,7 @@ const faqs: Faq[] = [
   {
     question: "Can the ChatGPT desktop app use Together AI models?",
     answer:
-      "TogetherLink's alpha integration adds a dedicated local provider to the desktop app configuration and routes its model requests to Together AI through a local Responses-compatible proxy.",
+      "TogetherLink's alpha integration adds a dedicated provider to the desktop app configuration and routes its model requests to Together AI through a local Responses-compatible proxy.",
   },
   {
     question: "Do I need a Together API key?",
@@ -91,8 +91,8 @@ function ChatGptDesktopGuide() {
                 Add open models to the ChatGPT Desktop app
               </h1>
               <p className="m-0 mt-6 max-w-[740px] text-pretty text-[18px] leading-relaxed text-muted">
-                Add Together's open models to the desktop coding experience, with a local proxy, an
-                automatic backup, and one explicit command to return to your normal OpenAI profile.
+                Bring Together's open models into ChatGPT Desktop with a local proxy, an automatic
+                backup, and one explicit command to return to your normal OpenAI profile.
               </p>
             </div>
             <GuideCover variant="together-chatgpt" className="mt-12" />
@@ -143,8 +143,8 @@ function ChatGptDesktopGuide() {
               <NumberedStep number="3" title="Configure and open ChatGPT Desktop">
                 <CommandBlock command="togetherlink chatgpt" />
                 <p className="m-0 mt-4">
-                  If the app is already open, TogetherLink asks before restarting it. Restart
-                  manually if you decline so the app reloads the new provider.
+                  If the app is already open, TogetherLink asks before restarting it. If you
+                  decline, restart the app manually so it reloads the new provider.
                 </p>
               </NumberedStep>
             </section>
@@ -169,7 +169,7 @@ function ChatGptDesktopGuide() {
                   ],
                   [
                     "App profile",
-                    "Keeps using the Together route until you run the restore command.",
+                    "Keeps using the Together provider until you run the restore command.",
                   ],
                 ].map(([label, body]) => (
                   <div
@@ -251,7 +251,7 @@ function ChatGptDesktopGuide() {
                   href="/guides/use-glm-5-2-with-grok-build"
                   eyebrow="Grok Build"
                   title="Launch Grok Build with GLM 5.2"
-                  body="Keep a terminal coding harness and use temporary model configuration."
+                  body="Keep coding in your terminal and use temporary model configuration."
                 />
               </div>
             </section>
