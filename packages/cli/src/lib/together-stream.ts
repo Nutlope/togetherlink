@@ -36,6 +36,23 @@ export class TogetherSseIdleTimeoutError extends Error {
   }
 }
 
+export class TogetherSsePrematureCloseError extends Error {
+  constructor(
+    readonly clientRequestId?: string | undefined,
+    readonly upstreamRequestId?: string | undefined,
+  ) {
+    const ids = [
+      clientRequestId ? `client request ID: ${clientRequestId}` : undefined,
+      upstreamRequestId ? `upstream request ID: ${upstreamRequestId}` : undefined,
+    ].filter(Boolean);
+    super(
+      "Together stream closed before the [DONE] event." +
+        (ids.length > 0 ? ` (${ids.join(", ")})` : ""),
+    );
+    this.name = "TogetherSsePrematureCloseError";
+  }
+}
+
 export class TogetherSseRetryResponseError extends Error {
   constructor(readonly response: Response) {
     super(`Together SSE retry returned HTTP ${response.status}.`);
@@ -68,10 +85,13 @@ export async function* readTogetherSseWithRetry(
       }
       return;
     } catch (err) {
-      if (!(err instanceof TogetherSseIdleTimeoutError)) {
+      if (
+        !(err instanceof TogetherSseIdleTimeoutError) &&
+        !(err instanceof TogetherSsePrematureCloseError)
+      ) {
         throw err;
       }
-      await persistIdleDiagnostic(response, err, attempt);
+      await persistStreamDiagnostic(response, err, attempt);
       if (options.isOutputStarted() || attempt >= maxRetries) {
         throw err;
       }
@@ -107,6 +127,7 @@ async function* readResponseSse(response: Response, idleTimeoutMs: number): Asyn
       ),
   );
   let buffer = "";
+  let sawDone = false;
   try {
     for (;;) {
       const read = await watchdog.read(reader);
@@ -117,6 +138,9 @@ async function* readResponseSse(response: Response, idleTimeoutMs: number): Asyn
       for (const event of takeSseEvents(buffer)) {
         buffer = event.remaining;
         if (event.payload) {
+          if (event.payload === "[DONE]") {
+            sawDone = true;
+          }
           yield event.payload;
         }
       }
@@ -136,14 +160,23 @@ async function* readResponseSse(response: Response, idleTimeoutMs: number): Asyn
   if (trailing) {
     const payload = sseEventPayload(trailing);
     if (payload) {
+      if (payload === "[DONE]") {
+        sawDone = true;
+      }
       yield payload;
     }
   }
+  if (!sawDone) {
+    throw new TogetherSsePrematureCloseError(
+      diagnostics?.clientRequestId,
+      diagnostics?.upstreamRequestId,
+    );
+  }
 }
 
-async function persistIdleDiagnostic(
+async function persistStreamDiagnostic(
   response: Response,
-  error: TogetherSseIdleTimeoutError,
+  error: TogetherSseIdleTimeoutError | TogetherSsePrematureCloseError,
   attempt: number,
 ): Promise<void> {
   const diagnostics = getTogetherResponseDiagnostics(response);
@@ -152,11 +185,11 @@ async function persistIdleDiagnostic(
   }
   await persistRequestDiagnostic({
     phase: "sse",
-    reason: "idle_timeout",
+    reason: error instanceof TogetherSseIdleTimeoutError ? "idle_timeout" : "premature_close",
     clientRequestId: diagnostics.clientRequestId,
     upstreamRequestId: diagnostics.upstreamRequestId,
     attempt,
-    timeoutMs: error.timeoutMs,
+    ...(error instanceof TogetherSseIdleTimeoutError ? { timeoutMs: error.timeoutMs } : {}),
     error: error.message,
   }).catch(() => undefined);
 }

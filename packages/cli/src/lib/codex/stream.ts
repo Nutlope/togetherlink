@@ -10,6 +10,7 @@ import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import {
   readTogetherSseWithRetry,
   TogetherSseIdleTimeoutError,
+  TogetherSsePrematureCloseError,
   TogetherSseRetryResponseError,
 } from "../together-stream.js";
 import { writeResponsesSse } from "./sse.js";
@@ -152,6 +153,9 @@ export async function streamResponseFromTogether(
       perf,
     );
   } catch (err) {
+    if (err instanceof TogetherSsePrematureCloseError) {
+      return failStream(res, responseId, 502, err.message);
+    }
     if (
       err instanceof SseIdleTimeoutError ||
       err instanceof TogetherSseIdleTimeoutError ||
@@ -337,6 +341,10 @@ async function streamTogetherTurn(
     }
   }
 
+  if (!finishReason) {
+    return { ok: false, status: 502, error: "Together stream ended without a finish reason." };
+  }
+
   return { ok: true, toolCalls: [...toolCalls.values()], usage, reasoningText, text, finishReason };
 }
 
@@ -387,6 +395,9 @@ async function streamResponseWithNativeTools(
         perf,
       );
     } catch (err) {
+      if (err instanceof TogetherSsePrematureCloseError) {
+        return failStream(res, responseId, 502, err.message);
+      }
       if (
         err instanceof SseIdleTimeoutError ||
         err instanceof TogetherSseIdleTimeoutError ||

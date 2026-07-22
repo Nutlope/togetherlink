@@ -752,6 +752,30 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain("response.completed");
   });
 
+  test("fails a streamed Codex turn when DONE arrives without a finish reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return sseResponse([{ choices: [{ delta: { content: "partial output" } }] }]);
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Say hi." }] },
+      ],
+    });
+
+    expect(response).toContain("response.failed");
+    expect(response).toContain("without a finish reason");
+    expect(response).not.toContain("response.completed");
+  });
+
   test("retries streamed Codex turns when upstream SSE goes idle before output", async () => {
     const requests: Array<{ body: any }> = [];
     vi.stubEnv("TOGETHERLINK_CODEX_STREAM_IDLE_TIMEOUT_MS", "100");

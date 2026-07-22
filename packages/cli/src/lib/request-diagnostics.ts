@@ -7,7 +7,7 @@ const REQUEST_DIAGNOSTICS_FILE = "request-diagnostics.jsonl";
 export type TogetherRequestDiagnostic = {
   at: string;
   phase: "response_headers" | "sse";
-  reason: "timeout" | "network_error" | "caller_abort" | "idle_timeout";
+  reason: "timeout" | "network_error" | "caller_abort" | "idle_timeout" | "premature_close";
   clientRequestId: string;
   upstreamRequestId?: string | undefined;
   model?: string | undefined;

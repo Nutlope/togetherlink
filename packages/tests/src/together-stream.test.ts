@@ -36,6 +36,26 @@ describe("shared Together SSE transport", () => {
     expect(events.join("\n")).toContain("recovered");
   });
 
+  test("retries a stream that closes before DONE when no harness output started", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    const retry = vi.fn(async () =>
+      sseResponse([
+        { choices: [{ delta: { content: "recovered" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+      ]),
+    );
+
+    const events: string[] = [];
+    for await (const event of readTogetherSseWithRetry(prematurelyClosedSseResponse([]), retry, {
+      isOutputStarted: () => false,
+    })) {
+      events.push(event.data);
+    }
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(events.join("\n")).toContain("recovered");
+  });
+
   test("does not retry an idle response after harness output starts", async () => {
     vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
@@ -122,4 +142,11 @@ function hangingSseResponse(): Response {
     }),
     { status: 200, headers: { "content-type": "text/event-stream" } },
   );
+}
+
+function prematurelyClosedSseResponse(events: unknown[]): Response {
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
 }

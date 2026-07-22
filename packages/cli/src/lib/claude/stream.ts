@@ -13,6 +13,7 @@ import {
 import {
   readTogetherSseWithRetry,
   TogetherSseIdleTimeoutError,
+  TogetherSsePrematureCloseError,
   TogetherSseRetryResponseError,
 } from "../together-stream.js";
 import { CostTracker } from "../cost.js";
@@ -216,6 +217,9 @@ export async function streamAnthropicFromTogether(
         ...(signal ? { signal } : {}),
       });
     } catch (err) {
+      if (err instanceof TogetherSsePrematureCloseError) {
+        return failAnthropicStream(res, 502, "api_error", err.message);
+      }
       if (err instanceof TogetherSseIdleTimeoutError) {
         return failAnthropicStream(res, 504, "timeout_error", err.message);
       }
@@ -309,6 +313,9 @@ export async function streamAnthropicFromTogether(
     debugLog(options, "together stream read error", {
       error: err instanceof Error ? err.message : String(err),
     });
+    if (err instanceof TogetherSsePrematureCloseError) {
+      return failAnthropicStream(res, 502, "api_error", err.message);
+    }
     if (err instanceof TogetherSseIdleTimeoutError) {
       return failAnthropicStream(res, 504, "timeout_error", err.message);
     }
