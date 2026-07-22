@@ -114,7 +114,12 @@ export function buildGrokLaunchEnvironment({
   const env: NodeJS.ProcessEnv = {
     ...inheritedEnv,
     [GROK_API_KEY_ENV]: apiKey,
+    // Grok 0.2.109 requires XAI_API_KEY for custom model catalogs and strips
+    // per-model env_key metadata from remote entries. Keep inference working,
+    // but route every xAI-native API surface to the localhost deny endpoint so
+    // this Together credential can never be sent to api.x.ai.
     [GROK_XAI_API_KEY_ENV]: apiKey,
+    GROK_XAI_API_BASE_URL: new URL(".", modelsListUrl).toString().replace(/\/$/, ""),
     GROK_AUTH_PATH: authPath,
     GROK_MODELS_BASE_URL: baseUrl,
     GROK_MODELS_LIST_URL: modelsListUrl,
@@ -129,6 +134,9 @@ export function buildGrokLaunchEnvironment({
     // Together key; image routing needs a dedicated Together integration.
     GROK_IMAGE_GEN: "0",
     GROK_IMAGE_EDIT: "0",
+    // Voice sends its bearer directly to api.x.ai. It cannot safely use the
+    // Together model credential or Together's chat-completions endpoint.
+    GROK_VOICE_MODE: "0",
     GROK_TELEMETRY_ENABLED: "0",
     GROK_FEEDBACK_ENABLED: "0",
   };

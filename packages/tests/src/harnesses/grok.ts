@@ -145,7 +145,7 @@ export function grokScenarios(): Scenario[] {
 
 export function claimsXaiIdentity(text: string): boolean {
   const withoutExplicitDenials = text
-    .replace(/\bnot\s+(?:an?\s+)?xAI(?:\s+model)?\b/gi, "")
+    .replace(/\bnot\s+(?:Grok\s+(?:or|nor)\s+)?(?:an?\s+)?xAI(?:\s+model)?\b/gi, "")
     .replace(
       /\b(?:am|is|are|was|were)(?:n't|\s+not)\s+(?:built|made|developed)\s+by\s+xAI\b/gi,
       "",

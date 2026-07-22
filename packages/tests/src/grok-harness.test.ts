@@ -17,6 +17,7 @@ describe("Grok harness", () => {
     expect(claimsXaiIdentity("I am not an xAI model; Together AI serves this session.")).toBe(
       false,
     );
+    expect(claimsXaiIdentity("I'm not Grok or an xAI model.")).toBe(false);
     expect(claimsXaiIdentity("I'm not Grok and wasn't built by xAI.")).toBe(false);
     expect(claimsXaiIdentity("I am an xAI model.")).toBe(true);
     expect(claimsXaiIdentity("I was built by xAI and served by Together AI.")).toBe(true);
@@ -57,6 +58,8 @@ describe("Grok harness", () => {
         GROK_HOME: "/users/custom-grok-home",
         GROK_AUTH: '{"xai":{"key":"saved-xai-session"}}',
         GROK_DISABLE_API_KEY_AUTH: "1",
+        GROK_VOICE_MODE: "1",
+        XAI_API_KEY: "saved-xai-api-key",
       },
       apiKey: "together-key",
       authPath: "/tmp/togetherlink-grok-auth/no-auth.json",
@@ -71,6 +74,7 @@ describe("Grok harness", () => {
     expect(env.GROK_DISABLE_API_KEY_AUTH).toBeUndefined();
     expect(env.XAI_API_KEY).toBe("together-key");
     expect(env.TOGETHER_API_KEY).toBe("together-key");
+    expect(env.GROK_XAI_API_BASE_URL).toBe("http://127.0.0.1:4242/v1");
     expect(env.GROK_MODELS_BASE_URL).toBe("https://api.together.ai/v1");
     expect(env.GROK_MODELS_LIST_URL).toBe("http://127.0.0.1:4242/v1/models");
     expect(env.GROK_DEFAULT_MODEL).toBe(GLM_5_2.id);
@@ -78,6 +82,7 @@ describe("Grok harness", () => {
     expect(env.GROK_IMAGE_DESCRIPTION_MODEL).toBe(VISION_PRIMARY.id);
     expect(env.GROK_PROMPT_SUGGESTIONS_MODEL).toBe(GLM_5_2.id);
     expect(env.GROK_WORKFLOWS).toBe("1");
+    expect(env.GROK_VOICE_MODE).toBe("0");
   });
 
   test("does not turn a blank inherited GROK_HOME into a new override", () => {
