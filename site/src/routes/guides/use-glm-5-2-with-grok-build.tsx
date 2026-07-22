@@ -19,7 +19,7 @@ const faqs: Faq[] = [
   {
     question: "Does Grok Build support GLM 5.2?",
     answer:
-      "Yes. TogetherLink gives Grok Build a temporary model catalog whose default points to zai-org/GLM-5.2 on Together AI.",
+      "Yes. TogetherLink gives Grok Build a local metadata-only model catalog whose default points to zai-org/GLM-5.2 on Together AI.",
   },
   {
     question: "Is the model still Grok?",
@@ -34,7 +34,12 @@ const faqs: Faq[] = [
   {
     question: "Does TogetherLink overwrite my Grok Build config?",
     answer:
-      "No. It creates a temporary Grok home for the launch, writes the Together model catalog there, and leaves your normal Grok config.toml untouched. Sessions and other supported local state are preserved.",
+      "No. It uses your normal Grok home without changing config.toml. A temporary auth path keeps your xAI login separate from the Together launch, while Grok's settings, built-ins, workflows, plugins, and sessions remain available.",
+  },
+  {
+    question: "Do Grok Build workflows work with TogetherLink?",
+    answer:
+      "Yes. TogetherLink enables workflows for the launch and keeps Grok's native bundled workflow resources available from your normal Grok home.",
   },
   {
     question: "Can I run Grok Build headlessly with GLM 5.2?",
@@ -45,6 +50,11 @@ const faqs: Faq[] = [
     question: "Does Grok Build web search work with TogetherLink?",
     answer:
       "No. TogetherLink disables Grok Build's native xAI-backed web search for this launch. Local coding tools and model requests through Together AI still work.",
+  },
+  {
+    question: "Do Grok Build image generation tools work with TogetherLink?",
+    answer:
+      "Not yet. TogetherLink disables Grok Build's xAI Imagine image generation and editing tools because they use a separate xAI-only API and model. Vision input through supported Together models is unaffected.",
   },
 ];
 
@@ -57,7 +67,7 @@ const guide = defineGuide({
   ogKey: "glm-grok",
   ogAlt: "Grok Build using GLM 5.2 through TogetherLink and Together AI",
   datePublished: "2026-07-21T12:00:00+02:00",
-  dateModified: "2026-07-21T12:00:00+02:00",
+  dateModified: "2026-07-22T16:45:00+02:00",
   faqs,
 });
 
@@ -102,9 +112,9 @@ function GlmGrokGuide() {
             Grok Build is the interface. GLM 5.2 is the model.
           </h2>
           <p className="mt-4 text-pretty text-[15px] leading-relaxed text-muted">
-            TogetherLink starts the existing <code>grok</code> binary with an isolated model
-            catalog. That catalog points directly at Together AI and names GLM 5.2 as the default.
-            No xAI model endpoint is involved in this launch.
+            TogetherLink starts the existing <code>grok</code> binary with a local metadata-only
+            model catalog. The model entries point directly at Together AI and name GLM 5.2 as the
+            default. No xAI model endpoint is involved in this launch.
           </p>
           <dl className="mt-7 grid border-y border-line-strong sm:grid-cols-3">
             {[
@@ -162,11 +172,11 @@ function GlmGrokGuide() {
             Your normal Grok configuration stays in place
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
-            For each launch, TogetherLink creates a temporary Grok home and writes the Together
-            model catalog there. It copies your existing preferences, then applies TogetherLink's
-            temporary model and privacy settings. It also links your session and state folders so
-            they remain available. When Grok exits, TogetherLink deletes the temporary home—not your
-            real <code>~/.grok/config.toml</code>.
+            TogetherLink leaves <code>GROK_HOME</code> alone, so Grok reads your normal settings,
+            built-ins, workflows, plugins, and sessions directly. Only authentication is isolated in
+            a temporary empty path, preventing a saved xAI login from overriding the Together API
+            key. The local catalog endpoint serves model metadata only; inference goes directly to
+            Together AI. Your <code>~/.grok/config.toml</code> is not rewritten.
           </p>
         </section>
 

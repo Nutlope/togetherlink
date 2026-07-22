@@ -19,7 +19,7 @@ const guides = [
     cover: "glm-grok" as GuideCoverVariant,
     title: "Launch Grok Build with GLM 5.2",
     description:
-      "Run the Grok Build command-line tool on GLM 5.2 through Together AI, with temporary model configuration and persistent local sessions.",
+      "Run Grok Build on GLM 5.2 through Together AI while keeping native settings, built-ins, workflows, plugins, and local sessions.",
     meta: "Grok Build · GLM 5.2 · 8 min",
   },
   {

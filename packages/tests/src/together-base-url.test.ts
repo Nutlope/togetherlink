@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
-import { buildGrokConfigToml } from "../../cli/src/lib/grok/core.js";
+import { buildGrokModelCatalog } from "../../cli/src/lib/grok/core.js";
 import { loadEnvFile } from "../../cli/src/lib/load-env.js";
 import { buildOpencodeConfigJson } from "../../cli/src/lib/opencode/core.js";
 import { buildPiModelsJson } from "../../cli/src/lib/harnesses/pi.js";
@@ -63,8 +63,8 @@ describe("direct coding harness configuration", () => {
     });
   });
 
-  test("Grok receives base_url", () => {
-    expect(buildGrokConfigToml(GLM_5_2, baseUrl)).toContain(`base_url = "${baseUrl}"`);
+  test("Grok catalog receives base_url", () => {
+    expect(buildGrokModelCatalog(baseUrl).data[0]?.base_url).toBe(baseUrl);
   });
 
   test("Pi receives baseUrl", () => {

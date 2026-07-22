@@ -87,8 +87,8 @@ const features = [
     tagTone: "beta",
     body: (
       <>
-        Grok Build launches directly on Together with the curated model catalog in a temporary home.
-        Your Grok config stays untouched and sessions still resume.
+        Grok Build launches directly on Together with a local metadata-only model catalog. Your
+        native Grok config, built-ins, workflows, and sessions stay available.
       </>
     ),
     icon: <GrokMark />,
