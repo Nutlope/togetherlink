@@ -2,6 +2,7 @@ import http from "node:http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { GLM_5_2, MINIMAX_M3, QWEN_3_5_9B, QWEN_3_7_MAX } from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
+import { asRecord } from "./json-lines.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
 
@@ -134,6 +135,213 @@ describe("Codex Responses proxy tool compatibility", () => {
         }),
       ]),
     );
+  });
+
+  test("returns reasoning items that normal Codex can safely replay", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                reasoning_content: "Private Together reasoning must not enter persisted history.",
+                content: "VISIBLE_ANSWER",
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+        });
+      }),
+    );
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Answer." }] },
+      ],
+    });
+
+    expect(response.output).toEqual([
+      expect.objectContaining({
+        type: "reasoning",
+        summary: [],
+        content: [],
+      }),
+      expect.objectContaining({
+        type: "message",
+        role: "assistant",
+        content: [expect.objectContaining({ type: "output_text", text: "VISIBLE_ANSWER" })],
+      }),
+    ]);
+  });
+
+  test("streams reasoning live without putting it in completed history", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: "VISIBLE_WHILE_RUNNING" } }] },
+          { choices: [{ delta: { content: "PORTABLE_ANSWER" } }] },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+          { usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } },
+        ]);
+      }),
+    );
+
+    const raw = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Answer." }] },
+      ],
+    });
+    const events = responsesSseEvents(raw);
+    const reasoningDelta = events.find((event) => event.type === "response.reasoning_text.delta");
+    const reasoningDone = events.find(
+      (event) =>
+        event.type === "response.output_item.done" && asRecord(event.item).type === "reasoning",
+    );
+    const completed = events.find((event) => event.type === "response.completed");
+    const completedOutput = asRecord(completed?.response).output;
+
+    expect(reasoningDelta?.delta).toBe("VISIBLE_WHILE_RUNNING");
+    expect(asRecord(reasoningDone?.item).content).toEqual([]);
+    expect(Array.isArray(completedOutput)).toBe(true);
+    expect(
+      asRecord(Array.isArray(completedOutput) ? completedOutput[0] : undefined).content,
+    ).toEqual([]);
+    expect(raw).toContain("PORTABLE_ANSWER");
+  });
+
+  test("keeps custom and function tool history portable across resumed turns", async () => {
+    const requests: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        if (requests.length === 1) {
+          return jsonResponse({
+            choices: [
+              {
+                message: {
+                  reasoning_content: "Choose two local actions.",
+                  tool_calls: [
+                    {
+                      id: "call_patch",
+                      type: "function",
+                      function: {
+                        name: "apply_patch",
+                        arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch" }),
+                      },
+                    },
+                    {
+                      id: "call_shell",
+                      type: "function",
+                      function: {
+                        name: "shell",
+                        arguments: JSON.stringify({ command: "cat marker.txt" }),
+                      },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          });
+        }
+        return jsonResponse({
+          choices: [
+            {
+              message: { reasoning_content: "Both actions completed.", content: "RESUMED_OK" },
+              finish_reason: "stop",
+            },
+          ],
+        });
+      }),
+    );
+
+    const tools = [
+      {
+        type: "custom",
+        name: "apply_patch",
+        description: "Apply a patch.",
+        format: { type: "grammar", syntax: "lark", definition: "start: /.+/" },
+      },
+      {
+        type: "function",
+        name: "shell",
+        description: "Run a shell command.",
+        parameters: {
+          type: "object",
+          properties: { command: { type: "string" } },
+          required: ["command"],
+        },
+      },
+    ];
+    const first = await postResponses({
+      model: GLM_5_2.id,
+      tools,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Act." }] }],
+    });
+
+    expect(first.output).toEqual([
+      expect.objectContaining({ type: "reasoning", content: [] }),
+      expect.objectContaining({
+        type: "custom_tool_call",
+        call_id: "call_patch",
+        name: "apply_patch",
+      }),
+      expect.objectContaining({
+        type: "function_call",
+        call_id: "call_shell",
+        name: "shell",
+      }),
+    ]);
+
+    const second = await postResponses({
+      model: GLM_5_2.id,
+      tools,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Act." }] },
+        ...first.output,
+        { type: "custom_tool_call_output", call_id: "call_patch", output: "PATCH_DONE" },
+        { type: "function_call_output", call_id: "call_shell", output: "SHELL_DONE" },
+      ],
+    });
+
+    expect(requests[1]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            expect.objectContaining({ id: "call_patch" }),
+            expect.objectContaining({ id: "call_shell" }),
+          ],
+        }),
+        { role: "tool", tool_call_id: "call_patch", content: "PATCH_DONE" },
+        { role: "tool", tool_call_id: "call_shell", content: "SHELL_DONE" },
+      ]),
+    );
+    expect(second.output).toEqual([
+      expect.objectContaining({ type: "reasoning", content: [] }),
+      expect.objectContaining({
+        type: "message",
+        role: "assistant",
+        content: [expect.objectContaining({ type: "output_text", text: "RESUMED_OK" })],
+      }),
+    ]);
   });
 
   test("maps custom tool calls back to Codex custom_tool_call items", async () => {
@@ -2272,6 +2480,13 @@ function reasoningOnlySseResponse(): Response {
       headers: { "content-type": "text/event-stream" },
     },
   );
+}
+
+function responsesSseEvents(raw: string): Array<Record<string, unknown>> {
+  return raw
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+    .map((line) => asRecord(JSON.parse(line.slice("data: ".length))));
 }
 
 function firstToolName(requests: unknown[]): string | undefined {

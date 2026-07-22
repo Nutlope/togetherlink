@@ -45,12 +45,7 @@ function toResponsesOutput(
   const output: Record<string, unknown>[] = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
-    output.push({
-      id: `rs_${randomUUID().replaceAll("-", "")}`,
-      type: "reasoning",
-      summary: [],
-      content: [{ type: "reasoning_text", text: reasoning }],
-    });
+    output.push(reasoningOutputItem());
   }
   if (message.content) {
     output.push(messageOutputItem(message.content));
@@ -119,7 +114,6 @@ export function openTextOutputItem(res: ServerResponse, state: StreamOutputState
 }
 
 export function reasoningOutputItem(
-  text: string,
   id = `rs_${randomUUID().replaceAll("-", "")}`,
 ): Record<string, unknown> {
   return {
@@ -127,7 +121,12 @@ export function reasoningOutputItem(
     type: "reasoning",
     status: "completed",
     summary: [],
-    content: [{ type: "reasoning_text", text }],
+    // Native OpenAI reasoning items carry encrypted_content and no raw content.
+    // Together reasoning cannot be encrypted for OpenAI, so keeping its text in
+    // this completed item makes a later `codex resume` fail validation. Streamed
+    // reasoning deltas remain visible during the turn; persisted history keeps
+    // only this replay-safe marker.
+    content: [],
   };
 }
 

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node scripts/run-vitest.mjs",
     "test:live-smoke": "TOGETHERLINK_LIVE_SMOKE=1 node scripts/run-vitest.mjs src/LiveSmoke.test.ts",
+    "test:live-codex-resume": "TOGETHERLINK_LIVE_CODEX_RESUME=1 VITEST_FILE_PARALLELISM=0 node scripts/run-vitest.mjs src/LiveCodexResume.test.ts",
     "test:live-models-check": "TOGETHERLINK_LIVE_MODELS_CHECK=1 VITEST_MAX_CONCURRENCY=${VITEST_MAX_CONCURRENCY:-6} node scripts/run-vitest.mjs src/livemodelscheck.test.ts",
     "test:codex": "node scripts/run-vitest.mjs src/Codex.test.ts",
     "test:claude": "node scripts/run-vitest.mjs src/Claude.test.ts",

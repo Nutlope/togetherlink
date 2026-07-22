@@ -613,7 +613,7 @@ function completeOpenOutputItems(res: ServerResponse, outputState: StreamOutputS
     writeResponsesSse(res, "response.output_item.done", {
       type: "response.output_item.done",
       output_index: outputState.reasoningOutputIndex,
-      item: reasoningOutputItem(outputState.reasoningText, outputState.reasoningItemId),
+      item: reasoningOutputItem(outputState.reasoningItemId),
     });
   }
 
@@ -688,7 +688,7 @@ function completeStreamResponse(
       model: body.model ?? options.modelId,
       output: [
         ...(outputState.reasoningItemId !== undefined
-          ? [reasoningOutputItem(outputState.reasoningText, outputState.reasoningItemId)]
+          ? [reasoningOutputItem(outputState.reasoningItemId)]
           : []),
         ...(outputState.textItemId !== undefined
           ? [messageOutputItem(outputState.text, outputState.textItemId)]
