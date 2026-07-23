@@ -12,6 +12,7 @@ type InstallSummary = DashboardData["installSummaries"][number];
 type RecentSession = DashboardData["recentSessions"][number];
 type CountryLifetime = DashboardData["countryLifetime"][number];
 type MapMetric = "installs" | "sessions" | "tokens" | "cost";
+type LeaderboardMetric = "tokens" | "sessions";
 
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
@@ -283,6 +284,12 @@ function DashboardRoute() {
               countryCount={data.overview.countriesLifetime}
             />
 
+            <UserLeaderboard
+              installs={data.installSummaries}
+              selectedInstallId={selectedInstallId}
+              onSelectInstall={setSelectedInstallId}
+            />
+
             <InstallPicker
               installs={data.installSummaries}
               selectedInstallId={selectedInstallId}
@@ -428,6 +435,130 @@ function OverviewMetric({
       <div className="mt-1 text-xs text-muted">{period}</div>
       <div className="mt-3 border-t border-line pt-2 font-mono text-xs text-muted">{lifetime}</div>
     </div>
+  );
+}
+
+function UserLeaderboard({
+  installs,
+  selectedInstallId,
+  onSelectInstall,
+}: {
+  installs: InstallSummary[];
+  selectedInstallId: string;
+  onSelectInstall: (installId: string) => void;
+}) {
+  const [metric, setMetric] = useState<LeaderboardMetric>("tokens");
+  const rankedInstalls = [...installs]
+    .filter((install) => leaderboardMetricValue(install, metric) > 0)
+    .sort((a, b) => {
+      const metricDifference =
+        leaderboardMetricValue(b, metric) - leaderboardMetricValue(a, metric);
+      if (metricDifference !== 0) return metricDifference;
+      return b.lastSeenAt - a.lastSeenAt;
+    })
+    .slice(0, 10);
+  const maxValue = Math.max(
+    1,
+    ...rankedInstalls.map((install) => leaderboardMetricValue(install, metric)),
+  );
+
+  return (
+    <section className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-4 py-4">
+        <div>
+          <h2 className="text-sm font-medium text-ink">Top 10 users</h2>
+          <p className="mt-1 text-xs text-muted">
+            Anonymous installs ranked by activity in the last 30 days.
+          </p>
+        </div>
+        <div className="flex rounded-md bg-code p-1" role="group" aria-label="Leaderboard metric">
+          {(["tokens", "sessions"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setMetric(option)}
+              aria-pressed={metric === option}
+              className={`min-h-10 rounded px-3 text-xs font-medium capitalize transition-[color,background-color,box-shadow,scale] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96] ${
+                metric === option ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="divide-y divide-line">
+        {rankedInstalls.map((install, index) => {
+          const value = leaderboardMetricValue(install, metric);
+          const isSelected = install.installId === selectedInstallId;
+
+          return (
+            <button
+              key={install.installId}
+              type="button"
+              onClick={() => onSelectInstall(install.installId)}
+              aria-label={`View analytics for ${install.nickname ?? shortInstallId(install.installId)}`}
+              className={`grid min-h-16 w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition-[background-color,scale] duration-150 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink active:scale-[0.99] ${
+                isSelected ? "bg-code" : "hover:bg-code/60"
+              }`}
+            >
+              <span
+                className={`font-mono text-sm tabular-nums ${
+                  index < 3 ? "font-semibold text-ink" : "text-faint"
+                }`}
+              >
+                {index + 1}
+              </span>
+
+              <span className="min-w-0">
+                <span className="flex items-baseline gap-2">
+                  <span
+                    className={`truncate text-sm text-ink ${
+                      install.nickname ? "font-medium" : "font-mono"
+                    }`}
+                  >
+                    {install.nickname ?? shortInstallId(install.installId)}
+                  </span>
+                  <span className="shrink-0 text-xs text-faint">
+                    {flagFor(install.countryCode)}
+                  </span>
+                </span>
+                <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-line">
+                  <span
+                    className="block h-full rounded-full bg-ink/80"
+                    style={{ width: `${Math.max(2, (value / maxValue) * 100)}%` }}
+                  />
+                </span>
+              </span>
+
+              <span className="text-right">
+                <span className="block font-mono text-sm font-medium tabular-nums text-ink">
+                  {formatLeaderboardMetric(value, metric)}
+                </span>
+                <span className="mt-0.5 block font-mono text-xs tabular-nums text-muted">
+                  {metric === "tokens"
+                    ? `${formatNumber(install.sessionEnds)} ${
+                        install.sessionEnds === 1 ? "session" : "sessions"
+                      }`
+                    : `${formatCompactTokens(totalTokens(install))} tokens`}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+
+        {rankedInstalls.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-faint">No {metric} data yet</div>
+        )}
+      </div>
+
+      {metric === "tokens" && (
+        <div className="border-t border-line bg-code px-4 py-2.5 text-xs text-muted">
+          Token totals cover proxied Claude, Codex, and ChatGPT sessions.
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -975,6 +1106,17 @@ function formatNumber(n: number): string {
 
 function totalTokens(usage: { promptTokens: number; completionTokens: number }): number {
   return usage.promptTokens + usage.completionTokens;
+}
+
+function leaderboardMetricValue(
+  install: Pick<InstallSummary, "promptTokens" | "completionTokens" | "sessionEnds">,
+  metric: LeaderboardMetric,
+): number {
+  return metric === "tokens" ? totalTokens(install) : install.sessionEnds;
+}
+
+function formatLeaderboardMetric(value: number, metric: LeaderboardMetric): string {
+  return metric === "tokens" ? formatCompactTokens(value) : formatNumber(value);
 }
 
 function formatCompactTokens(n: number): string {
