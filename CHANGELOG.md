@@ -3,8 +3,6 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
-## Unreleased
-
 ## 0.6.6 - 2026-07-23
 
 ### Changed
