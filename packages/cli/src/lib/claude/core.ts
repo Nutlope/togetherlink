@@ -163,17 +163,21 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
       `togetherlink ▸ Routing Claude Code → Together AI (${modelName}). Not Anthropic.\n`,
     buildEnv: ({ proxyUrl, authToken, modelId, modelName }) =>
       buildClaudeEnv({ ...options, modelId, modelName, proxyUrl, authToken }),
-    buildArgs: ({ args }) => [
-      ...claudeArgsWithoutModelOverrides(args),
-      ...claudeCacheFriendlyArgs(args),
-      ...claudeExtraSettingsArgs(args),
-    ],
+    buildArgs: ({ args }) => buildClaudeLaunchArgs(args),
   });
   return result;
 }
 
 export function claudeRunsInBackground(args: string[]): boolean {
   return args.some((arg) => arg === "--bg" || arg === "--background");
+}
+
+export function buildClaudeLaunchArgs(args: string[]): string[] {
+  return [
+    ...claudeArgsWithoutModelOverrides(args),
+    ...claudeCacheFriendlyArgs(args),
+    ...claudeExtraSettingsArgs(args),
+  ];
 }
 
 function claudeCodeMaxOutputTokensFromEnv(value: string | undefined): number {
@@ -234,7 +238,19 @@ function claudeExtraSettingsArgs(args: string[]): string[] {
   // (bypassing ANTHROPIC_BASE_URL / our proxy) for its domain safety check. In
   // a togetherlink session api.anthropic.com isn't our model endpoint, so the
   // preflight fails and WebFetch breaks entirely. Skipping it restores
-  // WebFetch without reaching Anthropic. Only sends a boolean — no other
-  // settings keys are added here.
-  return ["--settings", JSON.stringify({ skipWebFetchPreflight: true })];
+  // WebFetch without reaching Anthropic.
+  //
+  // attribution: TogetherLink runs Together AI models inside the Claude Code
+  // harness, so Claude's default generated-by text and Co-Authored-By trailer
+  // would identify the wrong model. Keep both commits and PRs unattributed.
+  return [
+    "--settings",
+    JSON.stringify({
+      skipWebFetchPreflight: true,
+      attribution: {
+        commit: "",
+        pr: "",
+      },
+    }),
+  ];
 }

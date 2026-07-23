@@ -2,7 +2,11 @@ import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { GLM_5_2, type ModelDefinition } from "../../models/src/index.js";
-import { buildClaudeEnv, claudeRunsInBackground } from "../../cli/src/lib/claude/core.js";
+import {
+  buildClaudeEnv,
+  buildClaudeLaunchArgs,
+  claudeRunsInBackground,
+} from "../../cli/src/lib/claude/core.js";
 import { isClaudeCompactionRequest } from "../../cli/src/lib/claude/compaction.js";
 import { CLAUDE_HAIKU_MODEL } from "../../cli/src/lib/claude/defaults.js";
 import { handleProxyRequest } from "../../cli/src/lib/claude/proxy.js";
@@ -100,6 +104,31 @@ describe("Claude proxy compatibility API", () => {
     expect(claudeRunsInBackground(["--bg", "do work"])).toBe(true);
     expect(claudeRunsInBackground(["--background", "do work"])).toBe(true);
     expect(claudeRunsInBackground(["--print", "do work"])).toBe(false);
+  });
+
+  test("disables Claude attribution for TogetherLink sessions", () => {
+    const args = buildClaudeLaunchArgs(["--print", "do work"]);
+    const settingsIndex = args.indexOf("--settings");
+
+    expect(settingsIndex).toBeGreaterThanOrEqual(0);
+    expect(JSON.parse(args[settingsIndex + 1] ?? "{}")).toMatchObject({
+      attribution: {
+        commit: "",
+        pr: "",
+      },
+    });
+  });
+
+  test("preserves explicit Claude settings instead of injecting attribution settings", () => {
+    const settings = JSON.stringify({ attribution: { commit: "Custom", pr: "Custom" } });
+
+    expect(buildClaudeLaunchArgs(["--settings", settings, "--print", "do work"])).toEqual([
+      "--settings",
+      settings,
+      "--print",
+      "do work",
+      "--exclude-dynamic-system-prompt-sections",
+    ]);
   });
 
   test("counts tokens without calling the upstream model", async () => {
