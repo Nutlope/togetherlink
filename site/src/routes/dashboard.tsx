@@ -286,6 +286,11 @@ function DashboardRoute() {
           </section>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <DailyActiveUsersChart
+              rows={data.activeInstallsPerDay}
+              monthlyActiveUsers={data.overview.activeInstalls30d}
+            />
+
             <WorldUsageMap
               countries={data.countryLifetime}
               countryCount={data.overview.countriesLifetime}
@@ -338,10 +343,6 @@ function DashboardRoute() {
               sessions={focusedSessions}
             />
 
-            <DailyActiveUsersChart
-              rows={data.activeInstallsPerDay}
-              monthlyActiveUsers={data.overview.activeInstalls30d}
-            />
             <StatCard
               title="Installs completed / day"
               rows={data.installsPerDay.map((r) => [r.day, r.count])}
