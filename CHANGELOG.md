@@ -3,6 +3,13 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.6.7 - 2026-07-23
+
+### Fixed
+
+- Prevented Claude Code from adding Claude attribution to commits and pull requests created during
+  TogetherLink sessions.
+
 ## 0.6.6 - 2026-07-23
 
 ### Changed
