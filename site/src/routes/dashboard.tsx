@@ -11,7 +11,9 @@ type DashboardData = NonNullable<DashboardSummary>;
 type InstallSummary = DashboardData["installSummaries"][number];
 type RecentSession = DashboardData["recentSessions"][number];
 type CountryLifetime = DashboardData["countryLifetime"][number];
+type DailyActiveUsers = DashboardData["activeInstallsPerDay"][number];
 type MapMetric = "installs" | "sessions" | "tokens" | "cost";
+type LeaderboardMetric = "tokens" | "sessions";
 
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
@@ -49,12 +51,18 @@ async function fetchSummary() {
 function normalizeDashboardData(value: unknown): DashboardSummary {
   if (!value || typeof value !== "object") return null;
   const data = value as Partial<DashboardData>;
+  const activeInstalls30d =
+    data.overview?.activeInstalls30d ??
+    (data.installSummaries ?? []).filter(
+      (install) => install.sessionStarts > 0 || install.sessionEnds > 0,
+    ).length;
   return {
     overview: {
       installs24h: data.overview?.installs24h ?? 0,
       installsLifetime: data.overview?.installsLifetime ?? 0,
       uniqueInstallsLifetime: data.overview?.uniqueInstallsLifetime ?? 0,
       activeInstalls24h: data.overview?.activeInstalls24h ?? 0,
+      activeInstalls30d,
       activeInstallsLifetime: data.overview?.activeInstallsLifetime ?? 0,
       sessions24h: data.overview?.sessions24h ?? 0,
       sessionsLifetime: data.overview?.sessionsLifetime ?? 0,
@@ -278,9 +286,20 @@ function DashboardRoute() {
           </section>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <DailyActiveUsersChart
+              rows={data.activeInstallsPerDay}
+              monthlyActiveUsers={data.overview.activeInstalls30d}
+            />
+
             <WorldUsageMap
               countries={data.countryLifetime}
               countryCount={data.overview.countriesLifetime}
+            />
+
+            <UserLeaderboard
+              installs={data.installSummaries}
+              selectedInstallId={selectedInstallId}
+              onSelectInstall={setSelectedInstallId}
             />
 
             <InstallPicker
@@ -324,10 +343,6 @@ function DashboardRoute() {
               sessions={focusedSessions}
             />
 
-            <StatCard
-              title="Active installs / day"
-              rows={data.activeInstallsPerDay.map((r) => [r.day, r.count])}
-            />
             <StatCard
               title="Installs completed / day"
               rows={data.installsPerDay.map((r) => [r.day, r.count])}
@@ -427,6 +442,254 @@ function OverviewMetric({
       <div className="mt-3 font-mono text-2xl font-semibold tracking-tight text-ink">{value}</div>
       <div className="mt-1 text-xs text-muted">{period}</div>
       <div className="mt-3 border-t border-line pt-2 font-mono text-xs text-muted">{lifetime}</div>
+    </div>
+  );
+}
+
+function UserLeaderboard({
+  installs,
+  selectedInstallId,
+  onSelectInstall,
+}: {
+  installs: InstallSummary[];
+  selectedInstallId: string;
+  onSelectInstall: (installId: string) => void;
+}) {
+  const [metric, setMetric] = useState<LeaderboardMetric>("tokens");
+  const rankedInstalls = [...installs]
+    .filter((install) => leaderboardMetricValue(install, metric) > 0)
+    .sort((a, b) => {
+      const metricDifference =
+        leaderboardMetricValue(b, metric) - leaderboardMetricValue(a, metric);
+      if (metricDifference !== 0) return metricDifference;
+      return b.lastSeenAt - a.lastSeenAt;
+    })
+    .slice(0, 10);
+  const maxValue = Math.max(
+    1,
+    ...rankedInstalls.map((install) => leaderboardMetricValue(install, metric)),
+  );
+
+  return (
+    <section className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-4 py-4">
+        <div>
+          <h2 className="text-sm font-medium text-ink">Top 10 users</h2>
+          <p className="mt-1 text-xs text-muted">
+            Anonymous installs ranked by activity in the last 30 days.
+          </p>
+        </div>
+        <div className="flex rounded-md bg-code p-1" role="group" aria-label="Leaderboard metric">
+          {(["tokens", "sessions"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setMetric(option)}
+              aria-pressed={metric === option}
+              className={`min-h-10 rounded px-3 text-xs font-medium capitalize transition-[color,background-color,box-shadow,scale] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96] ${
+                metric === option ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="divide-y divide-line">
+        {rankedInstalls.map((install, index) => {
+          const value = leaderboardMetricValue(install, metric);
+          const isSelected = install.installId === selectedInstallId;
+
+          return (
+            <button
+              key={install.installId}
+              type="button"
+              onClick={() => onSelectInstall(install.installId)}
+              aria-label={`View analytics for ${install.nickname ?? shortInstallId(install.installId)}`}
+              className={`grid min-h-16 w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition-[background-color,scale] duration-150 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink active:scale-[0.99] ${
+                isSelected ? "bg-code" : "hover:bg-code/60"
+              }`}
+            >
+              <span
+                className={`font-mono text-sm tabular-nums ${
+                  index < 3 ? "font-semibold text-ink" : "text-faint"
+                }`}
+              >
+                {index + 1}
+              </span>
+
+              <span className="min-w-0">
+                <span className="flex items-baseline gap-2">
+                  <span
+                    className={`truncate text-sm text-ink ${
+                      install.nickname ? "font-medium" : "font-mono"
+                    }`}
+                  >
+                    {install.nickname ?? shortInstallId(install.installId)}
+                  </span>
+                  <span className="shrink-0 text-xs text-faint">
+                    {flagFor(install.countryCode)}
+                  </span>
+                </span>
+                <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-line">
+                  <span
+                    className="block h-full rounded-full bg-ink/80"
+                    style={{ width: `${Math.max(2, (value / maxValue) * 100)}%` }}
+                  />
+                </span>
+              </span>
+
+              <span className="text-right">
+                <span className="block font-mono text-sm font-medium tabular-nums text-ink">
+                  {formatLeaderboardMetric(value, metric)}
+                </span>
+                <span className="mt-0.5 block font-mono text-xs tabular-nums text-muted">
+                  {metric === "tokens"
+                    ? `${formatNumber(install.sessionEnds)} ${
+                        install.sessionEnds === 1 ? "session" : "sessions"
+                      }`
+                    : `${formatCompactTokens(totalTokens(install))} tokens`}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+
+        {rankedInstalls.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-faint">No {metric} data yet</div>
+        )}
+      </div>
+
+      {metric === "tokens" && (
+        <div className="border-t border-line bg-code px-4 py-2.5 text-xs text-muted">
+          Token totals cover proxied Claude, Codex, and ChatGPT sessions.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DailyActiveUsersChart({
+  rows,
+  monthlyActiveUsers,
+}: {
+  rows: DailyActiveUsers[];
+  monthlyActiveUsers: number;
+}) {
+  const series = fillDailySeries(rows, 30);
+  const latest = series.at(-1)?.count ?? 0;
+  const peak = Math.max(0, ...series.map((row) => row.count));
+  const stickiness = monthlyActiveUsers > 0 ? latest / monthlyActiveUsers : 0;
+  const chartWidth = 720;
+  const chartTop = 12;
+  const chartBottom = 168;
+  const chartHeight = chartBottom - chartTop;
+  const chartMax = Math.max(1, peak);
+  const points = series.map((row, index) => {
+    const x = series.length === 1 ? 0 : (index / (series.length - 1)) * chartWidth;
+    const y = chartBottom - (row.count / chartMax) * chartHeight;
+    return { ...row, x, y };
+  });
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+  const areaPath =
+    points.length > 0
+      ? `${linePath} L ${points.at(-1)?.x ?? 0} ${chartBottom} L ${points[0]?.x ?? 0} ${chartBottom} Z`
+      : "";
+  const latestPoint = points.at(-1);
+
+  return (
+    <section className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-4">
+        <div>
+          <h2 className="text-sm font-medium text-ink">Daily active users</h2>
+          <p className="mt-1 max-w-2xl text-xs text-muted">
+            Unique anonymous installs that launch the CLI or report session activity on each UTC
+            day.
+          </p>
+        </div>
+        <span className="rounded-full bg-code px-2.5 py-1 font-mono text-xs text-muted">
+          30-day view
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 border-b border-line sm:grid-cols-4">
+        <DauMetric label="Today so far" value={formatNumber(latest)} />
+        <DauMetric label="30d active users" value={formatNumber(monthlyActiveUsers)} />
+        <DauMetric label="DAU / MAU" value={`${(stickiness * 100).toFixed(1)}%`} />
+        <DauMetric label="30d peak" value={formatNumber(peak)} />
+      </div>
+
+      <div className="p-4">
+        <div className="rounded-lg bg-code px-3 pb-2 pt-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-xs text-faint">{formatNumber(chartMax)}</span>
+            <span className="text-xs text-faint">users</span>
+          </div>
+          <svg
+            viewBox={`0 0 ${chartWidth} 180`}
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`Daily active users over the last 30 days, from ${series[0]?.count ?? 0} to ${latest}`}
+            className="h-44 w-full overflow-visible"
+          >
+            <title>Daily active users over the last 30 days</title>
+            {[chartTop, chartTop + chartHeight / 2, chartBottom].map((y) => (
+              <line
+                key={y}
+                x1="0"
+                x2={chartWidth}
+                y1={y}
+                y2={y}
+                stroke="#dfe3e8"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            <path d={areaPath} fill="rgba(10, 10, 10, 0.07)" />
+            <path
+              d={linePath}
+              fill="none"
+              stroke="#0a0a0a"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {latestPoint && (
+              <circle
+                cx={latestPoint.x}
+                cy={latestPoint.y}
+                r="4"
+                fill="#0a0a0a"
+                stroke="#ffffff"
+                strokeWidth="2"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          <div className="flex justify-between gap-3 font-mono text-xs text-faint">
+            <span>{formatChartDay(series[0]?.day)}</span>
+            <span>UTC</span>
+            <span>Today</span>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          DAU / MAU compares today&apos;s active installs with unique active installs across the
+          rolling 30-day window. Today&apos;s value is partial.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function DauMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-r border-line px-4 py-3 last:border-r-0 even:border-r-0 sm:even:border-r sm:last:border-r-0">
+      <div className="text-xs text-muted">{label}</div>
+      <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">{value}</div>
     </div>
   );
 }
@@ -975,6 +1238,38 @@ function formatNumber(n: number): string {
 
 function totalTokens(usage: { promptTokens: number; completionTokens: number }): number {
   return usage.promptTokens + usage.completionTokens;
+}
+
+function leaderboardMetricValue(
+  install: Pick<InstallSummary, "promptTokens" | "completionTokens" | "sessionEnds">,
+  metric: LeaderboardMetric,
+): number {
+  return metric === "tokens" ? totalTokens(install) : install.sessionEnds;
+}
+
+function formatLeaderboardMetric(value: number, metric: LeaderboardMetric): string {
+  return metric === "tokens" ? formatCompactTokens(value) : formatNumber(value);
+}
+
+function fillDailySeries(rows: DailyActiveUsers[], dayCount: number): DailyActiveUsers[] {
+  const countByDay = new Map(rows.map((row) => [row.day, row.count]));
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+
+  return Array.from({ length: dayCount }, (_, index) => {
+    const timestamp = todayUtc - (dayCount - index - 1) * 24 * 60 * 60 * 1000;
+    const day = new Date(timestamp).toISOString().slice(0, 10);
+    return { day, count: countByDay.get(day) ?? 0 };
+  });
+}
+
+function formatChartDay(day?: string): string {
+  if (!day) return "-";
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function formatCompactTokens(n: number): string {

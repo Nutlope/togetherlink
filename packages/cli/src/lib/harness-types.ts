@@ -45,9 +45,9 @@ export function defineHarness(impl: Harness): Harness {
  *   on exit. The lifecycle lives in `runProxiedSession` (proxied-session.ts).
  *
  * - **Spawned** — OpenCode, Grok, Pi. `run` spawns the agent binary directly;
- *   the binary talks to Together using inline config (OpenCode), an isolated
- *   temporary GROK_HOME (Grok), or a models.json on disk (Pi). No daemon, no
- *   proxy, no CostTracker, no keepalive.
+ *   the binary talks to Together using inline config (OpenCode), a local
+ *   metadata-only model catalog (Grok), or a models.json on disk (Pi). No
+ *   inference proxy, no CostTracker, no keepalive.
  *
  * The split is documented here and in CONTEXT.md but is not currently enforced
  * in the type system — the former `ProxiedHarness`/`SpawnedHarness` type

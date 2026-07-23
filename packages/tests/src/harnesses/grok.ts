@@ -136,8 +136,7 @@ export function grokScenarios(): Scenario[] {
         );
         assert(result.status === 0, `exit ${result.status}`);
         for (const model of SELECTABLE_MODELS) {
-          const alias = `together-${model.id.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
-          assert(result.stdout.includes(alias), `missing ${model.id}`);
+          assert(result.stdout.includes(model.id), `missing ${model.id}`);
         }
       },
     },
@@ -145,7 +144,12 @@ export function grokScenarios(): Scenario[] {
 }
 
 export function claimsXaiIdentity(text: string): boolean {
-  const withoutExplicitDenials = text.replace(/\bnot\s+(?:an?\s+)?xAI(?:\s+model)?\b/gi, "");
+  const withoutExplicitDenials = text
+    .replace(/\bnot\s+(?:Grok\s+(?:or|nor)\s+)?(?:an?\s+)?xAI(?:\s+model)?\b/gi, "")
+    .replace(
+      /\b(?:am|is|are|was|were)(?:n't|\s+not)\s+(?:built|made|developed)\s+by\s+xAI\b/gi,
+      "",
+    );
   return /\bxAI\b/i.test(withoutExplicitDenials);
 }
 

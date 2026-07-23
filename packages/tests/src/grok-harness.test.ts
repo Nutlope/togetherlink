@@ -1,25 +1,15 @@
-import { lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
-import { GLM_5_2, SELECTABLE_MODELS } from "@togetherlink/models";
+import { describe, expect, test } from "vitest";
+import { GLM_5_2, SELECTABLE_MODELS, VISION_PRIMARY } from "@togetherlink/models";
 import {
-  buildGrokConfigToml,
+  buildGrokLaunchEnvironment,
+  buildGrokModelCatalog,
   buildGrokIdentityRule,
   grokArgsWithoutTogetherlinkOverrides,
   grokArgsWithTogetherlinkIdentity,
-  grokModelAlias,
   GROK_IDENTITY_RULE,
-  GROK_VISION_MODEL_ALIAS,
-  populateTemporaryGrokHome,
+  startGrokModelCatalogServer,
 } from "../../cli/src/lib/grok/core.js";
 import { claimsXaiIdentity } from "./harnesses/grok.js";
-
-const cleanup: string[] = [];
-
-afterEach(() => {
-  for (const path of cleanup.splice(0)) rmSync(path, { recursive: true, force: true });
-});
 
 describe("Grok harness", () => {
   test("does not mistake an explicit xAI denial for an xAI identity claim", () => {
@@ -27,6 +17,8 @@ describe("Grok harness", () => {
     expect(claimsXaiIdentity("I am not an xAI model; Together AI serves this session.")).toBe(
       false,
     );
+    expect(claimsXaiIdentity("I'm not Grok or an xAI model.")).toBe(false);
+    expect(claimsXaiIdentity("I'm not Grok and wasn't built by xAI.")).toBe(false);
     expect(claimsXaiIdentity("I am an xAI model.")).toBe(true);
     expect(claimsXaiIdentity("I was built by xAI and served by Together AI.")).toBe(true);
   });
@@ -40,20 +32,121 @@ describe("Grok harness", () => {
     );
   });
 
-  test("builds an explicit direct-Together catalog without embedding the key", () => {
-    const config = buildGrokConfigToml(GLM_5_2);
+  test("adapts the curated models to Grok's wrapped catalog shape", () => {
+    const catalog = buildGrokModelCatalog("https://api.together.ai/v1");
 
-    expect(config).toContain(`default = "${grokModelAlias(GLM_5_2)}"`);
-    expect(config).toContain(`session_summary = "${grokModelAlias(GLM_5_2)}"`);
-    expect(config).toContain(`image_description = "${GROK_VISION_MODEL_ALIAS}"`);
-    expect(config).not.toContain("web_search =");
-    expect(config).toContain('base_url = "https://api.together.ai/v1"');
-    expect(config).toContain('env_key = "TOGETHER_API_KEY"');
-    expect(config).toContain('api_backend = "chat_completions"');
-    expect(config).not.toContain("tgp_v1_");
+    expect(catalog.object).toBe("list");
+    expect(catalog.data).toHaveLength(SELECTABLE_MODELS.length);
     for (const model of SELECTABLE_MODELS) {
-      expect(config).toContain(`[model.${grokModelAlias(model)}]`);
-      expect(config).toContain(`model = "${model.id}"`);
+      expect(catalog.data).toContainEqual({
+        id: model.id,
+        model: model.id,
+        name: `Together AI · ${model.name}`,
+        description: `Direct Together API model: ${model.id}`,
+        base_url: "https://api.together.ai/v1",
+        api_backend: "chat_completions",
+        context_window: model.limit.context,
+        max_completion_tokens: Math.min(model.limit.output, 8192),
+        user_selectable: true,
+      });
+    }
+  });
+
+  test("uses the real Grok home while isolating only auth and enabling workflows", () => {
+    const env = buildGrokLaunchEnvironment({
+      inheritedEnv: {
+        GROK_HOME: "/users/custom-grok-home",
+        GROK_AUTH: '{"xai":{"key":"saved-xai-session"}}',
+        GROK_DISABLE_API_KEY_AUTH: "1",
+        GROK_VOICE_MODE: "1",
+        XAI_API_KEY: "saved-xai-api-key",
+      },
+      apiKey: "together-key",
+      authPath: "/tmp/togetherlink-grok-auth/no-auth.json",
+      baseUrl: "https://api.together.ai/v1",
+      modelsListUrl: "http://127.0.0.1:4242/v1/models",
+      selectedModel: GLM_5_2,
+    });
+
+    expect(env.GROK_HOME).toBe("/users/custom-grok-home");
+    expect(env.GROK_AUTH_PATH).toBe("/tmp/togetherlink-grok-auth/no-auth.json");
+    expect(env.GROK_AUTH).toBeUndefined();
+    expect(env.GROK_DISABLE_API_KEY_AUTH).toBeUndefined();
+    expect(env.XAI_API_KEY).toBe("together-key");
+    expect(env.TOGETHER_API_KEY).toBe("together-key");
+    expect(env.GROK_XAI_API_BASE_URL).toBe("http://127.0.0.1:4242/v1");
+    expect(env.GROK_MODELS_BASE_URL).toBe("https://api.together.ai/v1");
+    expect(env.GROK_MODELS_LIST_URL).toBe("http://127.0.0.1:4242/v1/models");
+    expect(env.GROK_DEFAULT_MODEL).toBe(GLM_5_2.id);
+    expect(env.GROK_SESSION_SUMMARY_MODEL).toBe(GLM_5_2.id);
+    expect(env.GROK_IMAGE_DESCRIPTION_MODEL).toBe(VISION_PRIMARY.id);
+    expect(env.GROK_PROMPT_SUGGESTIONS_MODEL).toBe(GLM_5_2.id);
+    expect(env.GROK_WORKFLOWS).toBe("1");
+    expect(env.GROK_VOICE_MODE).toBe("0");
+  });
+
+  test("does not turn a blank inherited GROK_HOME into a new override", () => {
+    const env = buildGrokLaunchEnvironment({
+      inheritedEnv: { GROK_HOME: "   " },
+      apiKey: "together-key",
+      authPath: "/tmp/no-auth.json",
+      baseUrl: "https://api.together.ai/v1",
+      modelsListUrl: "http://127.0.0.1:4242/v1/models",
+      selectedModel: GLM_5_2,
+    });
+
+    expect(env.GROK_HOME).toBeUndefined();
+  });
+
+  test("routes optional AI shell suggestions through the selected Together model", () => {
+    const env = buildGrokLaunchEnvironment({
+      inheritedEnv: {
+        GROK_SUGGESTIONS_AI: "1",
+        GROK_SUGGESTIONS_AI_MODEL: "grok-build",
+      },
+      apiKey: "together-key",
+      authPath: "/tmp/no-auth.json",
+      baseUrl: "https://api.together.ai/v1",
+      modelsListUrl: "http://127.0.0.1:4242/v1/models",
+      selectedModel: GLM_5_2,
+    });
+
+    expect(env.GROK_SUGGESTIONS_AI).toBe("1");
+    expect(env.GROK_SUGGESTIONS_AI_MODEL).toBe(GLM_5_2.id);
+  });
+
+  test("disables xAI-only Imagine tools without changing goal subagent policy", () => {
+    const env = buildGrokLaunchEnvironment({
+      inheritedEnv: {
+        GROK_IMAGE_GEN: "1",
+        GROK_IMAGE_EDIT: "1",
+        GROK_GOAL_USE_CURRENT_MODEL_ONLY: "0",
+      },
+      apiKey: "together-key",
+      authPath: "/tmp/no-auth.json",
+      baseUrl: "https://api.together.ai/v1",
+      modelsListUrl: "http://127.0.0.1:4242/v1/models",
+      selectedModel: GLM_5_2,
+    });
+
+    expect(env.GROK_IMAGE_GEN).toBe("0");
+    expect(env.GROK_IMAGE_EDIT).toBe("0");
+    expect(env.GROK_GOAL_USE_CURRENT_MODEL_ONLY).toBe("0");
+  });
+
+  test("serves only the Grok-compatible local model catalog", async () => {
+    const catalogServer = await startGrokModelCatalogServer("https://api.together.ai/v1");
+    try {
+      const response = await fetch(catalogServer.modelsListUrl, {
+        headers: { Authorization: "Bearer secret-that-must-not-be-reflected" },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(buildGrokModelCatalog("https://api.together.ai/v1"));
+
+      const unsupported = await fetch(new URL("/v1/chat/completions", catalogServer.modelsListUrl));
+      expect(unsupported.status).toBe(404);
+    } finally {
+      await catalogServer.close();
     }
   });
 
@@ -104,31 +197,5 @@ describe("Grok harness", () => {
       "-p",
       "hello",
     ]);
-  });
-
-  test("isolates config while preserving sessions and user settings", () => {
-    const root = mkdtempSync(join(tmpdir(), "togetherlink-grok-unit-"));
-    cleanup.push(root);
-    const persistentHome = join(root, "persistent");
-    const temporaryHome = join(root, "temporary");
-    mkdirSync(join(persistentHome, "sessions"), { recursive: true });
-    writeFileSync(join(persistentHome, "config.toml"), "[ui]\nvim_mode = true\n", "utf8");
-
-    populateTemporaryGrokHome({
-      temporaryHome,
-      persistentHome,
-      selectedModel: GLM_5_2,
-    });
-
-    expect(lstatSync(join(temporaryHome, "sessions")).isSymbolicLink()).toBe(true);
-    expect(readFileSync(join(temporaryHome, "managed_config.toml"), "utf8")).toContain(
-      "vim_mode = true",
-    );
-    expect(readFileSync(join(temporaryHome, "config.toml"), "utf8")).toContain(
-      `default = "${grokModelAlias(GLM_5_2)}"`,
-    );
-    expect(readFileSync(join(persistentHome, "config.toml"), "utf8")).toBe(
-      "[ui]\nvim_mode = true\n",
-    );
   });
 });

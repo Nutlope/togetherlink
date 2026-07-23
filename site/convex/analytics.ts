@@ -125,6 +125,7 @@ export const getDashboardSummary = query({
     const installs = new Map<string, InstallSummary>();
     const sessions = new Map<string, SessionSummary>();
     const installDaily = new Map<string, InstallDailySummary>();
+    const activeInstallIds30d = new Set<string>();
     let failedSessions = 0;
     let totalEndedSessions = 0;
 
@@ -176,6 +177,7 @@ export const getDashboardSummary = query({
       ) {
         if (!activeInstallsByDay.has(day)) activeInstallsByDay.set(day, new Set());
         activeInstallsByDay.get(day)?.add(event.installId);
+        activeInstallIds30d.add(event.installId);
       }
 
       if (event.eventType === "session_started") {
@@ -376,6 +378,7 @@ export const getDashboardSummary = query({
         installsLifetime,
         uniqueInstallsLifetime: lifetimeInstallIds.size,
         activeInstalls24h: activeInstallIds24h.size,
+        activeInstalls30d: activeInstallIds30d.size,
         activeInstallsLifetime: lifetimeActiveInstallIds.size,
         sessions24h,
         sessionsLifetime,

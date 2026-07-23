@@ -19,8 +19,8 @@ currently enforced in the type system):
   (`packages/cli/src/lib/proxied-session.ts`).
 - **Spawned harness** — OpenCode, Pi, Grok. `run` spawns the agent binary
   directly; the binary talks to Together using inline config (OpenCode), a
-  temporary `models.json` (Pi), or an isolated temporary `GROK_HOME` (Grok).
-  No daemon, no proxy, no `CostTracker`, no keepalive. The shared
+  temporary `models.json` (Pi), or a local metadata-only model catalog (Grok).
+  No inference proxy, no `CostTracker`, no keepalive. The shared
   `runTrackedSpawnedSession` lifecycle records anonymous session start/end
   telemetry, but token and cost totals remain unavailable because Together
   traffic bypasses togetherlink.

@@ -235,7 +235,7 @@ There are two harness families behind the five tools:
 
 - **Proxied harnesses — Claude Code, Codex CLI.** `tclaude` and `tcodex` spawn a shared local daemon and route the agent's `/v1/*` traffic through it. The daemon translates the agent's native wire format (Anthropic Messages for Claude, OpenAI Responses for Codex) to Together's chat-completions API and back. Per run: it resolves the model, ensures the daemon, registers a session with your token, prints a banner, spawns the agent pointed at the local proxy, tracks cost, and deregisters on exit. Nothing is written to your real agent config — close it and your setup is exactly as it was.
 
-- **Spawned harnesses — OpenCode, Grok Build, Pi Code.** `topencode`, `tgrok`, and `tpi` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), an isolated temporary `GROK_HOME` with persistent session links (Grok), or a temporary `models.json` (Pi). No daemon, no proxy.
+- **Spawned harnesses — OpenCode, Grok Build, Pi Code.** `topencode`, `tgrok`, and `tpi` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), a local metadata-only model catalog plus temporary auth isolation (Grok), or a temporary `models.json` (Pi). No inference proxy is involved.
 
 The daemon is one persistent local process shared by all proxied sessions. If you ever need to stop it manually:
 
@@ -252,7 +252,7 @@ togetherlink daemon stop
 - **Web search fails in Claude Code** — set an Exa API key via `togetherlink configure`. Without it, searches return a clear "EXA_API_KEY not set" error.
 - **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
 - **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
-- **Grok web search fails** — Grok's native `web_search` auxiliary model requires Responses API web-search support. Together's direct chat-completions route does not provide that xAI-specific surface; pass `--disable-web-search` for deterministic headless runs.
+- **Grok web search or image generation is unavailable** — `tgrok` disables Grok's xAI-backed web search and Imagine image tools because Together's direct chat-completions route does not provide those xAI-specific API surfaces. Coding tools, workflows, image understanding through supported Together vision models, and Together model requests still work.
 - **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Grok Build / Pi Code setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
 
 ## Links

@@ -1,14 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveCodexModel } from "../codex/defaults.js";
 import {
-  GROK_API_KEY_ENV,
-  GROK_VISION_MODEL_ALIAS,
+  buildGrokLaunchEnvironment,
   buildGrokIdentityRule,
   grokArgsWithTogetherlinkIdentity,
-  grokModelAlias,
-  populateTemporaryGrokHome,
+  startGrokModelCatalogServer,
 } from "../grok/core.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
@@ -26,46 +24,40 @@ export default defineHarness({
     }
 
     const selectedModel = resolveCodexModel(ctx.main);
-    const selectedAlias = grokModelAlias(selectedModel.definition);
-    const temporaryHome = mkdtempSync(join(tmpdir(), "togetherlink-grok-"));
-    const configuredGrokHome = process.env.GROK_HOME?.trim();
-    const persistentHome = configuredGrokHome || join(ctx.home || homedir(), ".grok");
     const baseUrl = resolveTogetherBaseUrl();
-    populateTemporaryGrokHome({
-      temporaryHome,
-      persistentHome,
-      selectedModel: selectedModel.definition,
-      baseUrl,
-    });
-
-    const args = [
-      "--model",
-      selectedAlias,
-      ...grokArgsWithTogetherlinkIdentity(
-        ctx.passthrough ?? [],
-        buildGrokIdentityRule(selectedModel.definition),
-      ),
-    ];
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      GROK_HOME: temporaryHome,
-      [GROK_API_KEY_ENV]: apiKey,
-      GROK_DEFAULT_MODEL: selectedAlias,
-      GROK_SESSION_SUMMARY_MODEL: selectedAlias,
-      GROK_IMAGE_DESCRIPTION_MODEL: GROK_VISION_MODEL_ALIAS,
-      GROK_PROMPT_SUGGESTIONS_MODEL: selectedAlias,
-      GROK_TELEMETRY_ENABLED: "0",
-      GROK_FEEDBACK_ENABLED: "0",
-    };
-
-    if (process.env.TOGETHERLINK_DEBUG === "1") {
-      process.stderr.write(`[togetherlink grok] model: ${selectedModel.id}\n`);
-      process.stderr.write(`[togetherlink grok] temporary home: ${temporaryHome}\n`);
-      process.stderr.write(`[togetherlink grok] persistent state: ${persistentHome}\n`);
-    }
-
-    process.stderr.write("togetherlink ▸ Launching Grok Build with Together AI.\n");
+    const temporaryAuthDirectory = mkdtempSync(join(tmpdir(), "togetherlink-grok-auth-"));
+    const authPath = join(temporaryAuthDirectory, "no-auth.json");
+    let catalogServer: Awaited<ReturnType<typeof startGrokModelCatalogServer>> | undefined;
     try {
+      catalogServer = await startGrokModelCatalogServer(baseUrl);
+      const args = [
+        "--model",
+        selectedModel.id,
+        ...grokArgsWithTogetherlinkIdentity(
+          ctx.passthrough ?? [],
+          buildGrokIdentityRule(selectedModel.definition),
+        ),
+      ];
+      const env = buildGrokLaunchEnvironment({
+        inheritedEnv: process.env,
+        apiKey,
+        authPath,
+        baseUrl,
+        modelsListUrl: catalogServer.modelsListUrl,
+        selectedModel: selectedModel.definition,
+      });
+
+      if (process.env.TOGETHERLINK_DEBUG === "1") {
+        process.stderr.write(`[togetherlink grok] model: ${selectedModel.id}\n`);
+        process.stderr.write(`[togetherlink grok] inference: ${baseUrl}\n`);
+        process.stderr.write(`[togetherlink grok] model catalog: ${catalogServer.modelsListUrl}\n`);
+        process.stderr.write(`[togetherlink grok] auth isolation: ${authPath}\n`);
+        process.stderr.write(
+          `[togetherlink grok] Grok home: ${env.GROK_HOME || "~/.grok (native default)"}\n`,
+        );
+      }
+
+      process.stderr.write("togetherlink ▸ Launching Grok Build with Together AI.\n");
       const result = await runTrackedSpawnedSession({
         agent: HARNESS.GROK,
         modelId: selectedModel.id,
@@ -76,7 +68,11 @@ export default defineHarness({
       });
       process.exitCode = typeof result.status === "number" ? result.status : result.signal ? 1 : 0;
     } finally {
-      rmSync(temporaryHome, { recursive: true, force: true });
+      try {
+        await catalogServer?.close();
+      } finally {
+        rmSync(temporaryAuthDirectory, { recursive: true, force: true });
+      }
     }
 
     return {};
