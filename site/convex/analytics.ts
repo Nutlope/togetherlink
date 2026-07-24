@@ -2,9 +2,13 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
-function dayKey(timestampMs: number): string {
-  return new Date(timestampMs).toISOString().slice(0, 10);
+type DashboardRange = "24h" | "7d" | "30d" | "lifetime";
+
+function bucketKey(timestampMs: number, range: DashboardRange): string {
+  const iso = new Date(timestampMs).toISOString();
+  return range === "24h" ? `${iso.slice(0, 13)}:00` : iso.slice(0, 10);
 }
 
 // The standalone Codex desktop app merged into the ChatGPT desktop app in 2026.
@@ -95,11 +99,15 @@ function eventHasUsage(event: {
 
 export const getDashboardSummary = query({
   args: {
-    days: v.optional(v.number()),
+    range: v.optional(
+      v.union(v.literal("24h"), v.literal("7d"), v.literal("30d"), v.literal("lifetime")),
+    ),
   },
   handler: async (ctx, args) => {
-    const days = args.days ?? 30;
-    const since = Date.now() - days * DAY_MS;
+    const range = args.range ?? "30d";
+    const rangeDurationMs =
+      range === "24h" ? 24 * HOUR_MS : range === "7d" ? 7 * DAY_MS : 30 * DAY_MS;
+    const since = range === "lifetime" ? Number.NEGATIVE_INFINITY : Date.now() - rangeDurationMs;
 
     const allEvents = await ctx.db.query("telemetryEvents").withIndex("by_receivedAt").collect();
     const events = allEvents.filter((event) => event.receivedAt >= since);
@@ -125,12 +133,41 @@ export const getDashboardSummary = query({
     const installs = new Map<string, InstallSummary>();
     const sessions = new Map<string, SessionSummary>();
     const installDaily = new Map<string, InstallDailySummary>();
-    const activeInstallIds30d = new Set<string>();
+    const installIds = new Set<string>();
+    const activeInstallIds = new Set<string>();
+    const countries = new Set<string>();
+    const usage = emptyUsage();
+    const countryActivity = new Map<
+      string,
+      UsageTotals & {
+        installCompletions: number;
+        uniqueInstallIds: Set<string>;
+        activeInstallIds: Set<string>;
+        sessionsStarted: number;
+        sessionsEnded: number;
+      }
+    >();
+    let installCompletions = 0;
+    let sessionsStarted = 0;
     let failedSessions = 0;
     let totalEndedSessions = 0;
 
     for (const event of events) {
-      const day = dayKey(event.receivedAt);
+      const day = bucketKey(event.receivedAt, range);
+      const countryCode = event.countryCode.toUpperCase();
+      installIds.add(event.installId);
+      if (isCountryCode(countryCode)) countries.add(countryCode);
+
+      const country = countryActivity.get(countryCode) ?? {
+        ...emptyUsage(),
+        installCompletions: 0,
+        uniqueInstallIds: new Set<string>(),
+        activeInstallIds: new Set<string>(),
+        sessionsStarted: 0,
+        sessionsEnded: 0,
+      };
+      country.uniqueInstallIds.add(event.installId);
+
       const install = installs.get(event.installId) ?? {
         installId: event.installId,
         nickname: nicknames.get(event.installId),
@@ -168,6 +205,8 @@ export const getDashboardSummary = query({
       if (event.eventType === "install_completed") {
         if (!installsByDay.has(day)) installsByDay.set(day, new Set());
         installsByDay.get(day)?.add(event.installId);
+        installCompletions += 1;
+        country.installCompletions += 1;
       }
 
       if (
@@ -177,11 +216,14 @@ export const getDashboardSummary = query({
       ) {
         if (!activeInstallsByDay.has(day)) activeInstallsByDay.set(day, new Set());
         activeInstallsByDay.get(day)?.add(event.installId);
-        activeInstallIds30d.add(event.installId);
+        activeInstallIds.add(event.installId);
+        country.activeInstallIds.add(event.installId);
       }
 
       if (event.eventType === "session_started") {
         sessionsStartedByDay.set(day, (sessionsStartedByDay.get(day) ?? 0) + 1);
+        sessionsStarted += 1;
+        country.sessionsStarted += 1;
         install.sessionStarts += 1;
         daily.sessionsStarted += 1;
       }
@@ -195,6 +237,7 @@ export const getDashboardSummary = query({
           failedSessions += 1;
           install.failedSessions += 1;
         }
+        country.sessionsEnded += 1;
       }
 
       if (
@@ -281,8 +324,11 @@ export const getDashboardSummary = query({
 
         addUsage(install, event);
         addUsage(daily, event);
+        addUsage(usage, event);
+        addUsage(country, event);
       }
 
+      countryActivity.set(countryCode, country);
       osCounts.set(event.os, (osCounts.get(event.os) ?? 0) + 1);
       countryCounts.set(event.countryCode, (countryCounts.get(event.countryCode) ?? 0) + 1);
       if (event.cliVersion) {
@@ -295,99 +341,17 @@ export const getDashboardSummary = query({
         .map(([day, value]) => ({ day, count: value instanceof Set ? value.size : value }))
         .sort((a, b) => (a.day < b.day ? -1 : 1));
 
-    const last24HoursSince = Date.now() - DAY_MS;
-    const lifetimeInstallIds = new Set<string>();
-    const lifetimeActiveInstallIds = new Set<string>();
-    const activeInstallIds24h = new Set<string>();
-    const countries24h = new Set<string>();
-    const countriesLifetime = new Set<string>();
-    const usage24h = emptyUsage();
-    const usageLifetime = emptyUsage();
-    const countryLifetime = new Map<
-      string,
-      UsageTotals & {
-        installCompletions: number;
-        uniqueInstallIds: Set<string>;
-        activeInstallIds: Set<string>;
-        sessionsStarted: number;
-        sessionsEnded: number;
-      }
-    >();
-    let installs24h = 0;
-    let installsLifetime = 0;
-    let sessions24h = 0;
-    let sessionsLifetime = 0;
-
-    for (const event of allEvents) {
-      const countryCode = event.countryCode.toUpperCase();
-      const isLast24Hours = event.receivedAt >= last24HoursSince;
-      lifetimeInstallIds.add(event.installId);
-      if (isCountryCode(countryCode)) {
-        countriesLifetime.add(countryCode);
-        if (isLast24Hours) countries24h.add(countryCode);
-      }
-
-      const country = countryLifetime.get(countryCode) ?? {
-        ...emptyUsage(),
-        installCompletions: 0,
-        uniqueInstallIds: new Set<string>(),
-        activeInstallIds: new Set<string>(),
-        sessionsStarted: 0,
-        sessionsEnded: 0,
-      };
-
-      if (event.eventType === "install_completed") {
-        installsLifetime += 1;
-        country.installCompletions += 1;
-        country.uniqueInstallIds.add(event.installId);
-        if (isLast24Hours) installs24h += 1;
-      }
-
-      if (
-        event.eventType === "cli_started" ||
-        event.eventType === "session_started" ||
-        event.eventType === "session_ended"
-      ) {
-        lifetimeActiveInstallIds.add(event.installId);
-        country.activeInstallIds.add(event.installId);
-        if (isLast24Hours) activeInstallIds24h.add(event.installId);
-      }
-
-      if (event.eventType === "session_started") {
-        country.sessionsStarted += 1;
-        sessionsLifetime += 1;
-        if (isLast24Hours) sessions24h += 1;
-      }
-
-      if (event.eventType === "session_ended" && eventHasUsage(event)) {
-        addUsage(usageLifetime, event);
-        addUsage(country, event);
-        if (isLast24Hours) addUsage(usage24h, event);
-      }
-
-      if (event.eventType === "session_ended") {
-        country.sessionsEnded += 1;
-      }
-
-      countryLifetime.set(countryCode, country);
-    }
-
     return {
+      range,
       overview: {
-        installs24h,
-        installsLifetime,
-        uniqueInstallsLifetime: lifetimeInstallIds.size,
-        activeInstalls24h: activeInstallIds24h.size,
-        activeInstalls30d: activeInstallIds30d.size,
-        activeInstallsLifetime: lifetimeActiveInstallIds.size,
-        sessions24h,
-        sessionsLifetime,
-        countries24h: countries24h.size,
-        countriesLifetime: countriesLifetime.size,
-        usage24h,
-        usageLifetime,
+        installCompletions,
+        uniqueInstalls: installIds.size,
+        activeInstalls: activeInstallIds.size,
+        sessionsStarted,
+        countries: countries.size,
+        usage,
       },
-      countryLifetime: Array.from(countryLifetime.entries())
+      countryLifetime: Array.from(countryActivity.entries())
         .map(([countryCode, country]) => ({
           countryCode,
           installCompletions: country.installCompletions,

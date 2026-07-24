@@ -14,10 +14,17 @@ type CountryLifetime = DashboardData["countryLifetime"][number];
 type DailyActiveUsers = DashboardData["activeInstallsPerDay"][number];
 type MapMetric = "installs" | "sessions" | "tokens" | "cost";
 type LeaderboardMetric = "tokens" | "sessions";
+type DashboardRange = "24h" | "7d" | "30d" | "lifetime";
 
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
 const RECENT_SESSIONS_LIMIT = 10;
+const DASHBOARD_RANGES: Array<{ value: DashboardRange; label: string }> = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+  { value: "lifetime", label: "Lifetime" },
+];
 const EMPTY_USAGE = {
   promptTokens: 0,
   cachedTokens: 0,
@@ -39,37 +46,32 @@ async function dashboardSession() {
   });
 }
 
-async function fetchSummary() {
+async function fetchSummary(range: DashboardRange) {
   const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
   if (!url) {
     return null;
   }
   const client = new ConvexHttpClient(url);
-  return client.query(api.analytics.getDashboardSummary, { days: 30 });
+  return client.query(api.analytics.getDashboardSummary, { range });
 }
 
 function normalizeDashboardData(value: unknown): DashboardSummary {
   if (!value || typeof value !== "object") return null;
   const data = value as Partial<DashboardData>;
-  const activeInstalls30d =
-    data.overview?.activeInstalls30d ??
+  const activeInstalls =
+    data.overview?.activeInstalls ??
     (data.installSummaries ?? []).filter(
       (install) => install.sessionStarts > 0 || install.sessionEnds > 0,
     ).length;
   return {
+    range: data.range ?? "30d",
     overview: {
-      installs24h: data.overview?.installs24h ?? 0,
-      installsLifetime: data.overview?.installsLifetime ?? 0,
-      uniqueInstallsLifetime: data.overview?.uniqueInstallsLifetime ?? 0,
-      activeInstalls24h: data.overview?.activeInstalls24h ?? 0,
-      activeInstalls30d,
-      activeInstallsLifetime: data.overview?.activeInstallsLifetime ?? 0,
-      sessions24h: data.overview?.sessions24h ?? 0,
-      sessionsLifetime: data.overview?.sessionsLifetime ?? 0,
-      countries24h: data.overview?.countries24h ?? 0,
-      countriesLifetime: data.overview?.countriesLifetime ?? 0,
-      usage24h: data.overview?.usage24h ?? EMPTY_USAGE,
-      usageLifetime: data.overview?.usageLifetime ?? EMPTY_USAGE,
+      installCompletions: data.overview?.installCompletions ?? 0,
+      uniqueInstalls: data.overview?.uniqueInstalls ?? (data.installSummaries ?? []).length,
+      activeInstalls,
+      sessionsStarted: data.overview?.sessionsStarted ?? 0,
+      countries: data.overview?.countries ?? 0,
+      usage: data.overview?.usage ?? EMPTY_USAGE,
     },
     countryLifetime: data.countryLifetime ?? [],
     installsPerDay: data.installsPerDay ?? [],
@@ -106,13 +108,15 @@ const loginToDashboard = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-const getDashboardData = createServerFn({ method: "GET" }).handler(async () => {
-  const session = await dashboardSession();
-  if (!session.data.authed) {
-    throw new Error("Not authorized");
-  }
-  return fetchSummary();
-});
+const getDashboardData = createServerFn({ method: "GET" })
+  .validator((range: DashboardRange) => range)
+  .handler(async ({ data: range }) => {
+    const session = await dashboardSession();
+    if (!session.data.authed) {
+      throw new Error("Not authorized");
+    }
+    return fetchSummary(range);
+  });
 
 const saveInstallNickname = createServerFn({ method: "POST" })
   .validator((payload: { installId: string; nickname: string }) => payload)
@@ -152,31 +156,45 @@ function DashboardRoute() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [selectedInstallId, setSelectedInstallId] = useState("all");
+  const [range, setRange] = useState<DashboardRange>("30d");
+  const latestRequestRef = useRef(0);
 
-  const loadData = async (isFirstLoad: boolean) => {
+  const loadData = async (requestedRange: DashboardRange, isFirstLoad: boolean) => {
+    const requestId = ++latestRequestRef.current;
     if (isFirstLoad) {
       setLoading(true);
     } else {
       setRefreshing(true);
     }
     try {
-      const result = normalizeDashboardData(await getDashboardData());
+      const result = normalizeDashboardData(await getDashboardData({ data: requestedRange }));
+      if (requestId !== latestRequestRef.current) return;
       setData(result);
+      setSelectedInstallId((current) =>
+        current === "all" ||
+        result?.installSummaries.some((install) => install.installId === current)
+          ? current
+          : "all",
+      );
       setLastUpdated(Date.now());
       setError(null);
     } catch (err) {
+      if (requestId !== latestRequestRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === latestRequestRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
     if (!isAuthed) return;
-    const interval = setInterval(() => void loadData(false), REFRESH_INTERVAL_MS);
+    void loadData(range, data === null);
+    const interval = setInterval(() => void loadData(range, false), REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [isAuthed]);
+  }, [isAuthed, range]);
 
   if (!isAuthed) {
     return (
@@ -190,7 +208,6 @@ function DashboardRoute() {
             try {
               await loginToDashboard({ data: password });
               setIsAuthed(true);
-              await loadData(true);
             } catch {
               setError("Invalid password");
             }
@@ -216,10 +233,6 @@ function DashboardRoute() {
     );
   }
 
-  if (!data && !loading) {
-    void loadData(true);
-  }
-
   const selectedInstall =
     data && selectedInstallId !== "all"
       ? data.installSummaries.find((install) => install.installId === selectedInstallId)
@@ -232,9 +245,10 @@ function DashboardRoute() {
     data?.installDaily.filter(
       (day) => selectedInstallId !== "all" && day.installId === selectedInstallId,
     ) ?? [];
+  const dataRange = data?.range ?? range;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-10">
+    <div className="mx-auto max-w-7xl px-6 pb-32 pt-10">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-mono text-lg font-semibold text-ink">togetherlink analytics</h1>
         <RefreshStatus refreshing={refreshing} lastUpdated={lastUpdated} />
@@ -255,60 +269,60 @@ function DashboardRoute() {
           <section className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <OverviewMetric
               label="Install completions"
-              value={formatNumber(data.overview.installs24h)}
-              period="last 24 hours"
-              lifetime={`${formatNumber(data.overview.installsLifetime)} lifetime`}
+              value={formatNumber(data.overview.installCompletions)}
+              period={rangeDescription(dataRange)}
             />
             <OverviewMetric
-              label="Anonymous users"
-              value={formatNumber(data.overview.activeInstalls24h)}
-              period="active last 24 hours"
-              lifetime={`${formatNumber(data.overview.uniqueInstallsLifetime)} ever seen`}
+              label="Active installs"
+              value={formatNumber(data.overview.activeInstalls)}
+              period={rangeDescription(dataRange)}
+              secondary={`${formatNumber(data.overview.uniqueInstalls)} seen`}
             />
             <OverviewMetric
               label="Sessions started"
-              value={formatNumber(data.overview.sessions24h)}
-              period="last 24 hours"
-              lifetime={`${formatNumber(data.overview.sessionsLifetime)} lifetime`}
+              value={formatNumber(data.overview.sessionsStarted)}
+              period={rangeDescription(dataRange)}
             />
             <OverviewMetric
               label="Token usage"
-              value={formatCompactTokens(totalTokens(data.overview.usage24h))}
-              period="last 24 hours"
-              lifetime={`${formatCompactTokens(totalTokens(data.overview.usageLifetime))} lifetime`}
+              value={formatCompactTokens(totalTokens(data.overview.usage))}
+              period={rangeDescription(dataRange)}
             />
             <OverviewMetric
               label="Total cost"
-              value={formatCost(data.overview.usage24h.costUsd)}
-              period="last 24 hours"
-              lifetime={`${formatCost(data.overview.usageLifetime.costUsd)} lifetime`}
+              value={formatCost(data.overview.usage.costUsd)}
+              period={rangeDescription(dataRange)}
             />
           </section>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <DailyActiveUsersChart
               rows={data.activeInstallsPerDay}
-              monthlyActiveUsers={data.overview.activeInstalls30d}
+              activeUsers={data.overview.activeInstalls}
+              range={dataRange}
             />
 
             <WorldUsageMap
               countries={data.countryLifetime}
-              countryCount={data.overview.countriesLifetime}
+              countryCount={data.overview.countries}
+              range={dataRange}
             />
 
             <UserLeaderboard
               installs={data.installSummaries}
               selectedInstallId={selectedInstallId}
               onSelectInstall={setSelectedInstallId}
+              range={dataRange}
             />
 
             <InstallPicker
               installs={data.installSummaries}
               selectedInstallId={selectedInstallId}
               onSelectedInstallIdChange={setSelectedInstallId}
+              range={dataRange}
               onNicknameSave={async (installId, nickname) => {
                 await saveInstallNickname({ data: { installId, nickname } });
-                await loadData(false);
+                await loadData(range, false);
               }}
             />
 
@@ -316,16 +330,22 @@ function DashboardRoute() {
               <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
                 <FocusMetric label="Selected install" value={installDisplayName(selectedInstall)} />
                 <FocusMetric label="Sessions ended" value={String(selectedInstall.sessionEnds)} />
-                <FocusMetric label="30d cost" value={`$${selectedInstall.costUsd.toFixed(4)}`} />
+                <FocusMetric
+                  label={`${rangeLabel(dataRange)} cost`}
+                  value={`$${selectedInstall.costUsd.toFixed(4)}`}
+                />
                 <StatCard
-                  title="Selected sessions ended / day"
-                  rows={focusedDaily.map((r) => [r.day, r.sessionsEnded])}
+                  title={`Selected sessions ended / ${rangeBucketLabel(dataRange)}`}
+                  rows={focusedDaily.map((r) => [
+                    formatBucketLabel(r.day, dataRange),
+                    r.sessionsEnded,
+                  ])}
                 />
                 <BarCard
-                  title="Selected cost / day"
+                  title={`Selected cost / ${rangeBucketLabel(dataRange)}`}
                   className="md:col-span-2"
                   items={focusedDaily.map((r) => ({
-                    label: r.day,
+                    label: formatBucketLabel(r.day, dataRange),
                     value: r.costUsd,
                     detail: `${formatTokens(r.promptTokens)} in (${formatTokens(r.cachedTokens)} cached, ${formatCacheHitRatio(r.cachedTokens, r.promptTokens)}) · ${formatTokens(r.completionTokens)} out`,
                     valueLabel: `$${r.costUsd.toFixed(4)}`,
@@ -344,16 +364,22 @@ function DashboardRoute() {
             />
 
             <StatCard
-              title="Installs completed / day"
-              rows={data.installsPerDay.map((r) => [r.day, r.count])}
+              title={`Installs completed / ${rangeBucketLabel(dataRange)}`}
+              rows={data.installsPerDay.map((r) => [formatBucketLabel(r.day, dataRange), r.count])}
             />
             <StatCard
-              title="Sessions started / day"
-              rows={data.sessionsStartedPerDay.map((r) => [r.day, r.count])}
+              title={`Sessions started / ${rangeBucketLabel(dataRange)}`}
+              rows={data.sessionsStartedPerDay.map((r) => [
+                formatBucketLabel(r.day, dataRange),
+                r.count,
+              ])}
             />
             <StatCard
-              title="Sessions ended / day"
-              rows={data.sessionsEndedPerDay.map((r) => [r.day, r.count])}
+              title={`Sessions ended / ${rangeBucketLabel(dataRange)}`}
+              rows={data.sessionsEndedPerDay.map((r) => [
+                formatBucketLabel(r.day, dataRange),
+                r.count,
+              ])}
             />
 
             <BarCard
@@ -405,13 +431,56 @@ function DashboardRoute() {
                 </div>
               </div>
               <div>
-                <div className="text-muted">Total events (30d)</div>
+                <div className="text-muted">Total events ({rangeLabel(dataRange)})</div>
                 <div className="font-mono text-base text-ink">{data.totalEvents}</div>
               </div>
             </div>
           </div>
         </>
       )}
+
+      <DashboardRangeFilter range={range} onRangeChange={setRange} refreshing={refreshing} />
+    </div>
+  );
+}
+
+function DashboardRangeFilter({
+  range,
+  onRangeChange,
+  refreshing,
+}: {
+  range: DashboardRange;
+  onRangeChange: (range: DashboardRange) => void;
+  refreshing: boolean;
+}) {
+  return (
+    <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-40 w-[calc(100%-2rem)] max-w-max -translate-x-1/2">
+      <div
+        className="flex items-center gap-1 rounded-xl bg-white/90 p-1.5 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_4px_12px_rgba(0,0,0,0.08),0_16px_40px_rgba(0,0,0,0.14)] backdrop-blur-xl"
+        role="group"
+        aria-label="Dashboard time range"
+        aria-busy={refreshing}
+      >
+        <span className="hidden pl-2 pr-1 text-xs font-medium text-muted sm:inline">View</span>
+        {DASHBOARD_RANGES.map((option) => {
+          const isSelected = range === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onRangeChange(option.value)}
+              aria-pressed={isSelected}
+              className={`min-h-10 rounded-md px-3 text-xs font-medium tabular-nums transition-[background-color,color,box-shadow,scale] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96] sm:px-4 ${
+                isSelected
+                  ? "bg-ink text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
+                  : "text-muted hover:bg-code hover:text-ink"
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -429,19 +498,25 @@ function OverviewMetric({
   label,
   value,
   period,
-  lifetime,
+  secondary,
 }: {
   label: string;
   value: string;
   period: string;
-  lifetime: string;
+  secondary?: string;
 }) {
   return (
     <div className="rounded-lg border border-line-strong bg-white p-4">
       <div className="text-xs font-medium uppercase tracking-wide text-faint">{label}</div>
-      <div className="mt-3 font-mono text-2xl font-semibold tracking-tight text-ink">{value}</div>
+      <div className="mt-3 font-mono text-2xl font-semibold tracking-tight tabular-nums text-ink">
+        {value}
+      </div>
       <div className="mt-1 text-xs text-muted">{period}</div>
-      <div className="mt-3 border-t border-line pt-2 font-mono text-xs text-muted">{lifetime}</div>
+      {secondary && (
+        <div className="mt-3 border-t border-line pt-2 font-mono text-xs tabular-nums text-muted">
+          {secondary}
+        </div>
+      )}
     </div>
   );
 }
@@ -450,10 +525,12 @@ function UserLeaderboard({
   installs,
   selectedInstallId,
   onSelectInstall,
+  range,
 }: {
   installs: InstallSummary[];
   selectedInstallId: string;
   onSelectInstall: (installId: string) => void;
+  range: DashboardRange;
 }) {
   const [metric, setMetric] = useState<LeaderboardMetric>("tokens");
   const rankedInstalls = [...installs]
@@ -476,7 +553,7 @@ function UserLeaderboard({
         <div>
           <h2 className="text-sm font-medium text-ink">Top 10 users</h2>
           <p className="mt-1 text-xs text-muted">
-            Anonymous installs ranked by activity in the last 30 days.
+            Anonymous installs ranked by activity {rangeDescription(range)}.
           </p>
         </div>
         <div className="flex rounded-md bg-code p-1" role="group" aria-label="Leaderboard metric">
@@ -572,15 +649,17 @@ function UserLeaderboard({
 
 function DailyActiveUsersChart({
   rows,
-  monthlyActiveUsers,
+  activeUsers,
+  range,
 }: {
   rows: DailyActiveUsers[];
-  monthlyActiveUsers: number;
+  activeUsers: number;
+  range: DashboardRange;
 }) {
-  const series = fillDailySeries(rows, 30);
+  const series = fillActivitySeries(rows, range);
   const latest = series.at(-1)?.count ?? 0;
   const peak = Math.max(0, ...series.map((row) => row.count));
-  const stickiness = monthlyActiveUsers > 0 ? latest / monthlyActiveUsers : 0;
+  const stickiness = activeUsers > 0 ? latest / activeUsers : 0;
   const chartWidth = 720;
   const chartTop = 12;
   const chartBottom = 168;
@@ -604,22 +683,25 @@ function DailyActiveUsersChart({
     <section className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-4">
         <div>
-          <h2 className="text-sm font-medium text-ink">Daily active users</h2>
+          <h2 className="text-sm font-medium text-ink">Active users over time</h2>
           <p className="mt-1 max-w-2xl text-xs text-muted">
-            Unique anonymous installs that launch the CLI or report session activity on each UTC
-            day.
+            Unique anonymous installs that launch the CLI or report session activity in each UTC{" "}
+            {rangeBucketLabel(range)}.
           </p>
         </div>
         <span className="rounded-full bg-code px-2.5 py-1 font-mono text-xs text-muted">
-          30-day view
+          {rangeLabel(range)}
         </span>
       </div>
 
       <div className="grid grid-cols-2 border-b border-line sm:grid-cols-4">
-        <DauMetric label="Today so far" value={formatNumber(latest)} />
-        <DauMetric label="30d active users" value={formatNumber(monthlyActiveUsers)} />
-        <DauMetric label="DAU / MAU" value={`${(stickiness * 100).toFixed(1)}%`} />
-        <DauMetric label="30d peak" value={formatNumber(peak)} />
+        <DauMetric
+          label={range === "24h" ? "Current hour" : "Today so far"}
+          value={formatNumber(latest)}
+        />
+        <DauMetric label={`${rangeLabel(range)} active`} value={formatNumber(activeUsers)} />
+        <DauMetric label="Latest / range" value={`${(stickiness * 100).toFixed(1)}%`} />
+        <DauMetric label={`${rangeLabel(range)} peak`} value={formatNumber(peak)} />
       </div>
 
       <div className="p-4">
@@ -632,10 +714,10 @@ function DailyActiveUsersChart({
             viewBox={`0 0 ${chartWidth} 180`}
             preserveAspectRatio="none"
             role="img"
-            aria-label={`Daily active users over the last 30 days, from ${series[0]?.count ?? 0} to ${latest}`}
+            aria-label={`Active users ${rangeDescription(range)}, from ${series[0]?.count ?? 0} to ${latest}`}
             className="h-44 w-full overflow-visible"
           >
-            <title>Daily active users over the last 30 days</title>
+            <title>Active users {rangeDescription(range)}</title>
             {[chartTop, chartTop + chartHeight / 2, chartBottom].map((y) => (
               <line
                 key={y}
@@ -671,14 +753,14 @@ function DailyActiveUsersChart({
             )}
           </svg>
           <div className="flex justify-between gap-3 font-mono text-xs text-faint">
-            <span>{formatChartDay(series[0]?.day)}</span>
+            <span>{formatChartBucket(series[0]?.day, range)}</span>
             <span>UTC</span>
-            <span>Today</span>
+            <span>Now</span>
           </div>
         </div>
         <p className="mt-2 text-xs text-muted">
-          DAU / MAU compares today&apos;s active installs with unique active installs across the
-          rolling 30-day window. Today&apos;s value is partial.
+          Latest / range compares the current {rangeBucketLabel(range)} with unique active installs{" "}
+          {rangeDescription(range)}. The latest value is partial.
         </p>
       </div>
     </section>
@@ -697,9 +779,11 @@ function DauMetric({ label, value }: { label: string; value: string }) {
 function WorldUsageMap({
   countries,
   countryCount,
+  range,
 }: {
   countries: CountryLifetime[];
   countryCount: number;
+  range: DashboardRange;
 }) {
   const [metric, setMetric] = useState<MapMetric>("installs");
   const values = countries.map((country) => mapMetricValue(country, metric));
@@ -721,8 +805,9 @@ function WorldUsageMap({
         <div>
           <h2 className="text-sm font-medium text-ink">Global adoption and usage</h2>
           <p className="mt-1 text-xs text-muted">
-            Lifetime activity across {countryCount} countr{countryCount === 1 ? "y" : "ies"}.
-            Country is resolved when each telemetry event reaches Vercel.
+            Activity {rangeDescription(range)} across {countryCount} countr
+            {countryCount === 1 ? "y" : "ies"}. Country is resolved when each telemetry event
+            reaches Vercel.
           </p>
         </div>
         <div className="flex flex-wrap gap-1 rounded-md bg-code p-1">
@@ -744,12 +829,12 @@ function WorldUsageMap({
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_310px]">
         <div className="relative min-h-[360px] bg-[#fbfcfd] p-4">
           <div className="absolute left-4 top-4 z-10 rounded-md border border-line bg-white/95 px-3 py-2 shadow-sm">
-            <div className="text-xs text-muted">Lifetime view</div>
+            <div className="text-xs text-muted">{rangeLabel(range)} view</div>
             <div className="mt-0.5 font-mono text-sm font-medium capitalize text-ink">{metric}</div>
           </div>
           <div className="dashboard-world-map flex min-h-[330px] items-center justify-center pt-8">
             <WorldMap
-              title={`World map colored by lifetime ${metric}`}
+              title={`World map colored by ${rangeLabel(range)} ${metric}`}
               data={mapData}
               size="responsive"
               color="#1d4ed8"
@@ -823,11 +908,13 @@ function InstallPicker({
   selectedInstallId,
   onSelectedInstallIdChange,
   onNicknameSave,
+  range,
 }: {
   installs: InstallSummary[];
   selectedInstallId: string;
   onSelectedInstallIdChange: (installId: string) => void;
   onNicknameSave: (installId: string, nickname: string) => Promise<void>;
+  range: DashboardRange;
 }) {
   const [editingInstall, setEditingInstall] = useState<InstallSummary | null>(null);
 
@@ -837,8 +924,8 @@ function InstallPicker({
         <div>
           <h2 className="text-sm font-medium text-ink">People / installs</h2>
           <p className="mt-1 text-xs text-muted">
-            {installs.length} anonymous install{installs.length === 1 ? "" : "s"} active in the last
-            30 days.
+            {installs.length} anonymous install{installs.length === 1 ? "" : "s"} seen{" "}
+            {rangeDescription(range)}.
           </p>
         </div>
         <select
@@ -1251,25 +1338,66 @@ function formatLeaderboardMetric(value: number, metric: LeaderboardMetric): stri
   return metric === "tokens" ? formatCompactTokens(value) : formatNumber(value);
 }
 
-function fillDailySeries(rows: DailyActiveUsers[], dayCount: number): DailyActiveUsers[] {
-  const countByDay = new Map(rows.map((row) => [row.day, row.count]));
-  const today = new Date();
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+function fillActivitySeries(rows: DailyActiveUsers[], range: DashboardRange): DailyActiveUsers[] {
+  const countByBucket = new Map(rows.map((row) => [row.day, row.count]));
+  const now = new Date();
+  const intervalMs = range === "24h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const currentBucket =
+    range === "24h"
+      ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours())
+      : Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const defaultBucketCount = range === "24h" ? 24 : range === "7d" ? 7 : 30;
+  const firstLifetimeBucket =
+    range === "lifetime" && rows[0]
+      ? Date.parse(`${rows[0].day.slice(0, 10)}T00:00:00Z`)
+      : currentBucket - (defaultBucketCount - 1) * intervalMs;
+  const bucketCount =
+    range === "lifetime"
+      ? Math.max(1, Math.floor((currentBucket - firstLifetimeBucket) / intervalMs) + 1)
+      : defaultBucketCount;
 
-  return Array.from({ length: dayCount }, (_, index) => {
-    const timestamp = todayUtc - (dayCount - index - 1) * 24 * 60 * 60 * 1000;
-    const day = new Date(timestamp).toISOString().slice(0, 10);
-    return { day, count: countByDay.get(day) ?? 0 };
+  return Array.from({ length: bucketCount }, (_, index) => {
+    const timestamp = currentBucket - (bucketCount - index - 1) * intervalMs;
+    const iso = new Date(timestamp).toISOString();
+    const day = range === "24h" ? `${iso.slice(0, 13)}:00` : iso.slice(0, 10);
+    return { day, count: countByBucket.get(day) ?? 0 };
   });
 }
 
-function formatChartDay(day?: string): string {
-  if (!day) return "-";
-  return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", {
+function formatChartBucket(bucket: string | undefined, range: DashboardRange): string {
+  if (!bucket) return "-";
+  const date = new Date(range === "24h" ? `${bucket}:00Z` : `${bucket}T00:00:00Z`);
+  return date.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
+    ...(range === "24h" ? { hour: "numeric", hour12: true } : {}),
     timeZone: "UTC",
   });
+}
+
+function formatBucketLabel(bucket: string, range: DashboardRange): string {
+  return formatChartBucket(bucket, range);
+}
+
+function rangeLabel(range: DashboardRange): string {
+  return DASHBOARD_RANGES.find((option) => option.value === range)?.label ?? range;
+}
+
+function rangeDescription(range: DashboardRange): string {
+  switch (range) {
+    case "24h":
+      return "in the last 24 hours";
+    case "7d":
+      return "in the last 7 days";
+    case "30d":
+      return "in the last 30 days";
+    case "lifetime":
+      return "across all time";
+  }
+}
+
+function rangeBucketLabel(range: DashboardRange): string {
+  return range === "24h" ? "hour" : "day";
 }
 
 function formatCompactTokens(n: number): string {
