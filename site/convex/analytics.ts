@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { filterDashboardEvents } from "./dashboardFilters";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -102,18 +103,34 @@ export const getDashboardSummary = query({
     range: v.optional(
       v.union(v.literal("24h"), v.literal("7d"), v.literal("30d"), v.literal("lifetime")),
     ),
+    installId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const range = args.range ?? "30d";
+    const selectedInstallId = args.installId?.trim() || undefined;
     const rangeDurationMs =
       range === "24h" ? 24 * HOUR_MS : range === "7d" ? 7 * DAY_MS : 30 * DAY_MS;
     const since = range === "lifetime" ? Number.NEGATIVE_INFINITY : Date.now() - rangeDurationMs;
 
     const allEvents = await ctx.db.query("telemetryEvents").withIndex("by_receivedAt").collect();
-    const events = allEvents.filter((event) => event.receivedAt >= since);
+    const events = filterDashboardEvents(allEvents, { since, installId: selectedInstallId });
 
     const nicknameRows = await ctx.db.query("installNicknames").collect();
     const nicknames = new Map(nicknameRows.map((row) => [row.installId, row.nickname]));
+    const installFilterOptionsById = new Map<
+      string,
+      { installId: string; nickname?: string; lastSeenAt: number }
+    >();
+    for (const event of allEvents) {
+      const existing = installFilterOptionsById.get(event.installId);
+      if (!existing || event.receivedAt > existing.lastSeenAt) {
+        installFilterOptionsById.set(event.installId, {
+          installId: event.installId,
+          nickname: nicknames.get(event.installId),
+          lastSeenAt: event.receivedAt,
+        });
+      }
+    }
 
     const installsByDay = new Map<string, Set<string>>();
     const activeInstallsByDay = new Map<string, Set<string>>();
@@ -343,6 +360,10 @@ export const getDashboardSummary = query({
 
     return {
       range,
+      selectedInstallId: selectedInstallId ?? "all",
+      installFilterOptions: Array.from(installFilterOptionsById.values()).sort(
+        (a, b) => b.lastSeenAt - a.lastSeenAt,
+      ),
       overview: {
         installCompletions,
         uniqueInstalls: installIds.size,

@@ -12,9 +12,11 @@ type InstallSummary = DashboardData["installSummaries"][number];
 type RecentSession = DashboardData["recentSessions"][number];
 type CountryLifetime = DashboardData["countryLifetime"][number];
 type DailyActiveUsers = DashboardData["activeInstallsPerDay"][number];
+type InstallFilterOption = DashboardData["installFilterOptions"][number];
 type MapMetric = "installs" | "sessions" | "tokens" | "cost";
 type LeaderboardMetric = "tokens" | "sessions";
 type DashboardRange = "24h" | "7d" | "30d" | "lifetime";
+type DashboardFilters = { range: DashboardRange; installId?: string };
 
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
@@ -46,13 +48,13 @@ async function dashboardSession() {
   });
 }
 
-async function fetchSummary(range: DashboardRange) {
+async function fetchSummary(filters: DashboardFilters) {
   const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
   if (!url) {
     return null;
   }
   const client = new ConvexHttpClient(url);
-  return client.query(api.analytics.getDashboardSummary, { range });
+  return client.query(api.analytics.getDashboardSummary, filters);
 }
 
 function normalizeDashboardData(value: unknown): DashboardSummary {
@@ -65,6 +67,14 @@ function normalizeDashboardData(value: unknown): DashboardSummary {
     ).length;
   return {
     range: data.range ?? "30d",
+    selectedInstallId: data.selectedInstallId ?? "all",
+    installFilterOptions:
+      data.installFilterOptions ??
+      (data.installSummaries ?? []).map((install) => ({
+        installId: install.installId,
+        nickname: install.nickname,
+        lastSeenAt: install.lastSeenAt,
+      })),
     overview: {
       installCompletions: data.overview?.installCompletions ?? 0,
       uniqueInstalls: data.overview?.uniqueInstalls ?? (data.installSummaries ?? []).length,
@@ -109,13 +119,13 @@ const loginToDashboard = createServerFn({ method: "POST" })
   });
 
 const getDashboardData = createServerFn({ method: "GET" })
-  .validator((range: DashboardRange) => range)
-  .handler(async ({ data: range }) => {
+  .validator((filters: DashboardFilters) => filters)
+  .handler(async ({ data: filters }) => {
     const session = await dashboardSession();
     if (!session.data.authed) {
       throw new Error("Not authorized");
     }
-    return fetchSummary(range);
+    return fetchSummary(filters);
   });
 
 const saveInstallNickname = createServerFn({ method: "POST" })
@@ -159,7 +169,11 @@ function DashboardRoute() {
   const [range, setRange] = useState<DashboardRange>("30d");
   const latestRequestRef = useRef(0);
 
-  const loadData = async (requestedRange: DashboardRange, isFirstLoad: boolean) => {
+  const loadData = async (
+    requestedRange: DashboardRange,
+    requestedInstallId: string,
+    isFirstLoad: boolean,
+  ) => {
     const requestId = ++latestRequestRef.current;
     if (isFirstLoad) {
       setLoading(true);
@@ -167,15 +181,13 @@ function DashboardRoute() {
       setRefreshing(true);
     }
     try {
-      const result = normalizeDashboardData(await getDashboardData({ data: requestedRange }));
+      const filters: DashboardFilters = {
+        range: requestedRange,
+        ...(requestedInstallId === "all" ? {} : { installId: requestedInstallId }),
+      };
+      const result = normalizeDashboardData(await getDashboardData({ data: filters }));
       if (requestId !== latestRequestRef.current) return;
       setData(result);
-      setSelectedInstallId((current) =>
-        current === "all" ||
-        result?.installSummaries.some((install) => install.installId === current)
-          ? current
-          : "all",
-      );
       setLastUpdated(Date.now());
       setError(null);
     } catch (err) {
@@ -191,10 +203,13 @@ function DashboardRoute() {
 
   useEffect(() => {
     if (!isAuthed) return;
-    void loadData(range, data === null);
-    const interval = setInterval(() => void loadData(range, false), REFRESH_INTERVAL_MS);
+    void loadData(range, selectedInstallId, data === null);
+    const interval = setInterval(
+      () => void loadData(range, selectedInstallId, false),
+      REFRESH_INTERVAL_MS,
+    );
     return () => clearInterval(interval);
-  }, [isAuthed, range]);
+  }, [isAuthed, range, selectedInstallId]);
 
   if (!isAuthed) {
     return (
@@ -233,18 +248,17 @@ function DashboardRoute() {
     );
   }
 
+  const dataInstallId = data?.selectedInstallId ?? "all";
   const selectedInstall =
-    data && selectedInstallId !== "all"
-      ? data.installSummaries.find((install) => install.installId === selectedInstallId)
+    data && dataInstallId !== "all"
+      ? data.installSummaries.find((install) => install.installId === dataInstallId)
       : null;
-  const focusedSessions =
-    data?.recentSessions
-      .filter((session) => selectedInstallId === "all" || session.installId === selectedInstallId)
-      .slice(0, RECENT_SESSIONS_LIMIT) ?? [];
-  const focusedDaily =
-    data?.installDaily.filter(
-      (day) => selectedInstallId !== "all" && day.installId === selectedInstallId,
-    ) ?? [];
+  const selectedInstallOption =
+    dataInstallId === "all"
+      ? null
+      : data?.installFilterOptions.find((install) => install.installId === dataInstallId);
+  const focusedSessions = data?.recentSessions.slice(0, RECENT_SESSIONS_LIMIT) ?? [];
+  const focusedDaily = dataInstallId === "all" ? [] : (data?.installDaily ?? []);
   const dataRange = data?.range ?? range;
 
   return (
@@ -317,12 +331,13 @@ function DashboardRoute() {
 
             <InstallPicker
               installs={data.installSummaries}
+              installOptions={data.installFilterOptions}
               selectedInstallId={selectedInstallId}
               onSelectedInstallIdChange={setSelectedInstallId}
               range={dataRange}
               onNicknameSave={async (installId, nickname) => {
                 await saveInstallNickname({ data: { installId, nickname } });
-                await loadData(range, false);
+                await loadData(range, selectedInstallId, false);
               }}
             />
 
@@ -356,30 +371,18 @@ function DashboardRoute() {
 
             <RecentSessionsTable
               title={
-                selectedInstall
-                  ? `Recent sessions for ${installDisplayName(selectedInstall)}`
+                selectedInstallOption
+                  ? `Recent sessions for ${installDisplayName(selectedInstallOption)}`
                   : "Recent sessions"
               }
               sessions={focusedSessions}
             />
 
-            <StatCard
-              title={`Installs completed / ${rangeBucketLabel(dataRange)}`}
-              rows={data.installsPerDay.map((r) => [formatBucketLabel(r.day, dataRange), r.count])}
-            />
-            <StatCard
-              title={`Sessions started / ${rangeBucketLabel(dataRange)}`}
-              rows={data.sessionsStartedPerDay.map((r) => [
-                formatBucketLabel(r.day, dataRange),
-                r.count,
-              ])}
-            />
-            <StatCard
-              title={`Sessions ended / ${rangeBucketLabel(dataRange)}`}
-              rows={data.sessionsEndedPerDay.map((r) => [
-                formatBucketLabel(r.day, dataRange),
-                r.count,
-              ])}
+            <ActivitySummary
+              range={dataRange}
+              installsCompleted={sumCountRows(data.installsPerDay)}
+              sessionsStarted={sumCountRows(data.sessionsStartedPerDay)}
+              sessionsEnded={sumCountRows(data.sessionsEndedPerDay)}
             />
 
             <BarCard
@@ -905,12 +908,14 @@ function WorldUsageMap({
 
 function InstallPicker({
   installs,
+  installOptions,
   selectedInstallId,
   onSelectedInstallIdChange,
   onNicknameSave,
   range,
 }: {
   installs: InstallSummary[];
+  installOptions: InstallFilterOption[];
   selectedInstallId: string;
   onSelectedInstallIdChange: (installId: string) => void;
   onNicknameSave: (installId: string, nickname: string) => Promise<void>;
@@ -934,10 +939,9 @@ function InstallPicker({
           className="min-w-56 rounded-md border border-line-strong bg-white px-3 py-2 font-mono text-sm text-ink outline-none focus:border-ink"
         >
           <option value="all">All installs</option>
-          {installs.map((install) => (
+          {installOptions.map((install) => (
             <option key={install.installId} value={install.installId}>
-              {installDisplayName(install)} · {install.sessionEnds} sessions ·{" "}
-              {formatDateTime(install.lastSeenAt)}
+              {installDisplayName(install)} · last seen {formatDateTime(install.lastSeenAt)}
             </option>
           ))}
         </select>
@@ -1259,6 +1263,45 @@ function RefreshStatus({
   );
 }
 
+function ActivitySummary({
+  range,
+  installsCompleted,
+  sessionsStarted,
+  sessionsEnded,
+}: {
+  range: DashboardRange;
+  installsCompleted: number;
+  sessionsStarted: number;
+  sessionsEnded: number;
+}) {
+  const metrics = [
+    { label: "Installs completed", value: installsCompleted },
+    { label: "Sessions started", value: sessionsStarted },
+    { label: "Sessions ended", value: sessionsEnded },
+  ];
+
+  return (
+    <section
+      className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong"
+      aria-label="Activity totals"
+    >
+      <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        {metrics.map((metric) => (
+          <div key={metric.label} className="px-4 py-3">
+            <div className="text-xs font-medium text-muted">{metric.label}</div>
+            <div className="mt-1 flex items-baseline justify-between gap-3">
+              <span className="font-mono text-lg font-semibold tabular-nums text-ink">
+                {formatNumber(metric.value)}
+              </span>
+              <span className="text-xs text-faint">{rangeLabel(range)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function StatCard({ title, rows }: { title: string; rows: Array<[string, number]> }) {
   const total = rows.reduce((sum, [, count]) => sum + count, 0);
   return (
@@ -1321,6 +1364,10 @@ function formatTokens(n: number): string {
 
 function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
+}
+
+function sumCountRows(rows: Array<{ count: number }>): number {
+  return rows.reduce((sum, row) => sum + row.count, 0);
 }
 
 function totalTokens(usage: { promptTokens: number; completionTokens: number }): number {
