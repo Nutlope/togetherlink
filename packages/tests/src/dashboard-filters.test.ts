@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { filterDashboardEvents } from "../../site/convex/dashboardFilters.js";
+import { filterDashboardEvents } from "../../../site/convex/dashboardFilters.js";
 
 describe("dashboard filters", () => {
   test("combines the date range and selected install across dashboard events", () => {
