@@ -1,4 +1,5 @@
 import { assert, assertCommandExists } from "../assert.js";
+import { DEFAULT_MODEL } from "@togetherlink/models";
 import { runCommand } from "../command.js";
 import { asRecord, jsonLines } from "../json-lines.js";
 import type { Scenario } from "../types.js";
@@ -92,20 +93,20 @@ export function piScenarios(): Scenario[] {
     {
       name: "pi: together model list includes multiple models and vision metadata",
       run: async (context) => {
-        const codexModelResult = await runCommand(
+        const defaultModelResult = await runCommand(
           context,
-          "pi-model-list-codex-default",
+          "pi-model-list-default",
           process.execPath,
-          [context.cliBin, "pi", "--", "--list-models", "GLM-5.2"],
+          [context.cliBin, "pi", "--", "--list-models", "Kimi-K3"],
         );
-        assert(codexModelResult.status === 0, `exit ${codexModelResult.status}`);
+        assert(defaultModelResult.status === 0, `exit ${defaultModelResult.status}`);
         assert(
-          codexModelResult.stdout.includes("zai-org/GLM-5.2"),
-          "missing registered Codex default model",
+          defaultModelResult.stdout.includes(DEFAULT_MODEL.id),
+          "missing registered default model",
         );
         assert(
-          !codexModelResult.stderr.includes("Using custom model id"),
-          "Codex default should be registered in Pi",
+          !defaultModelResult.stderr.includes("Using custom model id"),
+          "default model should be registered in Pi",
         );
 
         const result = await runCommand(context, "pi-model-list", process.execPath, [

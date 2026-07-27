@@ -152,11 +152,10 @@ function GlmCodexGuide() {
             </NumberedStep>
             <NumberedStep number="3" title="Start Codex on GLM 5.2">
               <p className="m-0 mb-4">
-                GLM 5.2 is the current default, so the memorable <code>tcodex</code> shortcut is all
-                you need for the first run. Later, you will see the full command for scripts and
-                one-shot tasks.
+                Select GLM 5.2 explicitly because Kimi K3 is the current default. The model flag
+                belongs before the Codex subcommand.
               </p>
-              <CommandBlock command="tcodex" />
+              <CommandBlock command="togetherlink --model zai-org/GLM-5.2 codex" />
             </NumberedStep>
           </section>
 
@@ -241,7 +240,8 @@ function GlmCodexGuide() {
                 You can also provide <code>TOGETHER_API_KEY</code> in the environment.
               </TroubleshootingItem>
               <TroubleshootingItem title="The output says provider: openai">
-                Stop the process and relaunch with <code>tcodex</code>. A plain <code>codex</code>{" "}
+                Stop the process and relaunch with{" "}
+                <code>togetherlink --model zai-org/GLM-5.2 codex</code>. A plain <code>codex</code>{" "}
                 command intentionally uses your normal provider.
               </TroubleshootingItem>
               <TroubleshootingItem title="Codex does not recognize an option">

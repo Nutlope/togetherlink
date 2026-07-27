@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { GLM_5_2, SELECTABLE_MODELS } from "@togetherlink/models";
+import { DEFAULT_MODEL, SELECTABLE_MODELS } from "@togetherlink/models";
 import { assert, assertCommandExists } from "../assert.js";
 import { runCommand } from "../command.js";
 import { asRecord, jsonLines } from "../json-lines.js";
@@ -47,7 +47,7 @@ export function grokScenarios(): Scenario[] {
         assert(end, "missing end event");
         assert(asNumber(asRecord(end.usage).total_tokens) > 0, "missing token usage");
         const modelUsage = asRecord(end.modelUsage);
-        assert(GLM_5_2.id in modelUsage, "missing Together model usage");
+        assert(DEFAULT_MODEL.id in modelUsage, "missing default Together model usage");
       },
     },
     {

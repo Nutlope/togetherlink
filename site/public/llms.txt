@@ -113,11 +113,11 @@ Backups of your original config live under `~/.togetherlink/backup/codex-app/`.
 
 ## Models
 
-togetherlink routes to a curated set of Together AI models. The default for Codex and Claude Code is GLM 5.2.
+togetherlink routes to a curated set of Together AI models. The default for every coding harness is Kimi K3.
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.6.7):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.7.0):
 
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
@@ -125,11 +125,12 @@ togetherlink --model moonshotai/Kimi-K2.6 claude -p "task"
 togetherlink --main together-kimi-k2-7-code claude -p "task"   # Claude matches alias OR id
 ```
 
-Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (GLM 5.2), not the model you asked for. Always use the long form with the flag first.
+Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (Kimi K3), not the model you asked for. Always use the long form with the flag first.
 
 Selectable models (Together API id):
 
-- `zai-org/GLM-5.2` — GLM 5.2 · default. Text-only, 256K context, reasoning. The default coding model.
+- `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
+- `zai-org/GLM-5.2` — GLM 5.2. Text-only, 256K context, reasoning.
 - `moonshotai/Kimi-K2.7-Code` — Kimi K2.7 Code. Vision-capable, also used as the vision subagent.
 - `moonshotai/Kimi-K2.6` — Kimi K2.6. Vision, 256K context, reasoning.
 - `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.

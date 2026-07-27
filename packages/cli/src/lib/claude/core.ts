@@ -1,7 +1,7 @@
 import {
   CLAUDE_HAIKU_MODEL_SELECTION,
-  CLAUDE_MODEL_CAPABILITIES,
   CLAUDE_SUPPORTED_MODELS,
+  claudeModelCapabilities,
   resolveClaudeModel,
   type ClaudeModelSelection,
 } from "./defaults.js";
@@ -122,7 +122,12 @@ function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string):
   env.ANTHROPIC_CUSTOM_MODEL_OPTION = selected.alias;
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = selected.definition.name;
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = "Local Anthropic-to-Together proxy";
-  env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES = CLAUDE_MODEL_CAPABILITIES;
+  const capabilities = claudeModelCapabilities(selected.definition);
+  if (capabilities) {
+    env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES = capabilities;
+  } else {
+    delete env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES;
+  }
 }
 
 function setTierModelEnv(

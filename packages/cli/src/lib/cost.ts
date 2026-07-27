@@ -1,4 +1,9 @@
-import { GLM_5_2, VISION_MODELS, costPerToken, type ModelDefinition } from "@togetherlink/models";
+import {
+  DEFAULT_MODEL,
+  VISION_MODELS,
+  costPerToken,
+  type ModelDefinition,
+} from "@togetherlink/models";
 import { APPROX_CHARS_PER_TOKEN } from "./claude/context-budget.js";
 
 /**
@@ -104,7 +109,7 @@ export class CostTracker {
     },
   };
 
-  constructor(mainModel: ModelDefinition = GLM_5_2) {
+  constructor(mainModel: ModelDefinition = DEFAULT_MODEL) {
     this.defaultMainModel = mainModel;
   }
 

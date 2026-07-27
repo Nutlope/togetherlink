@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { GLM_5_2 } from "@togetherlink/models";
+import { DEFAULT_MODEL, GLM_5_2 } from "@togetherlink/models";
 import {
   appRegistrationPath,
   clearAppRegistration,
@@ -96,7 +96,7 @@ describe("daemon lazy codex-app session restore", () => {
     const response = await fetch(`${daemon.url}/session/${TOKEN}/v1/models`);
     expect(response.status).toBe(200);
     const catalog = (await response.json()) as { models?: Array<{ slug?: string }> };
-    expect(catalog.models?.[0]?.slug).toBe(GLM_5_2.id);
+    expect(catalog.models?.[0]?.slug).toBe(DEFAULT_MODEL.id);
 
     const sessions = await listSessions();
     expect(sessions).toHaveLength(1);

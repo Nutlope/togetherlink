@@ -1,6 +1,9 @@
 import {
+  DEFAULT_MODEL,
   GLM_5_2,
   GLM_5_2_ANTHROPIC_CAPABILITIES,
+  KIMI_K3,
+  KIMI_K3_ANTHROPIC_CAPABILITIES,
   KIMI_K2_7_CODE,
   SELECTABLE_MODELS,
   resolveModelByKeys,
@@ -8,7 +11,15 @@ import {
 } from "@togetherlink/models";
 
 export const CLAUDE_LOCAL_PROXY_HOST = "127.0.0.1";
-export const CLAUDE_MODEL_CAPABILITIES = GLM_5_2_ANTHROPIC_CAPABILITIES;
+export function claudeModelCapabilities(model: ModelDefinition): string | undefined {
+  if (model.id === GLM_5_2.id) {
+    return GLM_5_2_ANTHROPIC_CAPABILITIES;
+  }
+  if (model.id === KIMI_K3.id) {
+    return KIMI_K3_ANTHROPIC_CAPABILITIES;
+  }
+  return undefined;
+}
 
 export type ClaudeModelSelection = {
   alias: string;
@@ -48,7 +59,7 @@ export function resolveClaudeModel(value: string | undefined): ClaudeModelSelect
     CLAUDE_SUPPORTED_MODELS.map((model) => model.definition),
     value,
     [(model) => model.anthropicAlias, (model) => model.id],
-    GLM_5_2.id,
+    DEFAULT_MODEL.id,
   );
   if (!found) {
     const expected = CLAUDE_SUPPORTED_MODELS.map(

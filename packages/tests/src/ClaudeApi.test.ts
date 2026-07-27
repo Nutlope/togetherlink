@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2, type ModelDefinition } from "../../models/src/index.js";
+import { GLM_5_2, KIMI_K3, KIMI_K2_7_CODE, type ModelDefinition } from "../../models/src/index.js";
 import {
   buildClaudeEnv,
   buildClaudeLaunchArgs,
@@ -56,6 +56,36 @@ describe("Claude proxy compatibility API", () => {
         process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = previous;
       }
     }
+  });
+
+  test("advertises only capabilities verified for the selected custom model", () => {
+    const glmEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    const kimiEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+      modelName: KIMI_K3.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    const kimi27Env = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: KIMI_K2_7_CODE.anthropicAlias ?? KIMI_K2_7_CODE.id,
+      modelName: KIMI_K2_7_CODE.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+
+    expect(glmEnv.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toContain("max_effort");
+    expect(kimiEnv.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBe(
+      "effort,max_effort,thinking,interleaved_thinking",
+    );
+    expect(kimi27Env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBeUndefined();
   });
 
   test("preserves a user-provided Claude Code max output token setting", () => {
@@ -811,6 +841,49 @@ describe("Claude proxy compatibility API", () => {
       reasoning_effort: "max",
       stream: false,
     });
+  });
+
+  test("forwards every supported Kimi K3 reasoning effort", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "K3_REASONING_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    for (const effort of ["low", "high", "max"]) {
+      const response = await callClaudeProxy({
+        method: "POST",
+        url: "/v1/messages",
+        body: JSON.stringify({
+          model: KIMI_K3.anthropicAlias,
+          max_tokens: 32_000,
+          effort,
+          messages: [{ role: "user", content: `Use ${effort} reasoning.` }],
+        }),
+        options: {
+          modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+          targetModelId: KIMI_K3.id,
+          modelName: KIMI_K3.name,
+          modelDefinition: KIMI_K3,
+        },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(upstreamBodies.map((body) => body.reasoning_effort)).toEqual(["low", "high", "max"]);
+    expect(upstreamBodies.every((body) => body.model === KIMI_K3.id)).toBe(true);
   });
 
   test("caps streamed normal Claude requests before forwarding to Together", async () => {

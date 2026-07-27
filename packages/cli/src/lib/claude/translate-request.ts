@@ -1,4 +1,4 @@
-import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
+import { GLM_5_2, KIMI_K3, type ModelDefinition } from "@togetherlink/models";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
   runExaSearchDetailed as runSharedExaSearchDetailed,
@@ -24,7 +24,7 @@ type DebugOptions = {
   debug?: boolean | undefined;
 };
 
-type TogetherReasoningEffort = "max";
+type TogetherReasoningEffort = "low" | "high" | "max";
 
 const TOGETHERLINK_IDENTITY_PROMPT =
   "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
@@ -33,27 +33,37 @@ export function togetherReasoningEffort(
   body: AnthropicMessagesRequest,
   targetModel: ModelDefinition,
 ): TogetherReasoningEffort | undefined {
-  if (targetModel.id !== GLM_5_2.id) {
-    return undefined;
+  const requestedEffort = body.reasoning_effort ?? body.effort ?? body.thinking?.effort;
+  if (targetModel.id === GLM_5_2.id) {
+    return normalizeGlmReasoningEffort(requestedEffort);
   }
-
-  const explicitEffort = normalizeTogetherReasoningEffort(
-    body.reasoning_effort ?? body.effort ?? body.thinking?.effort,
-  );
-  if (explicitEffort) {
-    return explicitEffort;
+  if (targetModel.id === KIMI_K3.id) {
+    return normalizeKimiK3ReasoningEffort(requestedEffort);
   }
-
   return undefined;
 }
 
-function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
+function normalizeGlmReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
 
   const effort = value.toLowerCase();
   if (effort === "max" || effort === "xhigh") {
+    return "max";
+  }
+  return undefined;
+}
+
+function normalizeKimiK3ReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const effort = value.toLowerCase();
+  if (effort === "low" || effort === "high" || effort === "max") {
+    return effort;
+  }
+  if (effort === "xhigh") {
     return "max";
   }
   return undefined;

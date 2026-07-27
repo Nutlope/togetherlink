@@ -1,5 +1,5 @@
 import {
-  GLM_5_2,
+  DEFAULT_MODEL,
   SELECTABLE_MODELS,
   VISION_PRIMARY,
   VISION_PROMPT,
@@ -11,7 +11,7 @@ export const OPENCODE_PROVIDER_ID = "togetherai";
 // Real Together model id. OpenCode-facing selector is
 // `${OPENCODE_PROVIDER_ID}/${OPENCODE_DEFAULT_MODEL}` (slash form, per the
 // OpenCode config schema: "provider/model, eg anthropic/claude-2").
-export const OPENCODE_DEFAULT_MODEL = GLM_5_2.id;
+export const OPENCODE_DEFAULT_MODEL = DEFAULT_MODEL.id;
 
 /**
  * The shape of a model entry inside an OpenCode provider's `models` block.

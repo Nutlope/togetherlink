@@ -8,7 +8,7 @@ const githubUrl = "https://github.com/Nutlope/togetherlink";
 const siteUrl = "https://togetherlink.vercel.app/";
 const pageTitle = "Use Together AI Models in Claude Code, Codex & ChatGPT";
 const pageDescription =
-  "Run GLM 5.2 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, and the ChatGPT desktop app with togetherlink.";
+  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, and the ChatGPT desktop app with togetherlink.";
 const togetherReferralUrl =
   "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
@@ -27,7 +27,7 @@ const features = [
     tagTone: "live",
     body: (
       <>
-        OpenCode launches with Together GLM 5.2 wired in - config injected only for that launch.
+        OpenCode launches with Together Kimi K3 wired in - config injected only for that launch.
         Close it and your OpenCode setup is exactly as it was, while sessions can still resume.
       </>
     ),
@@ -325,7 +325,7 @@ function Home() {
           in Codex and Claude Code
         </h1>
         <p className="mx-auto mt-5 mb-9 max-w-[560px] text-pretty text-[19px] leading-normal text-muted">
-          Install once, then run GLM 5.2 in Claude Code or Codex with short commands. TogetherLink
+          Install once, then run Kimi K3 in Claude Code or Codex with short commands. TogetherLink
           injects Together settings for that run only, so your normal tool configs stay clean.
         </p>
 
