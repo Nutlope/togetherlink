@@ -100,6 +100,9 @@ describe("shared harness default", () => {
 
   it("advertises Claude custom-model capabilities only when verified per model", () => {
     expect(claudeModelCapabilities(GLM_5_2)).toBeTruthy();
+    expect(claudeModelCapabilities(KIMI_K3)).toBe(
+      "effort,max_effort,thinking,interleaved_thinking",
+    );
     expect(claudeModelCapabilities(KIMI_K2_7_CODE)).toBeUndefined();
   });
 });

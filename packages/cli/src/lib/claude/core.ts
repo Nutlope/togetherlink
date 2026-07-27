@@ -16,6 +16,9 @@ const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
   "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
   "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
@@ -109,16 +112,34 @@ export function buildClaudeEnv({
 function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string): void {
   const selected = resolveClaudeModel(selectedAlias);
   const defaultModel = CLAUDE_SUPPORTED_MODELS[0] ?? selected;
-  const secondaryModel =
+  const fableModel =
     CLAUDE_SUPPORTED_MODELS.find((model) => model.alias !== defaultModel.alias) ?? selected;
+  const sonnetModel =
+    CLAUDE_SUPPORTED_MODELS.find(
+      (model) =>
+        model.alias !== defaultModel.alias &&
+        model.alias !== fableModel.alias &&
+        model.alias !== CLAUDE_HAIKU_MODEL_SELECTION.alias,
+    ) ?? fableModel;
 
   setTierModelEnv(env, "OPUS", defaultModel);
-  setTierModelEnv(env, "SONNET", secondaryModel);
+  setTierModelEnv(env, "FABLE", fableModel);
+  setTierModelEnv(env, "SONNET", sonnetModel);
   setTierModelEnv(env, "HAIKU", CLAUDE_HAIKU_MODEL_SELECTION);
 
   // Claude Code currently exposes a single generic custom-model slot in
-  // addition to the three tier slots. Point that at the selected backend so a
-  // `--main together-kimi-k2-7-code` launch also marks Kimi as the custom row.
+  // addition to the tier slots. Only use it when the selected backend is not
+  // already represented; otherwise Claude renders a duplicate menu row.
+  const tierAliases = new Set([
+    defaultModel.alias,
+    fableModel.alias,
+    sonnetModel.alias,
+    CLAUDE_HAIKU_MODEL_SELECTION.alias,
+  ]);
+  if (tierAliases.has(selected.alias)) {
+    clearCustomModelEnv(env);
+    return;
+  }
   env.ANTHROPIC_CUSTOM_MODEL_OPTION = selected.alias;
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = selected.definition.name;
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = "Local Anthropic-to-Together proxy";
@@ -130,9 +151,16 @@ function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string):
   }
 }
 
+function clearCustomModelEnv(env: NodeJS.ProcessEnv): void {
+  delete env.ANTHROPIC_CUSTOM_MODEL_OPTION;
+  delete env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME;
+  delete env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION;
+  delete env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES;
+}
+
 function setTierModelEnv(
   env: NodeJS.ProcessEnv,
-  tier: "OPUS" | "SONNET" | "HAIKU",
+  tier: "OPUS" | "FABLE" | "SONNET" | "HAIKU",
   model: ClaudeModelSelection,
 ): void {
   const prefix = `ANTHROPIC_DEFAULT_${tier}_MODEL`;

@@ -1,7 +1,14 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2, KIMI_K3, KIMI_K2_7_CODE, type ModelDefinition } from "../../models/src/index.js";
+import {
+  GLM_5_2,
+  KIMI_K2_6,
+  KIMI_K3,
+  KIMI_K2_7_CODE,
+  MINIMAX_M3,
+  type ModelDefinition,
+} from "../../models/src/index.js";
 import {
   buildClaudeEnv,
   buildClaudeLaunchArgs,
@@ -58,34 +65,47 @@ describe("Claude proxy compatibility API", () => {
     }
   });
 
-  test("advertises only capabilities verified for the selected custom model", () => {
-    const glmEnv = buildClaudeEnv({
-      apiKey: "test-together-key",
-      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
-      modelName: GLM_5_2.name,
-      proxyUrl: "http://127.0.0.1:7878/session/test",
-      authToken: "local-token",
-    });
-    const kimiEnv = buildClaudeEnv({
+  test("emits distinct Together tiers without native Fable or a duplicate custom row", () => {
+    const env = buildClaudeEnv({
       apiKey: "test-together-key",
       modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
       modelName: KIMI_K3.name,
       proxyUrl: "http://127.0.0.1:7878/session/test",
       authToken: "local-token",
     });
-    const kimi27Env = buildClaudeEnv({
+
+    const tierModels = [
+      env.ANTHROPIC_DEFAULT_FABLE_MODEL,
+      env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+      env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ];
+    expect(tierModels).toEqual([
+      GLM_5_2.anthropicAlias,
+      KIMI_K3.anthropicAlias,
+      KIMI_K2_6.id,
+      EXPECTED_HAIKU_MODEL_ID,
+    ]);
+    expect(new Set(tierModels).size).toBe(tierModels.length);
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME).toBe(GLM_5_2.name);
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION).not.toContain("Fable");
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBeUndefined();
+  });
+
+  test("keeps the custom row for a selected model not represented by a tier", () => {
+    const env = buildClaudeEnv({
       apiKey: "test-together-key",
-      modelId: KIMI_K2_7_CODE.anthropicAlias ?? KIMI_K2_7_CODE.id,
-      modelName: KIMI_K2_7_CODE.name,
+      modelId: MINIMAX_M3.id,
+      modelName: MINIMAX_M3.name,
       proxyUrl: "http://127.0.0.1:7878/session/test",
       authToken: "local-token",
     });
 
-    expect(glmEnv.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toContain("max_effort");
-    expect(kimiEnv.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBe(
-      "effort,max_effort,thinking,interleaved_thinking",
-    );
-    expect(kimi27Env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(MINIMAX_M3.id);
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBe(MINIMAX_M3.name);
   });
 
   test("preserves a user-provided Claude Code max output token setting", () => {
