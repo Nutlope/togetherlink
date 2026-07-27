@@ -7,6 +7,7 @@ import {
   KIMI_K3,
   KIMI_K2_7_CODE,
   MINIMAX_M3,
+  QWEN_3_7_MAX,
   SELECTABLE_MODELS,
   type ModelDefinition,
 } from "../../models/src/index.js";
@@ -83,7 +84,7 @@ describe("Claude proxy compatibility API", () => {
     ];
     expect(tierModels).toEqual([
       GLM_5_2.anthropicAlias,
-      KIMI_K3.anthropicAlias,
+      `${KIMI_K3.anthropicAlias}[1m]`,
       KIMI_K2_6.id,
       EXPECTED_HAIKU_MODEL_ID,
     ]);
@@ -94,6 +95,37 @@ describe("Claude proxy compatibility API", () => {
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBeUndefined();
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION).toBeUndefined();
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBeUndefined();
+  });
+
+  test("marks 1M Together models with Claude Code's [1m] client hint", () => {
+    const kimiEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+      modelName: KIMI_K3.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(kimiEnv.ANTHROPIC_MODEL).toBe(`${KIMI_K3.anthropicAlias}[1m]`);
+    expect(kimiEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe(`${KIMI_K3.anthropicAlias}[1m]`);
+
+    const qwenEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: QWEN_3_7_MAX.id,
+      modelName: QWEN_3_7_MAX.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(qwenEnv.ANTHROPIC_MODEL).toBe(`${QWEN_3_7_MAX.id}[1m]`);
+    expect(qwenEnv.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(`${QWEN_3_7_MAX.id}[1m]`);
+
+    const glmEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(glmEnv.ANTHROPIC_MODEL).toBe(GLM_5_2.anthropicAlias);
   });
 
   test("keeps the custom row for a selected model not represented by a tier", () => {

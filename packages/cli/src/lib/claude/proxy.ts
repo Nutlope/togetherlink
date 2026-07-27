@@ -86,13 +86,9 @@ export async function handleProxyRequest(
   }
 
   if (req.method === "GET" && path === "/v1/models") {
-    // Claude Code's model discovery (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)
-    // reads `max_input_tokens` as the context window and `max_tokens` as the
-    // output cap per model object (since Mar 2026 — there is no `context_window`
-    // field). Without these, Claude Code falls back to a ~200K default and
-    // auto-compacts earlier than the selected model's true window, and the
-    // context indicator shows the wrong "% used". Advertise the real limits so
-    // compaction triggers at the right point.
+    // Keep the standard model metadata available to gateway clients. Claude
+    // Code discovery currently reads only `id` and `display_name`; its local
+    // context budget is selected by the `[1m]` model-id hint in core.ts.
     writeJson(res, 200, {
       data: CLAUDE_SUPPORTED_MODELS.map(claudeModelResponse),
     });

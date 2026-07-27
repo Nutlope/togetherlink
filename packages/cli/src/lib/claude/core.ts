@@ -35,6 +35,7 @@ const CONFLICTING_ENV_KEYS = [
 // independently caps ordinary upstream turns at 28k, while compaction keeps
 // the full budget requested by Claude Code.
 const DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS = 32_000;
+const CLAUDE_EXTENDED_CONTEXT_TOKENS = 1_000_000;
 
 export type ClaudeLaunchOptions = {
   apiKey: string;
@@ -70,7 +71,10 @@ export function buildClaudeEnv({
   // local daemon without entering that custom-key flow.
   env.ANTHROPIC_AUTH_TOKEN = authToken;
   env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1";
-  env.ANTHROPIC_MODEL = modelId;
+  // Claude Code does not derive its local context budget from gateway model
+  // metadata. It recognizes the `[1m]` client hint instead, then strips that
+  // suffix before sending the model id to the proxy.
+  env.ANTHROPIC_MODEL = claudeCodeModelId(resolveClaudeModel(modelId));
   // Claude Code disables tool search automatically when ANTHROPIC_BASE_URL is
   // customized unless the feature is explicitly enabled. TogetherLink forwards
   // the required tool_reference blocks, so opt in by default. Preserve
@@ -140,7 +144,7 @@ function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string):
     clearCustomModelEnv(env);
     return;
   }
-  env.ANTHROPIC_CUSTOM_MODEL_OPTION = selected.alias;
+  env.ANTHROPIC_CUSTOM_MODEL_OPTION = claudeCodeModelId(selected);
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = selected.definition.name;
   env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = "Local Anthropic-to-Together proxy";
   const capabilities = claudeModelCapabilities(selected.definition);
@@ -164,10 +168,16 @@ function setTierModelEnv(
   model: ClaudeModelSelection,
 ): void {
   const prefix = `ANTHROPIC_DEFAULT_${tier}_MODEL`;
-  env[prefix] = model.alias;
+  env[prefix] = claudeCodeModelId(model);
   env[`${prefix}_NAME`] = model.definition.name;
   env[`${prefix}_DESCRIPTION`] =
     `Together AI (${model.definition.name}) via togetherlink — not Anthropic`;
+}
+
+function claudeCodeModelId(model: ClaudeModelSelection): string {
+  return model.definition.limit.context >= CLAUDE_EXTENDED_CONTEXT_TOKENS
+    ? `${model.alias}[1m]`
+    : model.alias;
 }
 
 export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<ClaudeLaunchResult> {
