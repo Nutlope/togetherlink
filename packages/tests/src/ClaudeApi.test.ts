@@ -7,6 +7,7 @@ import {
   KIMI_K3,
   KIMI_K2_7_CODE,
   MINIMAX_M3,
+  SELECTABLE_MODELS,
   type ModelDefinition,
 } from "../../models/src/index.js";
 import {
@@ -363,6 +364,159 @@ describe("Claude proxy compatibility API", () => {
     expect(String(firstUserContent(upstreamBodies[0]))).toContain(
       "Resolved screenshot: compact terminal description.",
     );
+  });
+
+  test("forwards image blocks directly to every vision-capable Claude model", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_native_vision",
+            choices: [{ message: { content: "NATIVE_VISION_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const visionModels = SELECTABLE_MODELS.filter((model) => model.attachment);
+    expect(visionModels.length).toBeGreaterThan(1);
+
+    for (const model of visionModels) {
+      const requestCount = upstreamBodies.length;
+      const response = await callClaudeProxy({
+        method: "POST",
+        url: "/v1/messages",
+        body: JSON.stringify({
+          model: model.anthropicAlias ?? model.id,
+          max_tokens: 128,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Describe this image." },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "abc123",
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        options: {
+          modelId: model.anthropicAlias ?? model.id,
+          targetModelId: model.id,
+          modelName: model.name,
+          modelDefinition: model,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body.content).toEqual([{ type: "text", text: "NATIVE_VISION_OK" }]);
+      expect(upstreamBodies).toHaveLength(requestCount + 1);
+      expect(upstreamBodies[requestCount]?.model).toBe(model.id);
+      expect(firstUserContent(upstreamBodies[requestCount])).toEqual([
+        { type: "text", text: "Describe this image." },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,abc123" },
+        },
+      ]);
+    }
+  });
+
+  test("forwards tool-result images to a vision-capable Claude model", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_native_tool_vision",
+            choices: [{ message: { content: "TOOL_VISION_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: KIMI_K3.anthropicAlias,
+        max_tokens: 128,
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "call_screenshot",
+                name: "screenshot",
+                input: {},
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "call_screenshot",
+                content: [
+                  { type: "text", text: "Screenshot captured." },
+                  {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: "image/png",
+                      data: "toolabc123",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      options: {
+        modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+        targetModelId: KIMI_K3.id,
+        modelName: KIMI_K3.name,
+        modelDefinition: KIMI_K3,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamMessages(upstreamBodies[0])).toContainEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Image returned by tool call call_screenshot." },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,toolabc123" },
+        },
+      ],
+    });
   });
 
   test("tunes Claude Code compaction output before forwarding to Together", async () => {

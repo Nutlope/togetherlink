@@ -11,6 +11,7 @@ import {
   claudeModelResponse,
   countTokensResponse,
   findClaudeModel,
+  resolveTargetModel,
   toAnthropicMessage,
 } from "./translate-response.js";
 import { writeAnthropicError } from "./together-call.js";
@@ -183,17 +184,21 @@ export async function handleProxyRequest(
     debugLog(options, "claude compaction request tuned", compactionTuning);
   }
   const imageBlocks = extractImageBlocks(body);
+  const targetModel = resolveTargetModel(body.model, options).definition;
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
-  // GLM-5.2 can't see images: describe each image/url block with a vision model
-  // and replace it with a text block, so GLM reasons over the description.
-  if (imageBlocks.length > 0) {
+  // Text-only models receive image descriptions; vision-capable models get the
+  // original image blocks translated directly into Together `image_url` parts.
+  if (imageBlocks.length > 0 && !targetModel.attachment) {
     await perf.span("vision_image_resolution", () => resolveImageBlocks(body, options), {
       imageBlockCount: imageBlocks.length,
     });
   } else {
-    perf.mark("vision_image_resolution_skipped", { imageBlockCount: 0 });
+    perf.mark("vision_image_resolution_skipped", {
+      imageBlockCount: imageBlocks.length,
+      nativeVision: imageBlocks.length > 0,
+    });
   }
   const budgetRawBytes = imageBlocks.length > 0 ? undefined : rawBytes;
   if (imageBlocks.length > 0) {
