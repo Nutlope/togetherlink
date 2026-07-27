@@ -2202,6 +2202,9 @@ describe("Codex Responses proxy tool compatibility", () => {
         if (url.startsWith("http://127.0.0.1:")) {
           return realFetch(url, init);
         }
+        if (url.includes("/api/telemetry")) {
+          return new Response(null, { status: 204 });
+        }
         const body = JSON.parse(String(init?.body));
         requests.push({ body });
         callCount += 1;

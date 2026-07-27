@@ -249,7 +249,10 @@ export async function streamAnthropicFromTogether(
       response,
       () => postTogetherStream(payload, options, signal, perf, "upstream_fetch_retry"),
       {
-        isOutputStarted: () => blockManager.hasOutput(),
+        // Replaying is still safe when the only emitted block is reasoning:
+        // Claude Code has not received text or a tool call that could cause
+        // duplicate user-visible output or side effects.
+        isOutputStarted: () => blockManager.hasActionableOutput(),
         onRetry: ({ attempt, maxRetries, timeoutMs }) =>
           debugLog(options, "retrying together stream after idle timeout", {
             attempt,
@@ -791,6 +794,7 @@ class StreamBlockManager {
     | { type: "tool_use"; index: number; id: string; name: string; arguments: string }
     | null = null;
   private blockCount = 0;
+  private actionableOutputStarted = false;
 
   constructor(
     private readonly res: ServerResponse,
@@ -825,6 +829,7 @@ class StreamBlockManager {
     if (!emittedText) {
       return;
     }
+    this.actionableOutputStarted = true;
     if (!this.openBlock || this.openBlock.type !== "text") {
       this.closeOpenBlock();
       this.openBlock = { type: "text", index: this.nextIndex };
@@ -848,6 +853,7 @@ class StreamBlockManager {
     type?: string;
     function?: { name?: string; arguments?: string };
   }): void {
+    this.actionableOutputStarted = true;
     // Tool calls arrive across multiple chunks: the first carries id + name,
     // later chunks carry arguments JSON fragments (possibly split mid-string).
     // We accumulate into one block keyed by Together's tool-call `index`; if
@@ -906,6 +912,7 @@ class StreamBlockManager {
   }
 
   emitNativeWebSearch(search: ClaudeNativeWebSearchRecord): void {
+    this.actionableOutputStarted = true;
     this.closeOpenBlock();
     const toolIndex = this.nextIndex;
     writeSse(this.res, "content_block_start", {
@@ -979,6 +986,10 @@ class StreamBlockManager {
 
   hasOutput(): boolean {
     return this.blockCount > 0;
+  }
+
+  hasActionableOutput(): boolean {
+    return this.actionableOutputStarted;
   }
 
   summary(): string {
