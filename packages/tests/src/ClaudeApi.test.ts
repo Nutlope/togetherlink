@@ -1879,6 +1879,7 @@ describe("Claude proxy compatibility API", () => {
     vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
     vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const reasoningBeyondClaudeBudget = "r".repeat(40_000);
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
@@ -1888,7 +1889,7 @@ describe("Claude proxy compatibility API", () => {
         }
         upstreamBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return upstreamBodies.length === 1
-          ? reasoningThenHangingSseResponse("Partial Kimi reasoning before the stall.")
+          ? reasoningThenHangingSseResponse(reasoningBeyondClaudeBudget)
           : sseResponse([
               { choices: [{ delta: { content: "Recovered after reasoning-only stall." } }] },
               { choices: [{ finish_reason: "stop", delta: {} }] },
@@ -1915,9 +1916,56 @@ describe("Claude proxy compatibility API", () => {
 
     expect(upstreamBodies).toHaveLength(2);
     expect(response.status).toBe(200);
-    expect(response.body).toContain("Partial Kimi reasoning before the stall.");
+    expect(response.body).toContain(reasoningBeyondClaudeBudget.slice(0, 100));
     expect(response.body).toContain("Recovered after reasoning-only stall.");
     expect(response.body).toContain("message_stop");
+    expect(response.body).not.toContain("event: error");
+  }, 2_500);
+
+  test("retries a stalled Kimi stream after an incomplete tool call", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (String(_url).includes("/api/telemetry") || init?.body === undefined) {
+          return new Response(null, { status: 204 });
+        }
+        upstreamBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return upstreamBodies.length === 1
+          ? reasoningAndPartialToolThenHangingSseResponse()
+          : sseResponse([
+              {
+                choices: [{ delta: { content: "Recovered before running a partial tool call." } }],
+              },
+              { choices: [{ finish_reason: "stop", delta: {} }] },
+            ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: KIMI_K3.anthropicAlias,
+        max_tokens: 64,
+        stream: true,
+        messages: [{ role: "user", content: "Fan out coding sub-agents." }],
+      }),
+      options: {
+        modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+        targetModelId: KIMI_K3.id,
+        modelName: KIMI_K3.name,
+        modelDefinition: KIMI_K3,
+      },
+    });
+
+    expect(upstreamBodies).toHaveLength(2);
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("Recovered before running a partial tool call.");
+    expect(response.body).not.toContain('"type":"tool_use"');
     expect(response.body).not.toContain("event: error");
   }, 2_500);
 
@@ -2154,6 +2202,45 @@ function reasoningThenHangingSseResponse(reasoning: string): Response {
       },
       cancel() {
         // The stalled first attempt must be cancelled before retrying.
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    },
+  );
+}
+
+function reasoningAndPartialToolThenHangingSseResponse(): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    reasoning_content: "Planning the delegated work.",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call_partial_workflow",
+                        type: "function",
+                        function: { name: "Workflow", arguments: '{"task":' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            })}\n\n`,
+          ),
+        );
+      },
+      cancel() {
+        // The incomplete tool call must not reach Claude before a safe retry.
       },
     }),
     {

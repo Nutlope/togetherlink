@@ -243,6 +243,7 @@ export async function streamAnthropicFromTogether(
   let outputTokens = 0;
   let cachedTokens = 0;
   let streamAttempt = 0;
+  const pendingToolCalls = new Map<number, CollectedStreamToolCall>();
 
   try {
     for await (const eventData of readTogetherSseWithRetry(
@@ -268,6 +269,7 @@ export async function streamAnthropicFromTogether(
         inputTokens = 0;
         outputTokens = 0;
         cachedTokens = 0;
+        pendingToolCalls.clear();
       }
       const event = parseStreamData(eventData.data);
       if (!event) {
@@ -294,9 +296,23 @@ export async function streamAnthropicFromTogether(
           blockManager.emitText(delta.content);
         }
         if (Array.isArray(delta.tool_calls)) {
-          for (const toolCall of delta.tool_calls) {
+          for (const chunk of delta.tool_calls) {
             perf?.markOnce("first_delta", { kind: "tool_call" });
-            blockManager.emitToolCall(toolCall);
+            const index = typeof chunk.index === "number" ? chunk.index : 0;
+            const existing = pendingToolCalls.get(index) ?? {
+              index,
+              function: { arguments: "" },
+            };
+            if (chunk.id) {
+              existing.id = chunk.id;
+            }
+            if (chunk.function?.name) {
+              existing.function.name = chunk.function.name;
+            }
+            if (chunk.function?.arguments) {
+              existing.function.arguments += chunk.function.arguments;
+            }
+            pendingToolCalls.set(index, existing);
           }
         }
       }
@@ -331,6 +347,10 @@ export async function streamAnthropicFromTogether(
     // error event in a way Anthropic SSE expects after content has started.
   }
 
+  emitCollectedToolCalls(
+    blockManager,
+    [...pendingToolCalls.values()].sort((a, b) => a.index - b.index),
+  );
   stopReason = mapStopReason(upstreamFinishReason, {
     outputTokens,
     requestedMaxTokens: payload.max_tokens as number | undefined,
@@ -708,7 +728,14 @@ function emitCollectedStreamTurn(
   if (turn.text) {
     blockManager.emitText(turn.text);
   }
-  for (const toolCall of turn.toolCalls) {
+  emitCollectedToolCalls(blockManager, turn.toolCalls);
+}
+
+function emitCollectedToolCalls(
+  blockManager: StreamBlockManager,
+  toolCalls: CollectedStreamToolCall[],
+): void {
+  for (const toolCall of toolCalls) {
     const fn: { name?: string; arguments?: string } = {
       arguments: toolCall.function.arguments,
     };
