@@ -140,7 +140,7 @@ export async function streamAnthropicFromTogether(
     reasoningEffort,
   });
 
-  // The Together client owns both transient (429/503) and reactive context-fit
+  // The Together client owns both transient-status and reactive context-fit
   // retries now, so this path just posts once and maps whatever comes back. A
   // context-length rejection is self-healed inside the client (max_tokens →
   // strip old images → trim text → drop oldest turns) before it ever surfaces.

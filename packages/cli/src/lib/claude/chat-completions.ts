@@ -116,7 +116,7 @@ export async function callTogetherChatCompletions(
       nativeToolCount: nativeTools.length,
       turn,
     });
-    // The Together client owns transient (429/503) and reactive context-fit
+    // The Together client owns transient-status and reactive context-fit
     // retries (max_tokens → strip old images → trim text → drop oldest turns),
     // so a context-length rejection is self-healed before fetchTogether returns.
     const response = await (perf?.span(
@@ -127,7 +127,7 @@ export async function callTogetherChatCompletions(
 
     if (!response.ok) {
       // Surfaced via fetchTogether as a TogetherApiError after exhausting retries
-      // for transient faults (429/overloaded). Non-retryable, or retries
+      // for transient faults (rate limits/5xx overload). Non-retryable, or retries
       // exhausted — map to the matching Anthropic error shape and stop.
       throw response.error;
     }

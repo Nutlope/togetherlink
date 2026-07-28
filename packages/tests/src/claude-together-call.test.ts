@@ -4,8 +4,8 @@ import { fetchTogether } from "@togetherlink/cli/dist/lib/claude/together-call.j
 
 /**
  * Characterization tests for the Together HTTP retry loop (#1 prep). These lock
- * in the current retry contract — 429/503 retry with backoff, 401/400 no retry,
- * network failure retries then surfaces overloaded_error — so the extraction
+ * in the current retry contract — 429/transient 5xx retry with backoff,
+ * 401/400 no retry, network failure retries then surfaces overloaded_error — so the extraction
  * of a shared Together client (#1) can't silently change it. Uses a mocked
  * global fetch; no network calls.
  *

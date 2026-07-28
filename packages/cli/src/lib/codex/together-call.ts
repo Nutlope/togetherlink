@@ -262,7 +262,7 @@ async function postTogetherChat(
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<Response> {
-  // Delegate the fetch + 429/503 retry loop AND the reactive context-fit retry
+  // Delegate the transient-status retry loop AND the reactive context-fit retry
   // to the shared Together client (together-client.ts). Passing the model
   // definition enables the context-fit repair; this harness keeps only the
   // Codex-specific debug logging and template-error handling on top.

@@ -29,6 +29,9 @@ const model: ModelDefinition = {
 const overflowMessage = (inputTokens: number) =>
   `This model's maximum context length is 262144 tokens, but the request resolved to ${inputTokens} input tokens (including image/vision expansion).`;
 
+const kimiOverflowMessage =
+  "Failed to start generation: The input token count (1394335) exceeds the model's maximum context length (1048576)";
+
 const longText = (n: number) => "old context ".repeat(n);
 
 afterEach(() => {
@@ -41,6 +44,10 @@ describe("contextLengthOverflow", () => {
     expect(contextLengthOverflow(overflowMessage(262323), model)).toEqual({
       inputTokens: 262323,
       contextTokens: 262144,
+    });
+    expect(contextLengthOverflow(kimiOverflowMessage, model)).toEqual({
+      inputTokens: 1394335,
+      contextTokens: 1048576,
     });
     expect(contextLengthOverflow("template render error: 'items'", model)).toBeUndefined();
   });
@@ -253,6 +260,54 @@ describe("together-client context-fit retry", () => {
       modelDefinition: model,
       onContextTrim: () => {}, // suppress real stderr/telemetry
     });
+
+    expect(response.ok).toBe(true);
+    expect(bodies).toHaveLength(2);
+    const retriedFirstUser = (bodies[1]?.messages as Array<{ content: string }>)[0]?.content;
+    expect(retriedFirstUser).toContain(TRIM_MARKER);
+  });
+
+  test("self-heals Kimi's parenthetical context-length error", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        if (bodies.length === 1) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: kimiOverflowMessage,
+                type: "invalid_request_error",
+                code: null,
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ id: "ok", choices: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const payload: Record<string, unknown> = {
+      model: model.id,
+      max_tokens: 4000,
+      messages: [
+        { role: "user", content: longText(3000) },
+        { role: "user", content: "continue" },
+      ],
+    };
+    const response = await postChatCompletionStream(
+      payload,
+      { apiKey: "k" },
+      undefined,
+      undefined,
+      { modelDefinition: model, onContextTrim: () => {} },
+    );
 
     expect(response.ok).toBe(true);
     expect(bodies).toHaveLength(2);
