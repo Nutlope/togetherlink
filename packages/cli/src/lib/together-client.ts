@@ -39,7 +39,8 @@ const RETRYABLE_STATUSES = new Set([429, 503]);
 
 export const MAX_RETRIES = 3;
 const DEFAULT_STREAM_RETRIES = 1;
-const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 30_000;
+const DEFAULT_RESPONSE_HEADER_RETRIES = 0;
+const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 120_000;
 
 export type TogetherResponseDiagnostics = {
   clientRequestId: string;
@@ -125,9 +126,10 @@ async function postChatCompletionOnce(
     try {
       response = await fetchTogetherResponse(body, options, signal, attempt);
     } catch (err) {
-      // Header timeouts get one short, separately configurable retry and keep
-      // their typed error. Other network failures use the legacy transient
-      // retry budget and eventually become a 503 for existing error mapping.
+      // Header timeouts keep their typed error and use a separately
+      // configurable retry budget. Other network failures use the legacy
+      // transient retry budget and eventually become a 503 for existing error
+      // mapping.
       if (signal?.aborted) {
         throw err;
       }
@@ -287,7 +289,9 @@ function responseHeaderRetries(): number {
   const raw =
     process.env.TOGETHERLINK_RESPONSE_HEADER_RETRIES ?? process.env.TOGETHERLINK_STREAM_RETRIES;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_STREAM_RETRIES;
+  return Number.isFinite(parsed) && parsed >= 0
+    ? Math.floor(parsed)
+    : DEFAULT_RESPONSE_HEADER_RETRIES;
 }
 
 function upstreamRequestId(response: Response): string | undefined {

@@ -22,29 +22,37 @@ describe("Together response-header timeout", () => {
     }
   });
 
-  test("defaults to 30 seconds before rejecting a response-header stall", async () => {
+  test("keeps one default admission attempt alive for slow response headers", async () => {
     vi.useFakeTimers();
     vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
     vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS", "");
-    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_RETRIES", "0");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        (_url: string, init?: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
-              once: true,
-            });
-          }),
-      ),
+    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_RETRIES", "");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "");
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const responseTimer = setTimeout(
+            () => resolve(new Response("ok", { status: 200 })),
+            90_000,
+          );
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(responseTimer);
+              reject(init.signal?.reason);
+            },
+            { once: true },
+          );
+        }),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
     const pending = postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
       { apiKey: "redacted" },
     ).catch((caught: unknown) => caught);
 
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(89_999);
     let settled = false;
     void pending.finally(() => {
       settled = true;
@@ -53,10 +61,10 @@ describe("Together response-header timeout", () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(pending).resolves.toMatchObject({
-      name: "TogetherResponseHeaderTimeoutError",
-      timeoutMs: 30_000,
-    });
+    const response = await pending;
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("rejects a fetch that never returns headers with a typed, persisted diagnostic", async () => {
