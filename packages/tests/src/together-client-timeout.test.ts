@@ -163,6 +163,40 @@ describe("Together response-header timeout", () => {
     expect(upstreamSignal?.aborted).toBe(true);
   });
 
+  test("logs successful upstream response headers in debug mode without request credentials", async () => {
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response("data: [DONE]\n\n", {
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream",
+            "x-cache-status": "HIT",
+            "x-request-id": "upstream-request-123",
+          },
+        });
+      }),
+    );
+
+    await postChatCompletionStream(
+      { model: "fault-injection", messages: [], stream: true },
+      { apiKey: "secret-never-log", baseUrl: "https://together.test/v1", debug: true },
+    );
+
+    const headerLog = stderr.mock.calls
+      .map(([value]) => String(value))
+      .find((line) => line.includes("together response headers"));
+    expect(headerLog).toBeDefined();
+    expect(headerLog).toContain('"status":200');
+    expect(headerLog).toContain('"x-cache-status":"HIT"');
+    expect(headerLog).toContain('"x-request-id":"upstream-request-123"');
+    expect(headerLog).toContain('"upstreamUrl":"https://together.test/v1/chat/completions"');
+    expect(headerLog).not.toContain("secret-never-log");
+    expect(headerLog).not.toContain("Authorization");
+  });
+
   test("limits non-stream response-header timeouts to one safe retry", async () => {
     temporaryHome = await mkdtemp(path.join(os.tmpdir(), "togetherlink-buffered-timeout-test-"));
     vi.stubEnv("TOGETHERLINK_HOME", temporaryHome);

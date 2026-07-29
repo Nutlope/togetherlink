@@ -3,6 +3,46 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.2 - 2026-07-29
+
+### Changed
+
+- Enabled Claude Code thinking summaries by default for TogetherLink-launched sessions, so
+  Together reasoning can be expanded with Claude Code's verbose transcript view.
+
+### Debugging
+
+- Added successful Together response headers, status, header latency, retry attempt, endpoint,
+  and client/upstream request IDs to opt-in proxy debug logs. Existing per-call usage records
+  continue to report input, output, and cached tokens alongside the transport trace.
+
+### Tests
+
+- Added deterministic coverage for ephemeral Claude thinking-summary settings and successful
+  response-header logging without exposing request credentials.
+
+## 0.7.1 - 2026-07-29
+
+### Changed
+
+- Advertised Kimi K3's 1M context correctly to Claude Code, routed image blocks directly through
+  the vision-capable model, and removed the unsupported Fable tier from Claude's model menu.
+- Derived Claude reasoning-effort support from shared model metadata instead of adapter-specific
+  model checks.
+
+### Fixed
+
+- Recovered Kimi context overflows and transient Together failures before they could strand a
+  Claude or Codex turn.
+- Retried streams that stalled after reasoning or an incomplete tool call while replay was still
+  safe, preserved slow Together admission requests, and bounded the total duration of active
+  streams.
+
+### Tests
+
+- Added deterministic coverage for context fitting, response-header and SSE watchdogs, safe
+  pre-output retries, incomplete tool calls, and whole-turn timeouts.
+
 ## 0.7.0 - 2026-07-27
 
 ### Changed

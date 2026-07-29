@@ -286,10 +286,15 @@ function claudeExtraSettingsArgs(args: string[]): string[] {
   // attribution: TogetherLink runs Together AI models inside the Claude Code
   // harness, so Claude's default generated-by text and Co-Authored-By trailer
   // would identify the wrong model. Keep both commits and PRs unattributed.
+  //
+  // showThinkingSummaries: Together reasoning is translated into Anthropic
+  // thinking blocks. Let Claude Code reveal those blocks in verbose mode
+  // instead of leaving the user with only a timer while the model reasons.
   return [
     "--settings",
     JSON.stringify({
       skipWebFetchPreflight: true,
+      showThinkingSummaries: true,
       attribution: {
         commit: "",
         pr: "",

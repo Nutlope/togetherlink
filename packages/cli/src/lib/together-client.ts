@@ -3,6 +3,7 @@ import type { ModelDefinition } from "@togetherlink/models";
 import { TOGETHER_BASE_URL } from "./together-core.js";
 import { backoffMs, parseRetryAfter, sleep } from "./together-retry.js";
 import { persistRequestDiagnostic } from "./request-diagnostics.js";
+import { writeProxyDebugLog } from "./proxy-debug.js";
 import {
   CONTEXT_FIT_MAX_ATTEMPTS,
   applyContextFit,
@@ -222,6 +223,8 @@ async function fetchTogetherResponse(
 ): Promise<Response> {
   const clientRequestId = randomUUID();
   const timeoutMs = responseHeaderTimeoutMs();
+  const upstreamUrl = `${options.baseUrl ?? TOGETHER_BASE_URL}/chat/completions`;
+  const startedAt = Date.now();
   const controller = new AbortController();
   let timeoutError: TogetherResponseHeaderTimeoutError | undefined;
   const abortFromCaller = () => controller.abort(signal?.reason);
@@ -237,7 +240,7 @@ async function fetchTogetherResponse(
   timeout.unref?.();
 
   try {
-    const response = await fetch(`${options.baseUrl ?? TOGETHER_BASE_URL}/chat/completions`, {
+    const response = await fetch(upstreamUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.apiKey}`,
@@ -251,6 +254,15 @@ async function fetchTogetherResponse(
     responseDiagnostics.set(response, {
       clientRequestId,
       ...(responseRequestId ? { upstreamRequestId: responseRequestId } : {}),
+    });
+    writeProxyDebugLog("togetherlink proxy", options, "together response headers", {
+      upstreamUrl,
+      status: response.status,
+      responseHeadersMs: Date.now() - startedAt,
+      attempt,
+      clientRequestId,
+      ...(responseRequestId ? { upstreamRequestId: responseRequestId } : {}),
+      headers: Object.fromEntries(response.headers.entries()),
     });
     return response;
   } catch (err) {

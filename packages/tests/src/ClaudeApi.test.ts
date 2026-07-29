@@ -189,12 +189,13 @@ describe("Claude proxy compatibility API", () => {
     expect(claudeRunsInBackground(["--print", "do work"])).toBe(false);
   });
 
-  test("disables Claude attribution for TogetherLink sessions", () => {
+  test("applies TogetherLink's default Claude settings", () => {
     const args = buildClaudeLaunchArgs(["--print", "do work"]);
     const settingsIndex = args.indexOf("--settings");
 
     expect(settingsIndex).toBeGreaterThanOrEqual(0);
     expect(JSON.parse(args[settingsIndex + 1] ?? "{}")).toMatchObject({
+      showThinkingSummaries: true,
       attribution: {
         commit: "",
         pr: "",
