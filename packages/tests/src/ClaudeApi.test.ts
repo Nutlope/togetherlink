@@ -2108,10 +2108,12 @@ async function callClaudeProxyRaw({
   method,
   url,
   body,
+  options,
 }: {
   method: string;
   url: string;
   body?: string;
+  options?: Partial<ClaudeProxyOptions>;
 }): Promise<{ status: number; body: string }> {
   const req = Readable.from(body ? [body] : []) as IncomingMessage;
   req.method = method;
@@ -2119,7 +2121,7 @@ async function callClaudeProxyRaw({
   req.headers = { authorization: "Bearer local-token" };
   const res = new MemoryResponse() as unknown as ServerResponse;
 
-  await handleProxyRequest(req, res, proxyOptions());
+  await handleProxyRequest(req, res, proxyOptions(options));
 
   const memoryRes = res as unknown as MemoryResponse;
   return {
