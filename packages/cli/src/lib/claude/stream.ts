@@ -140,7 +140,7 @@ export async function streamAnthropicFromTogether(
     reasoningEffort,
   });
 
-  // The Together client owns both transient (429/503) and reactive context-fit
+  // The Together client owns both transient-status and reactive context-fit
   // retries now, so this path just posts once and maps whatever comes back. A
   // context-length rejection is self-healed inside the client (max_tokens →
   // strip old images → trim text → drop oldest turns) before it ever surfaces.
@@ -243,13 +243,17 @@ export async function streamAnthropicFromTogether(
   let outputTokens = 0;
   let cachedTokens = 0;
   let streamAttempt = 0;
+  const pendingToolCalls = new Map<number, CollectedStreamToolCall>();
 
   try {
     for await (const eventData of readTogetherSseWithRetry(
       response,
       () => postTogetherStream(payload, options, signal, perf, "upstream_fetch_retry"),
       {
-        isOutputStarted: () => blockManager.hasOutput(),
+        // Replaying is still safe when the only emitted block is reasoning:
+        // Claude Code has not received text or a tool call that could cause
+        // duplicate user-visible output or side effects.
+        isOutputStarted: () => blockManager.hasActionableOutput(),
         onRetry: ({ attempt, maxRetries, timeoutMs }) =>
           debugLog(options, "retrying together stream after idle timeout", {
             attempt,
@@ -265,6 +269,7 @@ export async function streamAnthropicFromTogether(
         inputTokens = 0;
         outputTokens = 0;
         cachedTokens = 0;
+        pendingToolCalls.clear();
       }
       const event = parseStreamData(eventData.data);
       if (!event) {
@@ -291,9 +296,23 @@ export async function streamAnthropicFromTogether(
           blockManager.emitText(delta.content);
         }
         if (Array.isArray(delta.tool_calls)) {
-          for (const toolCall of delta.tool_calls) {
+          for (const chunk of delta.tool_calls) {
             perf?.markOnce("first_delta", { kind: "tool_call" });
-            blockManager.emitToolCall(toolCall);
+            const index = typeof chunk.index === "number" ? chunk.index : 0;
+            const existing = pendingToolCalls.get(index) ?? {
+              index,
+              function: { arguments: "" },
+            };
+            if (chunk.id) {
+              existing.id = chunk.id;
+            }
+            if (chunk.function?.name) {
+              existing.function.name = chunk.function.name;
+            }
+            if (chunk.function?.arguments) {
+              existing.function.arguments += chunk.function.arguments;
+            }
+            pendingToolCalls.set(index, existing);
           }
         }
       }
@@ -328,6 +347,10 @@ export async function streamAnthropicFromTogether(
     // error event in a way Anthropic SSE expects after content has started.
   }
 
+  emitCollectedToolCalls(
+    blockManager,
+    [...pendingToolCalls.values()].sort((a, b) => a.index - b.index),
+  );
   stopReason = mapStopReason(upstreamFinishReason, {
     outputTokens,
     requestedMaxTokens: payload.max_tokens as number | undefined,
@@ -705,7 +728,14 @@ function emitCollectedStreamTurn(
   if (turn.text) {
     blockManager.emitText(turn.text);
   }
-  for (const toolCall of turn.toolCalls) {
+  emitCollectedToolCalls(blockManager, turn.toolCalls);
+}
+
+function emitCollectedToolCalls(
+  blockManager: StreamBlockManager,
+  toolCalls: CollectedStreamToolCall[],
+): void {
+  for (const toolCall of toolCalls) {
     const fn: { name?: string; arguments?: string } = {
       arguments: toolCall.function.arguments,
     };
@@ -791,6 +821,7 @@ class StreamBlockManager {
     | { type: "tool_use"; index: number; id: string; name: string; arguments: string }
     | null = null;
   private blockCount = 0;
+  private actionableOutputStarted = false;
 
   constructor(
     private readonly res: ServerResponse,
@@ -825,6 +856,7 @@ class StreamBlockManager {
     if (!emittedText) {
       return;
     }
+    this.actionableOutputStarted = true;
     if (!this.openBlock || this.openBlock.type !== "text") {
       this.closeOpenBlock();
       this.openBlock = { type: "text", index: this.nextIndex };
@@ -848,6 +880,7 @@ class StreamBlockManager {
     type?: string;
     function?: { name?: string; arguments?: string };
   }): void {
+    this.actionableOutputStarted = true;
     // Tool calls arrive across multiple chunks: the first carries id + name,
     // later chunks carry arguments JSON fragments (possibly split mid-string).
     // We accumulate into one block keyed by Together's tool-call `index`; if
@@ -906,6 +939,7 @@ class StreamBlockManager {
   }
 
   emitNativeWebSearch(search: ClaudeNativeWebSearchRecord): void {
+    this.actionableOutputStarted = true;
     this.closeOpenBlock();
     const toolIndex = this.nextIndex;
     writeSse(this.res, "content_block_start", {
@@ -979,6 +1013,10 @@ class StreamBlockManager {
 
   hasOutput(): boolean {
     return this.blockCount > 0;
+  }
+
+  hasActionableOutput(): boolean {
+    return this.actionableOutputStarted;
   }
 
   summary(): string {

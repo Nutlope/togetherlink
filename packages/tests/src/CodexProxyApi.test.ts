@@ -1,6 +1,12 @@
 import http from "node:http";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2, MINIMAX_M3, QWEN_3_5_9B, QWEN_3_7_MAX } from "@togetherlink/models";
+import {
+  DEFAULT_MODEL,
+  GLM_5_2,
+  MINIMAX_M3,
+  QWEN_3_5_9B,
+  QWEN_3_7_MAX,
+} from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 import { asRecord } from "./json-lines.js";
 
@@ -30,9 +36,14 @@ describe("Codex Responses proxy tool compatibility", () => {
     const catalog = await getModels();
     const first = catalog.models?.[0] as Record<string, unknown> | undefined;
 
-    expect(first?.slug).toBe(GLM_5_2.id);
-    expect(first?.display_name).toBe("GLM 5.2 · default");
-    expect(first?.default_reasoning_level).toBe("medium");
+    expect(first?.slug).toBe(DEFAULT_MODEL.id);
+    expect(first?.display_name).toBe(DEFAULT_MODEL.name);
+    expect(first?.default_reasoning_level).toBe("high");
+    expect(first?.supported_reasoning_levels).toEqual([
+      { effort: "low", description: "Fast responses with lighter reasoning" },
+      { effort: "high", description: "Greater reasoning depth for complex tasks" },
+      { effort: "max", description: "Maximum reasoning depth for the hardest tasks" },
+    ]);
     expect(first?.default_reasoning_summary).toBe("auto");
     expect(first?.model_messages).toEqual(
       expect.objectContaining({
@@ -42,7 +53,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
     expect(first?.supports_search_tool).toBe(true);
-    const expectedLimit = Math.floor(GLM_5_2.limit.context / 1.8);
+    const expectedLimit = Math.floor(DEFAULT_MODEL.limit.context / 1.8);
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
       limit: expectedLimit,
@@ -2190,6 +2201,9 @@ describe("Codex Responses proxy tool compatibility", () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.startsWith("http://127.0.0.1:")) {
           return realFetch(url, init);
+        }
+        if (url.includes("/api/telemetry")) {
+          return new Response(null, { status: 204 });
         }
         const body = JSON.parse(String(init?.body));
         requests.push({ body });

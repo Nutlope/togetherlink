@@ -3,7 +3,7 @@ import { type ModelDefinition } from "@togetherlink/models";
 import { writeJson } from "../http-util.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { parseRetryAfter } from "../together-retry.js";
-import { postChatCompletion } from "../together-client.js";
+import { isRetryableStatus, postChatCompletion } from "../together-client.js";
 import type { OpenAIChatResponse, TogetherApiError, TogetherFetchResult } from "./wire-types.js";
 
 type TogetherCallOptions = {
@@ -12,16 +12,11 @@ type TogetherCallOptions = {
   debug?: boolean | undefined;
 };
 
-// Transient upstream faults worth retrying with backoff. 429 = rate limited;
-// 503/overloaded = server-side temporary capacity. Everything else (401, 400,
-// 402, 404, 5xx other than 503) is non-retryable — retrying a bad key or a
-// malformed request just delays the same failure.
-const RETRYABLE_STATUSES = new Set([429, 503]);
 const RETRYABLE_ERROR_CODES = new Set(["overloaded", "service_unavailable"]);
 
 /**
- * POST to Together with automatic retry for transient faults (429 / 503 /
- * overloaded). On a non-retryable status, or after MAX_RETRIES retries, returns
+ * POST to Together with automatic retry for transient faults (429 / transient
+ * 5xx / overloaded). On a non-retryable status, or after retries, returns
  * `{ ok: false, error }` carrying the mapped Anthropic error shape — the caller
  * throws it to surface an honest error instead of flattening to 500.
  *
@@ -36,7 +31,7 @@ export async function fetchTogether(
   modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<TogetherFetchResult> {
-  // Delegate the fetch + 429/503 retry loop AND the reactive context-fit retry
+  // Delegate the transient-status retry loop AND the reactive context-fit retry
   // to the shared Together client (together-client.ts). Passing the model
   // definition enables the context-fit repair; this harness keeps only the
   // Anthropic error-shape mapping that's specific to its wire format.
@@ -93,7 +88,7 @@ export async function mapTogetherError(response: Response): Promise<TogetherApiE
 
   const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
   const retryable =
-    RETRYABLE_STATUSES.has(response.status) ||
+    isRetryableStatus(response.status) ||
     (typeof code === "string" && RETRYABLE_ERROR_CODES.has(code));
 
   const mapped = mapStatusToAnthropicError(response.status);

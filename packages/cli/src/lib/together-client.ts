@@ -16,7 +16,7 @@ import type { ContextTrimTelemetryInfo } from "./telemetry.js";
  * retry loop that used to be copy-pasted three times (claude/together-call.ts,
  * claude/stream.ts:postTogetherStream, codex/together-call.ts). Carved out so
  * `together-core.ts`'s name finally earns its keep: the retry contract
- * (429/503 + Retry-After + exponential backoff, serialize-once) lives here
+ * (429/transient 5xx + Retry-After + exponential backoff, serialize-once) lives here
  * behind a small interface, testable through one seam instead of three.
  *
  * On top of the transient-fault retry, the client also owns the shared
@@ -31,15 +31,16 @@ import type { ContextTrimTelemetryInfo } from "./telemetry.js";
  * the wire format lives, not here.
  */
 
-// Transient upstream faults worth retrying. 429 = rate limited; 503 = temporary
-// capacity. Everything else (401, 400, 402, 404, 5xx other than 503) is
-// non-retryable — retrying a bad key or a malformed request just delays the
-// same failure.
-const RETRYABLE_STATUSES = new Set([429, 503]);
+// Transient upstream faults worth retrying before any response bytes reach a
+// harness. Together documents 500 as a temporary server-side failure; 502/503/
+// 504 are the equivalent gateway/capacity failures. Client/auth/validation
+// errors remain terminal because replaying them only delays the same failure.
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 export const MAX_RETRIES = 3;
 const DEFAULT_STREAM_RETRIES = 1;
-const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 30_000;
+const DEFAULT_RESPONSE_HEADER_RETRIES = 0;
+const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 120_000;
 
 export type TogetherResponseDiagnostics = {
   clientRequestId: string;
@@ -89,7 +90,8 @@ export type ContextFitConfig = {
 };
 
 /**
- * POST /chat/completions with automatic retry for transient faults (429/503)
+ * POST /chat/completions with automatic retry for transient faults
+ * (429/500/502/503/504)
  * and, when `fit` is provided, the shared context-fit retry. Serializes once
  * per attempt (the context-fit path re-serializes after each payload mutation).
  * Honors `Retry-After` when present, else exponential 1s→2s→4s with jitter.
@@ -125,9 +127,10 @@ async function postChatCompletionOnce(
     try {
       response = await fetchTogetherResponse(body, options, signal, attempt);
     } catch (err) {
-      // Header timeouts get one short, separately configurable retry and keep
-      // their typed error. Other network failures use the legacy transient
-      // retry budget and eventually become a 503 for existing error mapping.
+      // Header timeouts keep their typed error and use a separately
+      // configurable retry budget. Other network failures use the legacy
+      // transient retry budget and eventually become a 503 for existing error
+      // mapping.
       if (signal?.aborted) {
         throw err;
       }
@@ -149,7 +152,7 @@ async function postChatCompletionOnce(
       return response;
     }
     // Drain the retryable response body before sleeping (the body is small for
-    // 429/503 and we must not leak the stream).
+    // retryable statuses and we must not leak the stream).
     await response.arrayBuffer().catch(() => undefined);
     await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoffMs(attempt));
   }
@@ -287,7 +290,9 @@ function responseHeaderRetries(): number {
   const raw =
     process.env.TOGETHERLINK_RESPONSE_HEADER_RETRIES ?? process.env.TOGETHERLINK_STREAM_RETRIES;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_STREAM_RETRIES;
+  return Number.isFinite(parsed) && parsed >= 0
+    ? Math.floor(parsed)
+    : DEFAULT_RESPONSE_HEADER_RETRIES;
 }
 
 function upstreamRequestId(response: Response): string | undefined {
@@ -382,8 +387,7 @@ function syntheticOverloadedResponse(message: string): Response {
   });
 }
 
-/** Whether a given HTTP status is in the retryable set (429/503). Exposed for
- * callers that need to decide whether to retry without re-issuing the fetch. */
+/** Whether a given HTTP status is transient and safe to retry before output. */
 export function isRetryableStatus(status: number): boolean {
   return RETRYABLE_STATUSES.has(status);
 }

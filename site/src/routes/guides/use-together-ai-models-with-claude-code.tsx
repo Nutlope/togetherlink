@@ -151,7 +151,7 @@ function TogetherClaudeGuide() {
           <div className="mt-6 space-y-4">
             <CommandBlock command={INSTALL_COMMAND} label="Install TogetherLink" />
             <CommandBlock command="togetherlink configure" label="Save the Together API key" />
-            <CommandBlock command="tclaude" label="Launch Claude Code on GLM 5.2" />
+            <CommandBlock command="tclaude" label="Launch Claude Code on Kimi K3" />
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-faint">
             The installer also adds <code className="text-ink">tcodex</code>,{" "}
@@ -241,7 +241,8 @@ function TogetherClaudeGuide() {
             should say:
           </p>
           <blockquote className="m-0 mt-5 rounded-[12px] bg-code px-5 py-4 font-mono text-[13px] leading-relaxed shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
-            togetherlink ▸ Routing Claude Code → Together AI (GLM 5.2 · default). Not Anthropic.
+            togetherlink ▸ Routing Claude Code → Together AI (Kimi K3 · default · vision · 1M). Not
+            Anthropic.
           </blockquote>
           <p className="mt-4 text-[14px] leading-relaxed text-muted">
             If you do not see that line, stop and check that you launched{" "}

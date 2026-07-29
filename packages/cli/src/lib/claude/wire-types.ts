@@ -64,7 +64,13 @@ export type OpenAITool = {
 
 export type OpenAIMessage = {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?:
+    | string
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string; detail?: string } }
+      >
+    | null;
   reasoning?: string;
   reasoning_content?: string;
   tool_call_id?: string;

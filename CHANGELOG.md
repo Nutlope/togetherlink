@@ -3,6 +3,22 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.0 - 2026-07-27
+
+### Changed
+
+- Made Kimi K3 the shared default model for Claude Code, Codex, OpenCode, Grok Build, Pi Code, and
+  new desktop configurations while keeping GLM 5.2 and Kimi K2.7 Code selectable.
+- Added Kimi K3's 1,048,576-token context, 131,072-token output ceiling, vision support, pricing,
+  and model-specific `low`, `high`, and `max` reasoning effort metadata.
+
+### Tests
+
+- Added a live release gate covering Together's docs and authenticated catalog, chat, streaming,
+  function calling, JSON mode, output-ceiling acceptance, and all Kimi K3 reasoning efforts.
+- Verified real headless responses, tool calls, coding tasks, long context, and model metadata
+  through the supported coding harnesses.
+
 ## 0.6.7 - 2026-07-23
 
 ### Fixed

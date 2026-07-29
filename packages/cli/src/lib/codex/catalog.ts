@@ -1,4 +1,4 @@
-import { type ModelDefinition } from "@togetherlink/models";
+import { type ModelDefinition, type ModelReasoningEffort } from "@togetherlink/models";
 import { CODEX_SUPPORTED_MODELS } from "./defaults.js";
 
 const CODEX_BASE_INSTRUCTIONS =
@@ -48,18 +48,21 @@ export function toCodexModelCatalogEntry(
   model: { id: string; definition: ModelDefinition },
   priority = 50,
 ): Record<string, unknown> {
-  const reasoningLevels = model.definition.reasoning
-    ? [
-        { effort: "low", description: "Fast responses with lighter reasoning" },
-        { effort: "medium", description: "Balances speed and reasoning depth" },
-        { effort: "high", description: "Greater reasoning depth for complex tasks" },
-      ]
+  const efforts = model.definition.reasoning
+    ? (model.definition.reasoningEfforts ?? ["low", "medium", "high"])
     : [];
+  const reasoningLevels = efforts.map((effort) => ({
+    effort,
+    description: reasoningEffortDescription(effort),
+  }));
+  const defaultReasoningLevel = model.definition.reasoning
+    ? (model.definition.defaultReasoningEffort ?? "medium")
+    : "none";
   return {
     slug: model.id,
     display_name: model.definition.name,
     description: `Together AI model via togetherlink (${model.definition.id})`,
-    default_reasoning_level: model.definition.reasoning ? "medium" : "none",
+    default_reasoning_level: defaultReasoningLevel,
     supported_reasoning_levels: reasoningLevels,
     shell_type: "shell_command",
     visibility: "list",
@@ -97,4 +100,17 @@ export function toCodexModelCatalogEntry(
     supports_search_tool: model.definition.tool_call,
     use_responses_lite: false,
   };
+}
+
+function reasoningEffortDescription(effort: ModelReasoningEffort): string {
+  switch (effort) {
+    case "low":
+      return "Fast responses with lighter reasoning";
+    case "medium":
+      return "Balances speed and reasoning depth";
+    case "high":
+      return "Greater reasoning depth for complex tasks";
+    case "max":
+      return "Maximum reasoning depth for the hardest tasks";
+  }
 }

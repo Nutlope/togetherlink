@@ -16,9 +16,14 @@ import {
 
 const models = [
   {
+    name: "Kimi K3",
+    id: "moonshotai/Kimi-K3",
+    note: "Default vision coding model with a 1M context window.",
+  },
+  {
     name: "GLM 5.2",
     id: "zai-org/GLM-5.2",
-    note: "Default text coding model with a 262K context window.",
+    note: "Text coding model with a 262K context window.",
   },
   {
     name: "Kimi K2.7 Code",
@@ -56,7 +61,7 @@ const faqs: Faq[] = [
   {
     question: "Which Together AI model does Codex use by default?",
     answer:
-      "TogetherLink currently defaults to zai-org/GLM-5.2 for Codex. You can select another curated model with --model before the codex command.",
+      "TogetherLink currently defaults to moonshotai/Kimi-K3 for Codex. You can select another curated model with --model before the codex command.",
   },
   {
     question: "Where does the --model flag go?",
@@ -116,7 +121,7 @@ function TogetherCodexGuide() {
           </p>
           <GuideByline guide={guide} />
           <div className="mt-8 max-w-[600px]">
-            <CommandBlock command="tcodex" label="Default shortcut: GLM 5.2" />
+            <CommandBlock command="tcodex" label="Default shortcut: Kimi K3" />
           </div>
         </div>
         <GuideCover variant={guide.ogKey} className="mt-12" />

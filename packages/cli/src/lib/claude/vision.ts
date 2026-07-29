@@ -139,7 +139,7 @@ export async function describeImage(
   model: string;
   usage?: { promptTokens: number; completionTokens: number; cachedTokens: number };
 }> {
-  const imageUrl = toDataUrl(block);
+  const imageUrl = toImageUrl(block);
   if (!imageUrl) {
     return { description: "[Image unavailable: could not read image data]", model: "none" };
   }
@@ -269,8 +269,8 @@ function visionFailoverRaceDelayMs(): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-/** Convert an Anthropic image/url block into an OpenAI `image_url` data URL. */
-function toDataUrl(block: ImageBlock | UrlBlock): string | null {
+/** Convert an Anthropic image/url block into an OpenAI `image_url` URL. */
+export function toImageUrl(block: ImageBlock | UrlBlock): string | null {
   if (isImageBlock(block)) {
     const { source } = block;
     if (source.type === "base64" && source.data && source.media_type) {

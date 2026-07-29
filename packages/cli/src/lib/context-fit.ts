@@ -51,11 +51,19 @@ export function jsonByteLength(value: unknown): number {
 // --------------------------------------------------------------------------
 
 export function parseTogetherContextLengthMaxTokens(message: string): number | undefined {
-  const match = message.match(/maximum context length is\s+([\d,_]+)\s+tokens/is);
-  return parseTokenCount(match?.[1]);
+  const statedMatch = message.match(/maximum context length is\s+([\d,_]+)\s+tokens/is);
+  if (statedMatch) {
+    return parseTokenCount(statedMatch[1]);
+  }
+  const parentheticalMatch = message.match(/maximum context length\s*\(([\d,_]+)\)/is);
+  return parseTokenCount(parentheticalMatch?.[1]);
 }
 
 export function parseTogetherContextLengthInputTokens(message: string): number | undefined {
+  const countedMatch = message.match(/input token count\s*\(([\d,_]+)\)/is);
+  if (countedMatch) {
+    return parseTokenCount(countedMatch[1]);
+  }
   const parentheticalMatch = message.match(
     /maximum context length is\s+[\d,_]+\s+tokens.*?\(([\d,_]+)\s+input\b/is,
   );

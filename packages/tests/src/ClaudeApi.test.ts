@@ -1,7 +1,16 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { GLM_5_2, type ModelDefinition } from "../../models/src/index.js";
+import {
+  GLM_5_2,
+  KIMI_K2_6,
+  KIMI_K3,
+  KIMI_K2_7_CODE,
+  MINIMAX_M3,
+  QWEN_3_7_MAX,
+  SELECTABLE_MODELS,
+  type ModelDefinition,
+} from "../../models/src/index.js";
 import {
   buildClaudeEnv,
   buildClaudeLaunchArgs,
@@ -56,6 +65,80 @@ describe("Claude proxy compatibility API", () => {
         process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = previous;
       }
     }
+  });
+
+  test("emits distinct Together tiers without native Fable or a duplicate custom row", () => {
+    const env = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+      modelName: KIMI_K3.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+
+    const tierModels = [
+      env.ANTHROPIC_DEFAULT_FABLE_MODEL,
+      env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+      env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ];
+    expect(tierModels).toEqual([
+      GLM_5_2.anthropicAlias,
+      `${KIMI_K3.anthropicAlias}[1m]`,
+      KIMI_K2_6.id,
+      EXPECTED_HAIKU_MODEL_ID,
+    ]);
+    expect(new Set(tierModels).size).toBe(tierModels.length);
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME).toBe(GLM_5_2.name);
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION).not.toContain("Fable");
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION).toBeUndefined();
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBeUndefined();
+  });
+
+  test("marks 1M Together models with Claude Code's [1m] client hint", () => {
+    const kimiEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+      modelName: KIMI_K3.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(kimiEnv.ANTHROPIC_MODEL).toBe(`${KIMI_K3.anthropicAlias}[1m]`);
+    expect(kimiEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe(`${KIMI_K3.anthropicAlias}[1m]`);
+
+    const qwenEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: QWEN_3_7_MAX.id,
+      modelName: QWEN_3_7_MAX.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(qwenEnv.ANTHROPIC_MODEL).toBe(`${QWEN_3_7_MAX.id}[1m]`);
+    expect(qwenEnv.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(`${QWEN_3_7_MAX.id}[1m]`);
+
+    const glmEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(glmEnv.ANTHROPIC_MODEL).toBe(GLM_5_2.anthropicAlias);
+  });
+
+  test("keeps the custom row for a selected model not represented by a tier", () => {
+    const env = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: MINIMAX_M3.id,
+      modelName: MINIMAX_M3.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(MINIMAX_M3.id);
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBe(MINIMAX_M3.name);
   });
 
   test("preserves a user-provided Claude Code max output token setting", () => {
@@ -313,6 +396,159 @@ describe("Claude proxy compatibility API", () => {
     expect(String(firstUserContent(upstreamBodies[0]))).toContain(
       "Resolved screenshot: compact terminal description.",
     );
+  });
+
+  test("forwards image blocks directly to every vision-capable Claude model", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        upstreamBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_native_vision",
+            choices: [{ message: { content: "NATIVE_VISION_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const visionModels = SELECTABLE_MODELS.filter((model) => model.attachment);
+    expect(visionModels.length).toBeGreaterThan(1);
+
+    for (const model of visionModels) {
+      const requestCount = upstreamBodies.length;
+      const response = await callClaudeProxy({
+        method: "POST",
+        url: "/v1/messages",
+        body: JSON.stringify({
+          model: model.anthropicAlias ?? model.id,
+          max_tokens: 128,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Describe this image." },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "abc123",
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        options: {
+          modelId: model.anthropicAlias ?? model.id,
+          targetModelId: model.id,
+          modelName: model.name,
+          modelDefinition: model,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body.content).toEqual([{ type: "text", text: "NATIVE_VISION_OK" }]);
+      expect(upstreamBodies).toHaveLength(requestCount + 1);
+      expect(upstreamBodies[requestCount]?.model).toBe(model.id);
+      expect(firstUserContent(upstreamBodies[requestCount])).toEqual([
+        { type: "text", text: "Describe this image." },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,abc123" },
+        },
+      ]);
+    }
+  });
+
+  test("forwards tool-result images to a vision-capable Claude model", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_native_tool_vision",
+            choices: [{ message: { content: "TOOL_VISION_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: KIMI_K3.anthropicAlias,
+        max_tokens: 128,
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "call_screenshot",
+                name: "screenshot",
+                input: {},
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "call_screenshot",
+                content: [
+                  { type: "text", text: "Screenshot captured." },
+                  {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: "image/png",
+                      data: "toolabc123",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      options: {
+        modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+        targetModelId: KIMI_K3.id,
+        modelName: KIMI_K3.name,
+        modelDefinition: KIMI_K3,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamMessages(upstreamBodies[0])).toContainEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Image returned by tool call call_screenshot." },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,toolabc123" },
+        },
+      ],
+    });
   });
 
   test("tunes Claude Code compaction output before forwarding to Together", async () => {
@@ -811,6 +1047,49 @@ describe("Claude proxy compatibility API", () => {
       reasoning_effort: "max",
       stream: false,
     });
+  });
+
+  test("forwards every supported Kimi K3 reasoning effort", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "K3_REASONING_OK" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    for (const effort of ["low", "high", "max"]) {
+      const response = await callClaudeProxy({
+        method: "POST",
+        url: "/v1/messages",
+        body: JSON.stringify({
+          model: KIMI_K3.anthropicAlias,
+          max_tokens: 32_000,
+          effort,
+          messages: [{ role: "user", content: `Use ${effort} reasoning.` }],
+        }),
+        options: {
+          modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+          targetModelId: KIMI_K3.id,
+          modelName: KIMI_K3.name,
+          modelDefinition: KIMI_K3,
+        },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(upstreamBodies.map((body) => body.reasoning_effort)).toEqual(["low", "high", "max"]);
+    expect(upstreamBodies.every((body) => body.model === KIMI_K3.id)).toBe(true);
   });
 
   test("caps streamed normal Claude requests before forwarding to Together", async () => {
@@ -1596,6 +1875,100 @@ describe("Claude proxy compatibility API", () => {
     expect(response.body).not.toContain("event: error");
   }, 2_500);
 
+  test("retries a stalled Kimi stream after reasoning but before actionable output", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const reasoningBeyondClaudeBudget = "r".repeat(40_000);
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (String(_url).includes("/api/telemetry") || init?.body === undefined) {
+          return new Response(null, { status: 204 });
+        }
+        upstreamBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return upstreamBodies.length === 1
+          ? reasoningThenHangingSseResponse(reasoningBeyondClaudeBudget)
+          : sseResponse([
+              { choices: [{ delta: { content: "Recovered after reasoning-only stall." } }] },
+              { choices: [{ finish_reason: "stop", delta: {} }] },
+            ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: KIMI_K3.anthropicAlias,
+        max_tokens: 64,
+        stream: true,
+        messages: [{ role: "user", content: "Continue the coding task." }],
+      }),
+      options: {
+        modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+        targetModelId: KIMI_K3.id,
+        modelName: KIMI_K3.name,
+        modelDefinition: KIMI_K3,
+      },
+    });
+
+    expect(upstreamBodies).toHaveLength(2);
+    expect(response.status).toBe(200);
+    expect(response.body).toContain(reasoningBeyondClaudeBudget.slice(0, 100));
+    expect(response.body).toContain("Recovered after reasoning-only stall.");
+    expect(response.body).toContain("message_stop");
+    expect(response.body).not.toContain("event: error");
+  }, 2_500);
+
+  test("retries a stalled Kimi stream after an incomplete tool call", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (String(_url).includes("/api/telemetry") || init?.body === undefined) {
+          return new Response(null, { status: 204 });
+        }
+        upstreamBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return upstreamBodies.length === 1
+          ? reasoningAndPartialToolThenHangingSseResponse()
+          : sseResponse([
+              {
+                choices: [{ delta: { content: "Recovered before running a partial tool call." } }],
+              },
+              { choices: [{ finish_reason: "stop", delta: {} }] },
+            ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: KIMI_K3.anthropicAlias,
+        max_tokens: 64,
+        stream: true,
+        messages: [{ role: "user", content: "Fan out coding sub-agents." }],
+      }),
+      options: {
+        modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+        targetModelId: KIMI_K3.id,
+        modelName: KIMI_K3.name,
+        modelDefinition: KIMI_K3,
+      },
+    });
+
+    expect(upstreamBodies).toHaveLength(2);
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("Recovered before running a partial tool call.");
+    expect(response.body).not.toContain('"type":"tool_use"');
+    expect(response.body).not.toContain("event: error");
+  }, 2_500);
+
   test("retries a streamed Claude turn when Together never returns response headers", async () => {
     vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
@@ -1805,6 +2178,69 @@ function hangingSseResponse(): Response {
     new ReadableStream({
       cancel() {
         // The shared transport should cancel this body before retrying.
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    },
+  );
+}
+
+function reasoningThenHangingSseResponse(reasoning: string): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { reasoning_content: reasoning }, finish_reason: null }],
+            })}\n\n`,
+          ),
+        );
+      },
+      cancel() {
+        // The stalled first attempt must be cancelled before retrying.
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    },
+  );
+}
+
+function reasoningAndPartialToolThenHangingSseResponse(): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    reasoning_content: "Planning the delegated work.",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call_partial_workflow",
+                        type: "function",
+                        function: { name: "Workflow", arguments: '{"task":' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            })}\n\n`,
+          ),
+        );
+      },
+      cancel() {
+        // The incomplete tool call must not reach Claude before a safe retry.
       },
     }),
     {

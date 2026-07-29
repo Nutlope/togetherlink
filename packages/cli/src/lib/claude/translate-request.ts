@@ -1,4 +1,4 @@
-import { GLM_5_2, type ModelDefinition } from "@togetherlink/models";
+import { GLM_5_2, type ModelDefinition, type ModelReasoningEffort } from "@togetherlink/models";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
   runExaSearchDetailed as runSharedExaSearchDetailed,
@@ -12,6 +12,7 @@ import {
   formatWebSearchToolResult,
   stringifyAnthropicContent,
 } from "./content-format.js";
+import { isImageBlock, isUrlImageBlock, toImageUrl } from "./vision.js";
 import type {
   AnthropicMessagesRequest,
   AnthropicTool,
@@ -24,37 +25,34 @@ type DebugOptions = {
   debug?: boolean | undefined;
 };
 
-type TogetherReasoningEffort = "max";
-
 const TOGETHERLINK_IDENTITY_PROMPT =
   "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 
 export function togetherReasoningEffort(
   body: AnthropicMessagesRequest,
   targetModel: ModelDefinition,
-): TogetherReasoningEffort | undefined {
-  if (targetModel.id !== GLM_5_2.id) {
-    return undefined;
+): ModelReasoningEffort | undefined {
+  const requestedEffort = body.reasoning_effort ?? body.effort ?? body.thinking?.effort;
+  const normalizedEffort = normalizeReasoningEffort(requestedEffort);
+  if (normalizedEffort && targetModel.reasoningEfforts?.includes(normalizedEffort)) {
+    return normalizedEffort;
   }
-
-  const explicitEffort = normalizeTogetherReasoningEffort(
-    body.reasoning_effort ?? body.effort ?? body.thinking?.effort,
-  );
-  if (explicitEffort) {
-    return explicitEffort;
+  if (targetModel.id === GLM_5_2.id) {
+    return normalizedEffort === "max" ? "max" : undefined;
   }
-
   return undefined;
 }
 
-function normalizeTogetherReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
+function normalizeReasoningEffort(value: unknown): ModelReasoningEffort | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
-
   const effort = value.toLowerCase();
-  if (effort === "max" || effort === "xhigh") {
+  if (effort === "xhigh") {
     return "max";
+  }
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "max") {
+    return effort;
   }
   return undefined;
 }
@@ -196,11 +194,20 @@ export function toOpenAIMessages(
     }
 
     const textParts: string[] = [];
+    const contentParts: NonNullable<Exclude<OpenAIMessage["content"], string | null>> = [];
+    let hasImageContent = false;
     const reasoningParts: string[] = [];
     const toolCalls: OpenAIMessage["tool_calls"] = [];
     for (const block of message.content) {
       if (block.type === "text") {
         textParts.push(block.text);
+        contentParts.push({ type: "text", text: block.text });
+      } else if (targetModel?.attachment && (isImageBlock(block) || isUrlImageBlock(block))) {
+        const imageUrl = toImageUrl(block);
+        if (imageUrl) {
+          contentParts.push({ type: "image_url", image_url: { url: imageUrl } });
+          hasImageContent = true;
+        }
       } else if (block.type === "thinking") {
         reasoningParts.push(block.thinking);
       } else if (block.type === "redacted_thinking") {
@@ -211,6 +218,27 @@ export function toOpenAIMessages(
           tool_call_id: block.tool_use_id,
           content: formatToolResultContent(block.content, block.is_error),
         });
+        if (targetModel?.attachment && Array.isArray(block.content)) {
+          let addedToolImageLabel = false;
+          for (const innerBlock of block.content) {
+            if (!isImageBlock(innerBlock) && !isUrlImageBlock(innerBlock)) {
+              continue;
+            }
+            const imageUrl = toImageUrl(innerBlock);
+            if (!imageUrl) {
+              continue;
+            }
+            if (!addedToolImageLabel) {
+              contentParts.push({
+                type: "text",
+                text: `Image returned by tool call ${block.tool_use_id}.`,
+              });
+              addedToolImageLabel = true;
+            }
+            contentParts.push({ type: "image_url", image_url: { url: imageUrl } });
+            hasImageContent = true;
+          }
+        }
       } else if (
         block.type === "web_search_tool_result" ||
         block.type === "web_search_tool_result_error"
@@ -229,11 +257,11 @@ export function toOpenAIMessages(
       }
     }
 
-    const content = textParts.join("\n");
-    if (content || reasoningParts.length > 0 || toolCalls.length > 0) {
+    const content = hasImageContent ? contentParts : textParts.join("\n");
+    if (content.length > 0 || reasoningParts.length > 0 || toolCalls.length > 0) {
       messages.push({
         role: message.role,
-        content: content || null,
+        content: typeof content === "string" ? content || null : content,
         ...(reasoningParts.length > 0 ? { reasoning_content: reasoningParts.join("\n") } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       });

@@ -12,7 +12,8 @@
  *  - GLM-5.2: https://docs.together.ai/docs/glm-5.2-quickstart ($1.40/$0.26/$4.40)
  *    and the models.dev PR github.com/anomalyco/models.dev/pull/2663
  *    (context 262144, output 164000).
- *  - Vision models use Together's published model pricing and capabilities.
+ *  - Kimi K3 and vision models use Together's published model pricing and
+ *    capabilities.
  */
 
 export const TOGETHER_BASE_URL = "https://api.together.ai/v1";
@@ -38,6 +39,8 @@ export type ModelModalities = {
   output: readonly ("text" | "audio" | "image" | "video" | "pdf")[];
 };
 
+export type ModelReasoningEffort = "low" | "medium" | "high" | "max";
+
 export type ModelDefinition = {
   /** The Together API model id, e.g. "zai-org/GLM-5.2". */
   id: string;
@@ -51,6 +54,10 @@ export type ModelDefinition = {
   attachment: boolean;
   /** Supports reasoning/thinking tokens. */
   reasoning: boolean;
+  /** Provider-supported reasoning effort values, when the set is model-specific. */
+  reasoningEfforts?: readonly ModelReasoningEffort[];
+  /** Default effort advertised to coding harnesses. Must be in reasoningEfforts. */
+  defaultReasoningEffort?: ModelReasoningEffort;
   /** Accepts a temperature setting. */
   temperature: boolean;
   /** Supports tool/function calling. */
@@ -66,13 +73,34 @@ export function costPerToken(costPerMillion: number): number {
 }
 
 /**
- * GLM-5.2 — Zhipu AI's flagship MoE, the default coding model for both
- * harnesses. Text-only: image blocks must be routed elsewhere (the Claude
- * proxy intercepts them; OpenCode uses the `@vision` subagent).
+ * Kimi K3 — Moonshot's 2.8T flagship and the shared coding default. Together's
+ * authenticated catalog reports a 1M context window and $3/$15 pricing with
+ * $0.30 cached input. Together serves the base model's 1,048,576-token context
+ * with a separate 131,072-token output ceiling.
+ */
+export const KIMI_K3: ModelDefinition = {
+  id: "moonshotai/Kimi-K3",
+  name: "Kimi K3 · default · vision · 1M",
+  anthropicAlias: "together-kimi-k3",
+  cost: { input: 3, output: 15, cache_read: 0.3 },
+  limit: { context: 1_048_576, output: 131_072 },
+  attachment: true,
+  reasoning: true,
+  reasoningEfforts: ["low", "high", "max"],
+  defaultReasoningEffort: "high",
+  temperature: true,
+  tool_call: true,
+  modalities: { input: ["text", "image"], output: ["text"] },
+};
+
+/**
+ * GLM-5.2 — Zhipu AI's flagship MoE and the previous coding default.
+ * Text-only: image blocks must be routed elsewhere (the Claude proxy
+ * intercepts them; OpenCode uses the `@vision` subagent).
  */
 export const GLM_5_2: ModelDefinition = {
   id: "zai-org/GLM-5.2",
-  name: "GLM 5.2 · default",
+  name: "GLM 5.2",
   anthropicAlias: "together-glm-5-2",
   cost: { input: 1.4, output: 4.4, cache_read: 0.26 },
   limit: { context: 262_144, output: 164_000 },
@@ -82,6 +110,16 @@ export const GLM_5_2: ModelDefinition = {
   tool_call: true,
   modalities: { input: ["text"], output: ["text"] },
 };
+
+/**
+ * One default shared by every TogetherLink harness.
+ *
+ * Keep this as a model object rather than duplicating ids in Claude, Codex,
+ * OpenCode, Grok, Pi, and ChatGPT Desktop. SELECTABLE_MODELS is built with this
+ * entry first so harness model menus and no-argument resolution agree.
+ *
+ */
+export const DEFAULT_MODEL: ModelDefinition = KIMI_K3;
 
 /**
  * Kimi K2.6 — Moonshot's newest reasoning + vision flagship. Vision-capable,
@@ -165,6 +203,9 @@ export const DEEPSEEK_V4_PRO: ModelDefinition = {
 export const GLM_5_2_ANTHROPIC_CAPABILITIES =
   "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking";
 
+/** Claude Code capabilities verified for Kimi K3 on Together. */
+export const KIMI_K3_ANTHROPIC_CAPABILITIES = "effort,max_effort,thinking,interleaved_thinking";
+
 /**
  * Kimi K2.7 Code — Moonshot's coding-focused model. Used as OpenCode's
  * `@vision` subagent primary and as an optional Claude Code backend.
@@ -231,13 +272,19 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
  * Sources: Together changelog (ids/pricing/context, June 2026) +
  * models.dev (output limits). See per-model doc comments for specifics.
  */
-export const SELECTABLE_MODELS: readonly ModelDefinition[] = [
+const CURATED_MODELS: readonly ModelDefinition[] = [
+  KIMI_K3,
   GLM_5_2,
   VISION_PRIMARY, // moonshotai/Kimi-K2.7-Code — also the @vision subagent model
   KIMI_K2_6,
   MINIMAX_M3,
   QWEN_3_7_MAX,
   DEEPSEEK_V4_PRO,
+];
+
+export const SELECTABLE_MODELS: readonly ModelDefinition[] = [
+  DEFAULT_MODEL,
+  ...CURATED_MODELS.filter((model) => model.id !== DEFAULT_MODEL.id),
 ];
 
 /**

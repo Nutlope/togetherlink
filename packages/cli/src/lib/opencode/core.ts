@@ -51,13 +51,12 @@ type OpencodeProviderConfig = {
 /**
  * Builds the inline OpenCode config passed via `OPENCODE_CONFIG_CONTENT`.
  * Registers Together as a provider (first-party `@ai-sdk/togetherai` adapter,
- * which already knows Together's base URL) and defaults the model to GLM 5.2
+ * which already knows Together's base URL) and defaults the model to Kimi K3
  * with its full capability/cost/limit metadata. The key is resolved at runtime
  * via `{env:TOGETHER_API_KEY}` so no credential is written to disk (no
  * auth.json). The `build` agent's system prompt is overridden to drop OpenCode
  * self-branding, and a `vision` subagent is added on a vision-capable Together
- * model so pasted images can be described (GLM-5.2 is text-only — this is the
- * OpenCode-native equivalent of the Claude proxy's image interception).
+ * model so pasted images can be described when a text-only primary is selected.
  * Highest precedence for settings, with no OpenCode config files written.
  */
 export function buildOpencodeConfigJson({
@@ -81,7 +80,7 @@ export function buildOpencodeConfigJson({
   const provider: OpencodeProviderConfig = {
     npm: "@ai-sdk/togetherai",
     // Provider label: OpenCode appends this provider `name` to every model
-    // line in the /models picker (e.g. "GLM 5.2 · default  Together AI"). Kept
+    // line in the /models picker (e.g. "Kimi K3 · default · vision · 1M  Together AI"). Kept
     // as the full brand name; the model display names are kept short so the
     // full suffix still fits without hitting the picker's truncation width
     // (opencode #20968).

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { DEFAULT_MODEL } from "@togetherlink/models";
 import { buildCodexAppConfig, codexAppModelCatalogJson } from "../../cli/src/lib/codex-app.js";
 
 describe("Codex App alpha config", () => {
@@ -133,14 +134,14 @@ describe("Codex App alpha config", () => {
     const first = catalog.models[0];
 
     expect(first).toBeDefined();
-    expect(first?.display_name).toBe("GLM 5.2 · default");
+    expect(first?.display_name).toBe(DEFAULT_MODEL.name);
     expect(first?.shell_type).toBe("shell_command");
     // Reasoning models expose effort levels; non-reasoning models use "none".
-    expect(first?.default_reasoning_level).toBe("medium");
+    expect(first?.default_reasoning_level).toBe("high");
     expect(first?.supported_reasoning_levels).toEqual([
       { effort: "low", description: "Fast responses with lighter reasoning" },
-      { effort: "medium", description: "Balances speed and reasoning depth" },
       { effort: "high", description: "Greater reasoning depth for complex tasks" },
+      { effort: "max", description: "Maximum reasoning depth for the hardest tasks" },
     ]);
     expect(first?.supports_reasoning_summaries).toBe(true);
     expect(first?.default_reasoning_summary).toBe("auto");
@@ -156,9 +157,12 @@ describe("Codex App alpha config", () => {
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
     // Truncation limit is the context window divided by the Codex↔Together
-    // tokenizer-mismatch ratio (floor(262144 / 1.8)), so Codex compacts before
-    // Together's server-side tokenizer rejects. See codex/catalog.ts.
-    expect(first?.truncation_policy).toEqual({ mode: "tokens", limit: 145635 });
+    // tokenizer-mismatch ratio, so Codex compacts before Together's
+    // server-side tokenizer rejects. See codex/catalog.ts.
+    expect(first?.truncation_policy).toEqual({
+      mode: "tokens",
+      limit: Math.floor(DEFAULT_MODEL.limit.context / 1.8),
+    });
     expect(first?.comp_hash).toBeNull();
     // model_messages MUST be an object (not null) so Codex Desktop can resolve
     // the requested personality instead of warning and falling back.
@@ -176,8 +180,8 @@ describe("Codex App alpha config", () => {
     // Per-model capability flags must be derived from the model definition,
     // not hardcoded off, so vision/tool-calling models are advertised correctly.
     expect(first?.supports_parallel_tool_calls).toBe(true);
-    expect(first?.supports_image_detail_original).toBe(false); // GLM-5.2 is text-only
-    expect(first?.input_modalities).toEqual(["text"]);
+    expect(first?.supports_image_detail_original).toBe(DEFAULT_MODEL.attachment);
+    expect(first?.input_modalities).toEqual(DEFAULT_MODEL.modalities.input);
 
     // A vision-capable model in the catalog must advertise image input.
     const vision = catalog.models.find((m) => m.slug === "moonshotai/Kimi-K2.6");

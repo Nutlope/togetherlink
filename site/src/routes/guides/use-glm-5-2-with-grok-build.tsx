@@ -19,7 +19,7 @@ const faqs: Faq[] = [
   {
     question: "Does Grok Build support GLM 5.2?",
     answer:
-      "Yes. TogetherLink gives Grok Build a local metadata-only model catalog whose default points to zai-org/GLM-5.2 on Together AI.",
+      "Yes. TogetherLink gives Grok Build a local metadata-only model catalog and can select zai-org/GLM-5.2 on Together AI explicitly.",
   },
   {
     question: "Is the model still Grok?",
@@ -113,8 +113,8 @@ function GlmGrokGuide() {
           </h2>
           <p className="mt-4 text-pretty text-[15px] leading-relaxed text-muted">
             TogetherLink starts the existing <code>grok</code> binary with a local metadata-only
-            model catalog. The model entries point directly at Together AI and name GLM 5.2 as the
-            default. No xAI model endpoint is involved in this launch.
+            model catalog. The explicit selection points directly at GLM 5.2 on Together AI. No xAI
+            model endpoint is involved in this launch.
           </p>
           <dl className="mt-7 grid border-y border-line-strong sm:grid-cols-3">
             {[
@@ -156,7 +156,7 @@ function GlmGrokGuide() {
             </p>
           </NumberedStep>
           <NumberedStep number="4" title="Launch Grok Build on GLM 5.2">
-            <CommandBlock command="tgrok" />
+            <CommandBlock command="togetherlink --model zai-org/GLM-5.2 grok" />
             <p className="m-0 mt-4">
               Use the full <code>togetherlink --model ... grok</code> form in scripts when you want
               the model choice to be explicit.

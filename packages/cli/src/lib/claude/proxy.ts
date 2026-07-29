@@ -11,6 +11,7 @@ import {
   claudeModelResponse,
   countTokensResponse,
   findClaudeModel,
+  resolveTargetModel,
   toAnthropicMessage,
 } from "./translate-response.js";
 import { writeAnthropicError } from "./together-call.js";
@@ -85,13 +86,9 @@ export async function handleProxyRequest(
   }
 
   if (req.method === "GET" && path === "/v1/models") {
-    // Claude Code's model discovery (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY)
-    // reads `max_input_tokens` as the context window and `max_tokens` as the
-    // output cap per model object (since Mar 2026 — there is no `context_window`
-    // field). Without these, Claude Code falls back to a ~200K default and
-    // auto-compacts earlier than the selected model's true window, and the
-    // context indicator shows the wrong "% used". Advertise the real limits so
-    // compaction triggers at the right point.
+    // Keep the standard model metadata available to gateway clients. Claude
+    // Code discovery currently reads only `id` and `display_name`; its local
+    // context budget is selected by the `[1m]` model-id hint in core.ts.
     writeJson(res, 200, {
       data: CLAUDE_SUPPORTED_MODELS.map(claudeModelResponse),
     });
@@ -183,17 +180,21 @@ export async function handleProxyRequest(
     debugLog(options, "claude compaction request tuned", compactionTuning);
   }
   const imageBlocks = extractImageBlocks(body);
+  const targetModel = resolveTargetModel(body.model, options).definition;
   if (imageBlocks.length > 0) {
     debugLog(options, "image blocks detected", imageBlocks);
   }
-  // GLM-5.2 can't see images: describe each image/url block with a vision model
-  // and replace it with a text block, so GLM reasons over the description.
-  if (imageBlocks.length > 0) {
+  // Text-only models receive image descriptions; vision-capable models get the
+  // original image blocks translated directly into Together `image_url` parts.
+  if (imageBlocks.length > 0 && !targetModel.attachment) {
     await perf.span("vision_image_resolution", () => resolveImageBlocks(body, options), {
       imageBlockCount: imageBlocks.length,
     });
   } else {
-    perf.mark("vision_image_resolution_skipped", { imageBlockCount: 0 });
+    perf.mark("vision_image_resolution_skipped", {
+      imageBlockCount: imageBlocks.length,
+      nativeVision: imageBlocks.length > 0,
+    });
   }
   const budgetRawBytes = imageBlocks.length > 0 ? undefined : rawBytes;
   if (imageBlocks.length > 0) {

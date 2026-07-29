@@ -56,6 +56,33 @@ describe("shared Together SSE transport", () => {
     expect(events.join("\n")).toContain("recovered");
   });
 
+  test("retries a transient HTTP 500 before the stream starts", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "temporary worker failure" } }), {
+          status: 500,
+          headers: { "content-type": "application/json", "retry-after": "0" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        sseResponse([
+          { choices: [{ delta: { content: "recovered" } }] },
+          { choices: [{ finish_reason: "stop", delta: {} }] },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await postChatCompletionStream(
+      { model: "fault-injection", messages: [], stream: true },
+      { apiKey: "redacted" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test("does not retry an idle response after harness output starts", async () => {
     vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
