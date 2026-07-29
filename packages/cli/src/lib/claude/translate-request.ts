@@ -1,4 +1,4 @@
-import { GLM_5_2, KIMI_K3, type ModelDefinition } from "@togetherlink/models";
+import { GLM_5_2, type ModelDefinition, type ModelReasoningEffort } from "@togetherlink/models";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
   runExaSearchDetailed as runSharedExaSearchDetailed,
@@ -25,47 +25,34 @@ type DebugOptions = {
   debug?: boolean | undefined;
 };
 
-type TogetherReasoningEffort = "low" | "high" | "max";
-
 const TOGETHERLINK_IDENTITY_PROMPT =
   "You are a Together AI model routed through togetherlink, not Anthropic Claude.";
 
 export function togetherReasoningEffort(
   body: AnthropicMessagesRequest,
   targetModel: ModelDefinition,
-): TogetherReasoningEffort | undefined {
+): ModelReasoningEffort | undefined {
   const requestedEffort = body.reasoning_effort ?? body.effort ?? body.thinking?.effort;
+  const normalizedEffort = normalizeReasoningEffort(requestedEffort);
+  if (normalizedEffort && targetModel.reasoningEfforts?.includes(normalizedEffort)) {
+    return normalizedEffort;
+  }
   if (targetModel.id === GLM_5_2.id) {
-    return normalizeGlmReasoningEffort(requestedEffort);
-  }
-  if (targetModel.id === KIMI_K3.id) {
-    return normalizeKimiK3ReasoningEffort(requestedEffort);
+    return normalizedEffort === "max" ? "max" : undefined;
   }
   return undefined;
 }
 
-function normalizeGlmReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const effort = value.toLowerCase();
-  if (effort === "max" || effort === "xhigh") {
-    return "max";
-  }
-  return undefined;
-}
-
-function normalizeKimiK3ReasoningEffort(value: unknown): TogetherReasoningEffort | undefined {
+function normalizeReasoningEffort(value: unknown): ModelReasoningEffort | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
   const effort = value.toLowerCase();
-  if (effort === "low" || effort === "high" || effort === "max") {
-    return effort;
-  }
   if (effort === "xhigh") {
     return "max";
+  }
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "max") {
+    return effort;
   }
   return undefined;
 }

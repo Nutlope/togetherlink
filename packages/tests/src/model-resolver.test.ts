@@ -9,6 +9,7 @@ import {
   type ModelDefinition,
 } from "@togetherlink/models";
 import { claudeModelCapabilities, resolveClaudeModel } from "../../cli/src/lib/claude/defaults.js";
+import { togetherReasoningEffort } from "../../cli/src/lib/claude/translate-request.js";
 import { CODEX_DEFAULT_MODEL, resolveCodexModel } from "../../cli/src/lib/codex/defaults.js";
 import { OPENCODE_DEFAULT_MODEL } from "../../cli/src/lib/opencode/defaults.js";
 
@@ -104,5 +105,17 @@ describe("shared harness default", () => {
       "effort,max_effort,thinking,interleaved_thinking",
     );
     expect(claudeModelCapabilities(KIMI_K2_7_CODE)).toBeUndefined();
+  });
+
+  it("derives Claude reasoning efforts from shared model metadata", () => {
+    const metadataDrivenModel: ModelDefinition = {
+      ...KIMI_K3,
+      id: "test/metadata-driven-reasoning",
+      reasoningEfforts: ["low"],
+    };
+
+    expect(togetherReasoningEffort({ effort: "low" }, metadataDrivenModel)).toBe("low");
+    expect(togetherReasoningEffort({ effort: "high" }, metadataDrivenModel)).toBeUndefined();
+    expect(togetherReasoningEffort({ effort: "xhigh" }, KIMI_K3)).toBe("max");
   });
 });
