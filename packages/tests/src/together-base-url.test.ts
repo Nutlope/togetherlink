@@ -63,6 +63,15 @@ describe("direct coding harness configuration", () => {
     });
   });
 
+  test("OpenCode receives the shared whole-turn timeout", () => {
+    const config = buildOpencodeConfigJson({ baseUrl, timeoutMs: 120_000 });
+    expect(config.provider?.togetherai?.options).toEqual({
+      apiKey: "{env:TOGETHER_API_KEY}",
+      baseURL: baseUrl,
+      timeout: 120_000,
+    });
+  });
+
   test("Grok catalog receives base_url", () => {
     expect(buildGrokModelCatalog(baseUrl).data[0]?.base_url).toBe(baseUrl);
   });

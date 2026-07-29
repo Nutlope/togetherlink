@@ -254,11 +254,12 @@ export async function streamAnthropicFromTogether(
         // Claude Code has not received text or a tool call that could cause
         // duplicate user-visible output or side effects.
         isOutputStarted: () => blockManager.hasActionableOutput(),
-        onRetry: ({ attempt, maxRetries, timeoutMs }) =>
-          debugLog(options, "retrying together stream after idle timeout", {
+        onRetry: ({ attempt, maxRetries, timeoutMs, reason }) =>
+          debugLog(options, "retrying together stream", {
             attempt,
             maxRetries,
             model: payload.model,
+            reason,
             timeoutMs,
           }),
       },
@@ -639,10 +640,11 @@ async function collectTogetherStreamTurn(
   try {
     for await (const eventData of readTogetherSseWithRetry(response, retry, {
       isOutputStarted,
-      onRetry: ({ attempt, maxRetries, timeoutMs }) =>
-        debugLog(options, "retrying together native stream after idle timeout", {
+      onRetry: ({ attempt, maxRetries, timeoutMs, reason }) =>
+        debugLog(options, "retrying together native stream", {
           attempt,
           maxRetries,
+          reason,
           timeoutMs,
         }),
     })) {

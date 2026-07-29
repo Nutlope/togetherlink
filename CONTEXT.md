@@ -56,9 +56,15 @@ migrations, and resilience behind a 7-method interface.
 **Together client** (`together-client.ts`) — the deep HTTP client for
 `POST /chat/completions`. Owns the fetch + response-header timeout + 429/503
 retry loop + backoff. **Together stream transport** (`together-stream.ts`)
-owns shared SSE framing, idle watchdog, pre-output retry, cancellation, and
-request diagnostics for Claude and Codex. Each harness maps responses and SSE
-events to its own wire format on top (Anthropic vs OpenAI Responses).
+owns shared SSE framing, idle and whole-turn watchdogs, pre-output retry,
+cancellation, and request diagnostics for Claude and Codex. Each harness maps
+responses and SSE events to its own wire format on top (Anthropic vs OpenAI
+Responses).
+
+OpenCode remains a spawned harness, so Togetherlink cannot retry its stream
+directly. Its inline provider config receives the same
+`TOGETHERLINK_STREAM_TURN_TIMEOUT_MS` deadline, letting OpenCode abort a
+poisoned active stream instead of running without a bound.
 
 **Wire format** — the request/response shape an agent CLI speaks. Claude speaks
 the Anthropic Messages API (`/v1/messages`); Codex speaks the OpenAI Responses

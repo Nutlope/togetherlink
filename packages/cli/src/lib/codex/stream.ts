@@ -40,8 +40,6 @@ import type {
 const MAX_TOGETHER_STREAM_IDLE_RETRIES = 3;
 // Two minutes: allow slow reasoning gaps without treating the upstream stream as dead.
 const DEFAULT_CODEX_STREAM_IDLE_TIMEOUT_MS = 120_000;
-// Ten minutes: leak protection for a whole streamed Codex turn, not a normal thinking limit.
-const DEFAULT_CODEX_STREAM_TURN_TIMEOUT_MS = 600_000;
 
 type StreamTurnResult =
   | {
@@ -54,18 +52,9 @@ type StreamTurnResult =
     }
   | { ok: false; status: number; error: string };
 
-type SseTimeoutKind = "idle" | "turn";
-
 class SseIdleTimeoutError extends Error {
-  constructor(
-    readonly timeoutMs: number,
-    readonly kind: SseTimeoutKind = "idle",
-  ) {
-    super(
-      kind === "turn"
-        ? `Together stream exceeded maximum turn duration of ${timeoutMs}ms.`
-        : `Together stream produced no SSE event for ${timeoutMs}ms.`,
-    );
+  constructor(readonly timeoutMs: number) {
+    super(`Together stream produced no SSE event for ${timeoutMs}ms.`);
     this.name = "SseIdleTimeoutError";
   }
 }
@@ -221,10 +210,8 @@ async function streamTogetherTurn(
   let reasoningText = "";
   let text = "";
   let finishReason: string | null | undefined;
-  const turnStartedAt = Date.now();
   let lastProgressAt = Date.now();
   const progressTimeoutMs = codexStreamIdleTimeoutMs();
-  const turnTimeoutMs = codexStreamTurnTimeoutMs();
   let streamAttempt = 0;
 
   for await (const eventData of readTogetherSseWithRetry(
@@ -240,11 +227,12 @@ async function streamTogetherTurn(
     },
     {
       isOutputStarted: () => streamOutputStarted(outputState),
-      onRetry: ({ attempt, maxRetries, timeoutMs }) =>
-        debugLog(options, "retrying together stream after idle timeout", {
+      onRetry: ({ attempt, maxRetries, timeoutMs, reason }) =>
+        debugLog(options, "retrying together stream", {
           attempt,
           maxRetries,
           model: payload.model,
+          reason,
           timeoutMs,
         }),
     },
@@ -259,7 +247,6 @@ async function streamTogetherTurn(
       lastProgressAt = Date.now();
     }
     const chunk = eventData.data;
-    assertStreamTurnDuration(turnStartedAt, turnTimeoutMs);
     if (chunk === "[DONE]") {
       break;
     }
@@ -351,12 +338,6 @@ async function streamTogetherTurn(
 function assertStreamProgress(lastProgressAt: number, timeoutMs: number): void {
   if (Date.now() - lastProgressAt > timeoutMs) {
     throw new SseIdleTimeoutError(timeoutMs);
-  }
-}
-
-function assertStreamTurnDuration(startedAt: number, timeoutMs: number): void {
-  if (Date.now() - startedAt > timeoutMs) {
-    throw new SseIdleTimeoutError(timeoutMs, "turn");
   }
 }
 
@@ -755,14 +736,6 @@ function codexStreamIdleTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0
     ? Math.max(100, parsed)
     : DEFAULT_CODEX_STREAM_IDLE_TIMEOUT_MS;
-}
-
-function codexStreamTurnTimeoutMs(): number {
-  const raw = process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0
-    ? Math.max(100, parsed)
-    : DEFAULT_CODEX_STREAM_TURN_TIMEOUT_MS;
 }
 
 function codexStreamIdleRetries(): number {
