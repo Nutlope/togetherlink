@@ -100,6 +100,24 @@ describe("shared Together SSE transport", () => {
     expect(retry).not.toHaveBeenCalled();
   });
 
+  test("stops a turn that stays active without ever completing", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "1000");
+    vi.stubEnv("TOGETHERLINK_STREAM_TURN_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "0");
+    const retry = vi.fn(async () => sseResponse([]));
+
+    const consume = async () => {
+      for await (const _event of readTogetherSseWithRetry(activeSseResponse(), retry, {
+        isOutputStarted: () => false,
+      })) {
+        // The fault-injection stream stays active but never finishes.
+      }
+    };
+
+    await expect(consume()).rejects.toMatchObject({ name: "TogetherSseTurnTimeoutError" });
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   test("persists and surfaces request IDs when an SSE stream stays idle", async () => {
     temporaryHome = await mkdtemp(path.join(os.tmpdir(), "togetherlink-sse-test-"));
     vi.stubEnv("TOGETHERLINK_HOME", temporaryHome);
@@ -165,6 +183,38 @@ function hangingSseResponse(): Response {
     new ReadableStream({
       cancel() {
         // The shared transport must cancel this reader before retrying.
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function activeSseResponse(): Response {
+  const encoder = new TextEncoder();
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let emitted = 0;
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        interval = setInterval(() => {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ choices: [{ delta: { reasoning: "." } }] })}\n\n`,
+            ),
+          );
+          emitted += 1;
+          if (emitted === 8) {
+            clearInterval(interval);
+            interval = undefined;
+            controller.close();
+          }
+        }, 25);
+      },
+      cancel() {
+        if (interval) {
+          clearInterval(interval);
+          interval = undefined;
+        }
       },
     }),
     { status: 200, headers: { "content-type": "text/event-stream" } },

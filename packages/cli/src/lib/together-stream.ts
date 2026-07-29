@@ -4,6 +4,7 @@ import { persistRequestDiagnostic } from "./request-diagnostics.js";
 import { createSseIdleWatchdog, sseEventPayload, takeSseEvents } from "./sse.js";
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+const DEFAULT_STREAM_TURN_TIMEOUT_MS = 600_000;
 const DEFAULT_STREAM_RETRIES = 1;
 
 export type TogetherSseEvent = {
@@ -16,6 +17,7 @@ export type TogetherSseRetryInfo = {
   attempt: number;
   maxRetries: number;
   timeoutMs: number;
+  reason: "idle_timeout" | "turn_timeout" | "premature_close";
 };
 
 export class TogetherSseIdleTimeoutError extends Error {
@@ -33,6 +35,24 @@ export class TogetherSseIdleTimeoutError extends Error {
         (ids.length > 0 ? ` (${ids.join(", ")})` : ""),
     );
     this.name = "TogetherSseIdleTimeoutError";
+  }
+}
+
+export class TogetherSseTurnTimeoutError extends TogetherSseIdleTimeoutError {
+  constructor(
+    timeoutMs: number,
+    clientRequestId?: string | undefined,
+    upstreamRequestId?: string | undefined,
+  ) {
+    super(timeoutMs, clientRequestId, upstreamRequestId);
+    const ids = [
+      clientRequestId ? `client request ID: ${clientRequestId}` : undefined,
+      upstreamRequestId ? `upstream request ID: ${upstreamRequestId}` : undefined,
+    ].filter(Boolean);
+    this.message =
+      `Together stream exceeded maximum turn duration of ${timeoutMs}ms.` +
+      (ids.length > 0 ? ` (${ids.join(", ")})` : "");
+    this.name = "TogetherSseTurnTimeoutError";
   }
 }
 
@@ -74,13 +94,14 @@ export async function* readTogetherSseWithRetry(
   },
 ): AsyncGenerator<TogetherSseEvent> {
   const idleTimeoutMs = streamIdleTimeoutMs();
+  const turnTimeoutMs = streamTurnTimeoutMs();
   const maxRetries = streamRetries();
   let response = initialResponse;
   let attempt = 0;
 
   for (;;) {
     try {
-      for await (const data of readResponseSse(response, idleTimeoutMs)) {
+      for await (const data of readResponseSse(response, idleTimeoutMs, turnTimeoutMs)) {
         yield { data, attempt };
       }
       return;
@@ -95,7 +116,17 @@ export async function* readTogetherSseWithRetry(
       if (options.isOutputStarted() || attempt >= maxRetries) {
         throw err;
       }
-      options.onRetry?.({ attempt, maxRetries, timeoutMs: idleTimeoutMs });
+      options.onRetry?.({
+        attempt,
+        maxRetries,
+        timeoutMs: err instanceof TogetherSseTurnTimeoutError ? turnTimeoutMs : idleTimeoutMs,
+        reason:
+          err instanceof TogetherSseTurnTimeoutError
+            ? "turn_timeout"
+            : err instanceof TogetherSseIdleTimeoutError
+              ? "idle_timeout"
+              : "premature_close",
+      });
       await sleep(backoffMs(attempt));
       const next = await retry();
       if (!next.ok) {
@@ -110,7 +141,11 @@ export async function* readTogetherSseWithRetry(
   }
 }
 
-async function* readResponseSse(response: Response, idleTimeoutMs: number): AsyncGenerator<string> {
+async function* readResponseSse(
+  response: Response,
+  idleTimeoutMs: number,
+  turnTimeoutMs: number,
+): AsyncGenerator<string> {
   if (!response.body) {
     throw new Error("Together returned no stream body.");
   }
@@ -126,11 +161,27 @@ async function* readResponseSse(response: Response, idleTimeoutMs: number): Asyn
         diagnostics?.upstreamRequestId,
       ),
   );
+  let turnError: TogetherSseTurnTimeoutError | undefined;
+  const turnTimer = setTimeout(() => {
+    turnError = new TogetherSseTurnTimeoutError(
+      turnTimeoutMs,
+      diagnostics?.clientRequestId,
+      diagnostics?.upstreamRequestId,
+    );
+    void reader.cancel(turnError).catch(() => undefined);
+  }, turnTimeoutMs);
+  turnTimer.unref?.();
   let buffer = "";
   let sawDone = false;
   try {
     for (;;) {
+      if (turnError) {
+        throw turnError;
+      }
       const read = await watchdog.read(reader);
+      if (turnError) {
+        throw turnError;
+      }
       if (read.done) {
         break;
       }
@@ -146,15 +197,19 @@ async function* readResponseSse(response: Response, idleTimeoutMs: number): Asyn
       }
     }
   } catch (err) {
-    if (err instanceof TogetherSseIdleTimeoutError) {
+    if (err instanceof TogetherSseIdleTimeoutError || err instanceof TogetherSseTurnTimeoutError) {
       await reader.cancel(err).catch(() => undefined);
     }
     throw err;
   } finally {
+    clearTimeout(turnTimer);
     watchdog.dispose();
     reader.releaseLock();
   }
 
+  if (turnError) {
+    throw turnError;
+  }
   buffer += decoder.decode();
   const trailing = buffer.trim();
   if (trailing) {
@@ -176,7 +231,7 @@ async function* readResponseSse(response: Response, idleTimeoutMs: number): Asyn
 
 async function persistStreamDiagnostic(
   response: Response,
-  error: TogetherSseIdleTimeoutError | TogetherSsePrematureCloseError,
+  error: TogetherSseIdleTimeoutError | TogetherSseTurnTimeoutError | TogetherSsePrematureCloseError,
   attempt: number,
 ): Promise<void> {
   const diagnostics = getTogetherResponseDiagnostics(response);
@@ -185,7 +240,12 @@ async function persistStreamDiagnostic(
   }
   await persistRequestDiagnostic({
     phase: "sse",
-    reason: error instanceof TogetherSseIdleTimeoutError ? "idle_timeout" : "premature_close",
+    reason:
+      error instanceof TogetherSseTurnTimeoutError
+        ? "turn_timeout"
+        : error instanceof TogetherSseIdleTimeoutError
+          ? "idle_timeout"
+          : "premature_close",
     clientRequestId: diagnostics.clientRequestId,
     upstreamRequestId: diagnostics.upstreamRequestId,
     attempt,
@@ -202,6 +262,16 @@ function streamIdleTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0
     ? Math.max(100, parsed)
     : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+}
+
+export function streamTurnTimeoutMs(): number {
+  const raw =
+    process.env.TOGETHERLINK_STREAM_TURN_TIMEOUT_MS ??
+    process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(100, parsed)
+    : DEFAULT_STREAM_TURN_TIMEOUT_MS;
 }
 
 function streamRetries(): number {
