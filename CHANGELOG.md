@@ -3,6 +3,26 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.3 - 2026-07-29
+
+### Fixed
+
+- Propagated Claude and Codex client disconnects through active Together SSE body readers and
+  retry backoff, preventing canceled turns from surviving as orphaned upstream requests or
+  starting a later retry.
+- Returned response-header watchdog failures as `504 timeout_error` responses instead of generic
+  `500` API errors.
+
+### Debugging
+
+- Logged when a disconnected Claude or Codex client aborts its active upstream request, alongside
+  the existing Together response-header and request-ID trace.
+
+### Tests
+
+- Added deterministic coverage proving that cancellation after streaming starts cancels the
+  Together body reader, skips retries, and does not emit a successful stream terminator.
+
 ## 0.7.2 - 2026-07-29
 
 ### Changed

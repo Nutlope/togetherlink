@@ -2016,6 +2016,47 @@ describe("Claude proxy compatibility API", () => {
     expect(response.body).not.toContain("event: error");
   }, 2_500);
 
+  test("cancels a started Together stream without retrying when Claude disconnects", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "1000");
+    vi.stubEnv("TOGETHERLINK_STREAM_TURN_TIMEOUT_MS", "1000");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    const cancel = vi.fn();
+    const fetchMock = vi.fn(async () => hangingSseResponse(cancel));
+    vi.stubGlobal("fetch", fetchMock);
+    const req = Readable.from([
+      JSON.stringify({
+        model: KIMI_K3.anthropicAlias,
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Keep streaming." }],
+        stream: true,
+      }),
+    ]) as IncomingMessage;
+    req.method = "POST";
+    req.url = "/v1/messages";
+    req.headers = { authorization: "Bearer local-token" };
+    const memoryRes = new MemoryResponse();
+    const handling = handleProxyRequest(
+      req,
+      memoryRes as unknown as ServerResponse,
+      proxyOptions({
+        modelId: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+        targetModelId: KIMI_K3.id,
+        modelName: KIMI_K3.name,
+        modelDefinition: KIMI_K3,
+      }),
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    memoryRes.emit("close");
+    await handling;
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(memoryRes.body).toContain("message_start");
+    expect(memoryRes.body).not.toContain("message_stop");
+  });
+
   test("retries a streamed Claude turn when Together never returns response headers", async () => {
     vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_TIMEOUT_MS", "100");
     vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
@@ -2222,10 +2263,11 @@ function sseResponse(events: unknown[]): Response {
   );
 }
 
-function hangingSseResponse(): Response {
+function hangingSseResponse(onCancel?: () => void): Response {
   return new Response(
     new ReadableStream({
       cancel() {
+        onCancel?.();
         // The shared transport should cancel this body before retrying.
       },
     }),

@@ -103,7 +103,11 @@ export async function handleCodexProxyRequest(
   const { nativeToolCount, toolTranslation, requestModel, translatedPayload } = translated;
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
-    upstreamAbort.abort();
+    if (upstreamAbort.signal.aborted) {
+      return;
+    }
+    debugLog(options, "codex client disconnected; aborting upstream request", {});
+    upstreamAbort.abort(new DOMException("Codex client disconnected.", "AbortError"));
   };
   req.once("aborted", markClientDisconnected);
   res.once("close", () => {

@@ -100,6 +100,41 @@ describe("shared Together SSE transport", () => {
     expect(retry).not.toHaveBeenCalled();
   });
 
+  test("cancels the active stream and never retries after the caller aborts", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "100");
+    vi.stubEnv("TOGETHERLINK_STREAM_TURN_TIMEOUT_MS", "1000");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const retry = vi.fn(async () => sseResponse([]));
+    const options = {
+      isOutputStarted: () => false,
+      signal: controller.signal,
+    };
+
+    const consume = async () => {
+      for await (const _event of readTogetherSseWithRetry(
+        hangingSseResponse(cancel),
+        retry,
+        options,
+      )) {
+        // The fault-injection stream never emits.
+      }
+    };
+    const result = consume().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const abortReason = new Error("client disconnected");
+    controller.abort(abortReason);
+
+    expect(await result).toBe(abortReason);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   test("stops a turn that stays active without ever completing", async () => {
     vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "1000");
     vi.stubEnv("TOGETHERLINK_STREAM_TURN_TIMEOUT_MS", "100");
@@ -178,10 +213,11 @@ function sseResponse(events: unknown[]): Response {
   );
 }
 
-function hangingSseResponse(): Response {
+function hangingSseResponse(onCancel?: () => void): Response {
   return new Response(
     new ReadableStream({
       cancel() {
+        onCancel?.();
         // The shared transport must cancel this reader before retrying.
       },
     }),

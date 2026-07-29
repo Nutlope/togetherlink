@@ -142,6 +142,9 @@ export async function streamResponseFromTogether(
       perf,
     );
   } catch (err) {
+    if (signal?.aborted) {
+      return clientDisconnectedResult();
+    }
     if (err instanceof TogetherSsePrematureCloseError) {
       return failStream(res, responseId, 502, err.message);
     }
@@ -235,6 +238,7 @@ async function streamTogetherTurn(
           reason,
           timeoutMs,
         }),
+      ...(signal ? { signal } : {}),
     },
   )) {
     if (eventData.attempt !== streamAttempt) {
@@ -376,6 +380,9 @@ async function streamResponseWithNativeTools(
         perf,
       );
     } catch (err) {
+      if (signal?.aborted) {
+        return clientDisconnectedResult();
+      }
       if (err instanceof TogetherSsePrematureCloseError) {
         return failStream(res, responseId, 502, err.message);
       }
@@ -502,6 +509,10 @@ async function streamResponseWithNativeTools(
     toolTranslation,
     lastFinishReason,
   );
+}
+
+function clientDisconnectedResult(): StreamProxyResult {
+  return { ok: false, status: 499, error: "Codex client disconnected." };
 }
 
 async function streamTogetherTurnWithIdleRetries(

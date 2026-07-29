@@ -91,6 +91,7 @@ export async function* readTogetherSseWithRetry(
   options: {
     isOutputStarted: () => boolean;
     onRetry?: ((info: TogetherSseRetryInfo) => void) | undefined;
+    signal?: AbortSignal | undefined;
   },
 ): AsyncGenerator<TogetherSseEvent> {
   const idleTimeoutMs = streamIdleTimeoutMs();
@@ -100,12 +101,19 @@ export async function* readTogetherSseWithRetry(
   let attempt = 0;
 
   for (;;) {
+    await cancelResponseIfAborted(response, options.signal);
     try {
-      for await (const data of readResponseSse(response, idleTimeoutMs, turnTimeoutMs)) {
+      for await (const data of readResponseSse(
+        response,
+        idleTimeoutMs,
+        turnTimeoutMs,
+        options.signal,
+      )) {
         yield { data, attempt };
       }
       return;
     } catch (err) {
+      throwIfAborted(options.signal);
       if (
         !(err instanceof TogetherSseIdleTimeoutError) &&
         !(err instanceof TogetherSsePrematureCloseError)
@@ -127,8 +135,9 @@ export async function* readTogetherSseWithRetry(
               ? "idle_timeout"
               : "premature_close",
       });
-      await sleep(backoffMs(attempt));
+      await sleepWithSignal(backoffMs(attempt), options.signal);
       const next = await retry();
+      await cancelResponseIfAborted(next, options.signal);
       if (!next.ok) {
         throw new TogetherSseRetryResponseError(next);
       }
@@ -145,12 +154,20 @@ async function* readResponseSse(
   response: Response,
   idleTimeoutMs: number,
   turnTimeoutMs: number,
+  signal?: AbortSignal,
 ): AsyncGenerator<string> {
   if (!response.body) {
     throw new Error("Together returned no stream body.");
   }
   const diagnostics = getTogetherResponseDiagnostics(response);
   const reader = response.body.getReader();
+  const cancelForCallerAbort = () => {
+    void reader.cancel(abortReason(signal)).catch(() => undefined);
+  };
+  signal?.addEventListener("abort", cancelForCallerAbort, { once: true });
+  if (signal?.aborted) {
+    cancelForCallerAbort();
+  }
   const decoder = new TextDecoder();
   const watchdog = createSseIdleWatchdog(
     idleTimeoutMs,
@@ -175,10 +192,12 @@ async function* readResponseSse(
   let sawDone = false;
   try {
     for (;;) {
+      throwIfAborted(signal);
       if (turnError) {
         throw turnError;
       }
       const read = await watchdog.read(reader);
+      throwIfAborted(signal);
       if (turnError) {
         throw turnError;
       }
@@ -197,6 +216,10 @@ async function* readResponseSse(
       }
     }
   } catch (err) {
+    if (signal?.aborted) {
+      await reader.cancel(abortReason(signal)).catch(() => undefined);
+      throw abortReason(signal);
+    }
     if (err instanceof TogetherSseIdleTimeoutError || err instanceof TogetherSseTurnTimeoutError) {
       await reader.cancel(err).catch(() => undefined);
     }
@@ -204,9 +227,11 @@ async function* readResponseSse(
   } finally {
     clearTimeout(turnTimer);
     watchdog.dispose();
+    signal?.removeEventListener("abort", cancelForCallerAbort);
     reader.releaseLock();
   }
 
+  throwIfAborted(signal);
   if (turnError) {
     throw turnError;
   }
@@ -227,6 +252,47 @@ async function* readResponseSse(
       diagnostics?.upstreamRequestId,
     );
   }
+}
+
+function abortReason(signal: AbortSignal | undefined): unknown {
+  return signal?.reason ?? new DOMException("The operation was aborted.", "AbortError");
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw abortReason(signal);
+  }
+}
+
+async function cancelResponseIfAborted(
+  response: Response,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!signal?.aborted) {
+    return;
+  }
+  await response.body?.cancel(abortReason(signal)).catch(() => undefined);
+  throw abortReason(signal);
+}
+
+async function sleepWithSignal(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) {
+    await sleep(ms);
+    return;
+  }
+  throwIfAborted(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    timer.unref?.();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function persistStreamDiagnostic(

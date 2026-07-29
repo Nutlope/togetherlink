@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { type ServerResponse } from "node:http";
 import { renderDaemonError } from "@togetherlink/cli/dist/lib/daemon/server.js";
+import { TogetherResponseHeaderTimeoutError } from "@togetherlink/cli/dist/lib/together-client.js";
 import type { TogetherApiError } from "@togetherlink/cli/dist/lib/claude/wire-types.js";
 
 // A minimal ServerResponse stub: capture statusCode + the JSON body written.
@@ -61,6 +62,21 @@ describe("daemon error rendering (#2 — error contract at the seam)", () => {
     expect(parsed.error.message).toBe("boom");
   });
 
+  test("Claude agent + Together response-header timeout → Anthropic 504 timeout_error", () => {
+    const m = mockRes();
+    renderDaemonError(
+      m.res,
+      new TogetherResponseHeaderTimeoutError(120_000, "request-123"),
+      "claude",
+    );
+    expect(m.statusCode).toBe(504);
+    const parsed = JSON.parse(m.body);
+    expect(parsed.type).toBe("error");
+    expect(parsed.error.type).toBe("timeout_error");
+    expect(parsed.error.message).toContain("no response headers within 120000ms");
+    expect(parsed.error.message).toContain("request-123");
+  });
+
   test("Codex agent + Anthropic-shaped error → OpenAI error shape (the bug fix)", () => {
     const m = mockRes();
     // Before the fix: Codex threw plain Error, isTogetherApiError never matched,
@@ -84,6 +100,20 @@ describe("daemon error rendering (#2 — error contract at the seam)", () => {
     const parsed = JSON.parse(m.body);
     expect(parsed.error.type).toBe("api_error");
     expect(parsed.error.message).toBe("codex boom");
+    expect(parsed.type).toBeUndefined();
+  });
+
+  test("Codex agent + Together response-header timeout → OpenAI 504 timeout_error", () => {
+    const m = mockRes();
+    renderDaemonError(
+      m.res,
+      new TogetherResponseHeaderTimeoutError(120_000, "request-456"),
+      "codex",
+    );
+    expect(m.statusCode).toBe(504);
+    const parsed = JSON.parse(m.body);
+    expect(parsed.error.type).toBe("timeout_error");
+    expect(parsed.error.message).toContain("request-456");
     expect(parsed.type).toBeUndefined();
   });
 

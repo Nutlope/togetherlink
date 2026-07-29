@@ -10,6 +10,7 @@ import { extractToken, readJsonBody, requestPath, writeJson } from "../http-util
 import { handleProxyRequest } from "../claude/proxy.js";
 import { writeAnthropicError, isTogetherApiError } from "../claude/together-call.js";
 import { handleCodexProxyRequest, writeOpenAIError } from "../codex/proxy.js";
+import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
 import {
@@ -131,11 +132,19 @@ export function renderDaemonError(
   agent: string | undefined,
 ): void {
   if (agent === "codex" || agent === "codex-app") {
+    if (err instanceof TogetherResponseHeaderTimeoutError) {
+      writeOpenAIError(res, 504, "timeout_error", err.message);
+      return;
+    }
     if (isTogetherApiError(err)) {
       writeOpenAIError(res, err.anthropicStatus, err.anthropicType, err.message);
       return;
     }
     writeOpenAIError(res, 500, "api_error", err instanceof Error ? err.message : String(err));
+    return;
+  }
+  if (err instanceof TogetherResponseHeaderTimeoutError) {
+    writeAnthropicError(res, 504, "timeout_error", err.message);
     return;
   }
   if (isTogetherApiError(err)) {

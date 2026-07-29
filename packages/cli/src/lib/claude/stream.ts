@@ -217,6 +217,9 @@ export async function streamAnthropicFromTogether(
         ...(signal ? { signal } : {}),
       });
     } catch (err) {
+      if (signal?.aborted) {
+        return clientDisconnectedResult();
+      }
       if (err instanceof TogetherSsePrematureCloseError) {
         return failAnthropicStream(res, 502, "api_error", err.message);
       }
@@ -262,6 +265,7 @@ export async function streamAnthropicFromTogether(
             reason,
             timeoutMs,
           }),
+        ...(signal ? { signal } : {}),
       },
     )) {
       if (eventData.attempt !== streamAttempt) {
@@ -330,6 +334,9 @@ export async function streamAnthropicFromTogether(
       }
     }
   } catch (err) {
+    if (signal?.aborted) {
+      return clientDisconnectedResult();
+    }
     debugLog(options, "together stream read error", {
       error: err instanceof Error ? err.message : String(err),
     });
@@ -391,6 +398,10 @@ export async function streamAnthropicFromTogether(
   return { ok: true, status: res.statusCode };
 }
 
+function clientDisconnectedResult(): StreamProxyResult {
+  return { ok: false, status: 499, error: "Claude client disconnected." };
+}
+
 type CollectedStreamToolCall = {
   id?: string;
   index: number;
@@ -447,6 +458,7 @@ async function streamAnthropicNativeToolLoop({
       initialPayload.max_tokens as number | undefined,
       () => postTogetherStream(currentPayload, options, signal),
       () => blockManager.hasOutput(),
+      signal,
     );
     inputTokens += collected.inputTokens;
     outputTokens += collected.outputTokens;
@@ -621,6 +633,7 @@ async function collectTogetherStreamTurn(
   requestedMaxTokens?: number | undefined,
   retry: () => Promise<Response> = async () => response,
   isOutputStarted: () => boolean = () => false,
+  signal?: AbortSignal,
 ): Promise<CollectedStreamTurn> {
   const toolCalls = new Map<number, CollectedStreamToolCall>();
   let upstreamFinishReason: string | null = null;
@@ -647,6 +660,7 @@ async function collectTogetherStreamTurn(
           reason,
           timeoutMs,
         }),
+      ...(signal ? { signal } : {}),
     })) {
       if (eventData.attempt !== streamAttempt) {
         streamAttempt = eventData.attempt;

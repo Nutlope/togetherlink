@@ -152,7 +152,11 @@ export async function handleProxyRequest(
   const body = parsedBody as AnthropicMessagesRequest;
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
-    upstreamAbort.abort();
+    if (upstreamAbort.signal.aborted) {
+      return;
+    }
+    debugLog(options, "claude client disconnected; aborting upstream request", {});
+    upstreamAbort.abort(new DOMException("Claude client disconnected.", "AbortError"));
   };
   req.once("aborted", markClientDisconnected);
   res.once("close", () => {
