@@ -60,14 +60,18 @@ export class TogetherSsePrematureCloseError extends Error {
   constructor(
     readonly clientRequestId?: string | undefined,
     readonly upstreamRequestId?: string | undefined,
+    cause?: unknown,
   ) {
     const ids = [
       clientRequestId ? `client request ID: ${clientRequestId}` : undefined,
       upstreamRequestId ? `upstream request ID: ${upstreamRequestId}` : undefined,
     ].filter(Boolean);
+    const causeMessage = cause instanceof Error ? cause.message : undefined;
     super(
       "Together stream closed before the [DONE] event." +
+        (causeMessage ? ` Upstream reader error: ${causeMessage}.` : "") +
         (ids.length > 0 ? ` (${ids.join(", ")})` : ""),
+      { cause },
     );
     this.name = "TogetherSsePrematureCloseError";
   }
@@ -222,8 +226,14 @@ async function* readResponseSse(
     }
     if (err instanceof TogetherSseIdleTimeoutError || err instanceof TogetherSseTurnTimeoutError) {
       await reader.cancel(err).catch(() => undefined);
+      throw err;
     }
-    throw err;
+    const prematureClose = new TogetherSsePrematureCloseError(
+      diagnostics?.clientRequestId,
+      diagnostics?.upstreamRequestId,
+      err,
+    );
+    throw prematureClose;
   } finally {
     clearTimeout(turnTimer);
     watchdog.dispose();

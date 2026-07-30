@@ -3,6 +3,19 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.4 - 2026-07-30
+
+### Fixed
+
+- Classified upstream SSE reader terminations as premature closes, allowing safe pre-output
+  retries and surfacing an explicit error after actionable output instead of silently ending the
+  Claude turn successfully.
+
+### Tests
+
+- Added deterministic coverage for retrying or surfacing terminated SSE readers according to
+  whether actionable harness output has begun.
+
 ## 0.7.3 - 2026-07-29
 
 ### Fixed

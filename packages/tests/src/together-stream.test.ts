@@ -56,6 +56,46 @@ describe("shared Together SSE transport", () => {
     expect(events.join("\n")).toContain("recovered");
   });
 
+  test("retries a stream whose reader terminates before DONE when no harness output started", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    const retry = vi.fn(async () =>
+      sseResponse([
+        { choices: [{ delta: { content: "recovered after transport termination" } }] },
+        { choices: [{ finish_reason: "stop", delta: {} }] },
+      ]),
+    );
+
+    const events: string[] = [];
+    for await (const event of readTogetherSseWithRetry(terminatedSseResponse(), retry, {
+      isOutputStarted: () => false,
+    })) {
+      events.push(event.data);
+    }
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(events.join("\n")).toContain("recovered after transport termination");
+  });
+
+  test("surfaces a terminated reader after harness output starts", async () => {
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
+    const retry = vi.fn(async () => sseResponse([]));
+
+    const consume = async () => {
+      for await (const _event of readTogetherSseWithRetry(terminatedSseResponse(), retry, {
+        isOutputStarted: () => true,
+      })) {
+        // The first chunk represents output already forwarded by the harness.
+      }
+    };
+
+    await expect(consume()).rejects.toMatchObject({
+      name: "TogetherSsePrematureCloseError",
+      message: expect.stringContaining("Upstream reader error: terminated."),
+      cause: expect.objectContaining({ message: "terminated" }),
+    });
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   test("retries a transient HTTP 500 before the stream starts", async () => {
     vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "1");
     const fetchMock = vi
@@ -262,4 +302,21 @@ function prematurelyClosedSseResponse(events: unknown[]): Response {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });
+}
+
+function terminatedSseResponse(): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { reasoning: "still thinking" } }] })}\n\n`,
+          ),
+        );
+        controller.error(new TypeError("terminated"));
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
 }
