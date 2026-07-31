@@ -3,6 +3,7 @@ import {
   removeManagedBlock,
   removeTomlSections,
   splitTomlPreamble,
+  insertTopLevelTomlKeys,
   upsertTopLevelTomlKeys,
   removeTopLevelTomlKeys,
   tomlString,
@@ -51,6 +52,16 @@ describe("codex-app/toml.ts — pure TOML preamble manipulation (#4)", () => {
     expect(out).toContain('model = "new"');
     expect(out).toContain('model_provider = "togetherlink"');
     expect(out).toContain('other = "keep"');
+  });
+
+  test("insertTopLevelTomlKeys preserves user-owned values", () => {
+    const out = insertTopLevelTomlKeys('voice_url = "user"\n', {
+      voice_url: '"managed"',
+      ws_url: '"default"',
+    });
+    expect(out).toContain('voice_url = "user"');
+    expect(out).not.toContain('voice_url = "managed"');
+    expect(out).toContain('ws_url = "default"');
   });
 
   test("removeTopLevelTomlKeys strips only the named keys", () => {

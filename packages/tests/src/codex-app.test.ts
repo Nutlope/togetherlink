@@ -3,7 +3,7 @@ import { DEFAULT_MODEL } from "@togetherlink/models";
 import { buildCodexAppConfig, codexAppModelCatalogJson } from "../../cli/src/lib/codex-app.js";
 
 describe("Codex App alpha config", () => {
-  test("writes an app-specific provider without dropping existing tables", () => {
+  test("adds the Together router without replacing the native OpenAI provider", () => {
     const config = buildCodexAppConfig(
       [
         'model = "gpt-5.5"',
@@ -26,22 +26,23 @@ describe("Codex App alpha config", () => {
     );
 
     expect(config).toContain('model = "zai-org/GLM-5.2"');
-    expect(config).toContain('model_provider = "togetherlink_codex_app"');
+    expect(config).toContain('model_provider = "openai"');
     expect(config).toContain('model_catalog_json = "/tmp/models.json"');
     expect(config).not.toContain("approval_policy");
     expect(config).not.toContain("model_context_window");
     expect(config).not.toContain("model_auto_compact_token_limit");
-    expect(config).not.toContain("model_reasoning_effort");
-    expect(config).not.toContain("openai_base_url");
+    expect(config).toContain('model_reasoning_effort = "high"');
+    expect(config).toContain('openai_base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
+    expect(config).toContain(
+      'experimental_realtime_webrtc_call_base_url = "https://chatgpt.com/backend-api/codex"',
+    );
+    expect(config).toContain('experimental_realtime_ws_base_url = "https://api.openai.com/v1"');
     expect(config).toContain('[projects."/repo"]');
     expect(config).toContain("[model_providers.togetherlink_codex_app]");
     expect(config).toContain('name = "Togetherlink"');
     expect(config).toContain('base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
     expect(config).toContain('wire_api = "responses"');
-    // Codex Desktop currently gates the model picker on provider auth state.
-    // This keeps the picker visible for custom providers; actual model
-    // requests still go to Togetherlink's local base_url.
-    expect(config).toContain("requires_openai_auth = true");
+    expect(config).not.toContain("requires_openai_auth");
   });
 
   test("replaces an existing managed block instead of appending duplicates", () => {
@@ -66,13 +67,38 @@ describe("Codex App alpha config", () => {
     expect(second).not.toContain("/tmp/old.json");
     expect(second).not.toContain("/session/old/v1");
     expect(second).toContain('model = "moonshotai/Kimi-K2.7-Code"');
-    expect(second).toContain('model_provider = "togetherlink_codex_app"');
+    expect(second).not.toContain("model_provider =");
     expect(second.match(/approval_policy = "on-request"/g)).toHaveLength(1);
     expect(second.match(/sandbox_mode = "workspace-write"/g)).toHaveLength(1);
     expect(second.match(/approvals_reviewer = "auto_review"/g)).toHaveLength(1);
-    expect(second).not.toContain("openai_base_url");
+    expect(second).toContain('openai_base_url = "http://127.0.0.1:7878/session/new/v1"');
     expect(second).toContain('base_url = "http://127.0.0.1:7878/session/new/v1"');
     expect(second).toContain("/session/new/v1");
+  });
+
+  test("preserves the native default and user-owned realtime endpoints when no model is requested", () => {
+    const config = buildCodexAppConfig(
+      [
+        'model = "gpt-5.6-sol"',
+        'model_provider = "openai"',
+        'experimental_realtime_webrtc_call_base_url = "https://voice.example/calls"',
+        'experimental_realtime_ws_base_url = "wss://voice.example/live"',
+      ].join("\n"),
+      {
+        providerId: "togetherlink_codex_app",
+        providerName: "Togetherlink",
+        baseUrl: "http://127.0.0.1:7878/session/local-secret/v1",
+        bearerToken: "local-secret",
+        catalogPath: "/tmp/models.json",
+      },
+    );
+
+    expect(config).toContain('model = "gpt-5.6-sol"');
+    expect(config).toContain('model_provider = "openai"');
+    expect(config).toContain(
+      'experimental_realtime_webrtc_call_base_url = "https://voice.example/calls"',
+    );
+    expect(config).toContain('experimental_realtime_ws_base_url = "wss://voice.example/live"');
   });
 
   test("removes legacy app profile and provider tables", () => {
@@ -187,5 +213,32 @@ describe("Codex App alpha config", () => {
     const vision = catalog.models.find((m) => m.slug === "moonshotai/Kimi-K2.6");
     expect(vision?.supports_image_detail_original).toBe(true);
     expect(vision?.input_modalities).toEqual(["text", "image"]);
+  });
+
+  test("merges native GPT and Together models into one picker catalog", () => {
+    const catalog = JSON.parse(
+      codexAppModelCatalogJson({
+        models: [
+          {
+            slug: "gpt-5.6-sol",
+            display_name: "GPT-5.6-Sol",
+            priority: 1,
+            native_marker: "preserved",
+          },
+          { slug: "gpt-5.6-terra", display_name: "GPT-5.6-Terra", priority: 2 },
+        ],
+      }),
+    ) as { models: Array<Record<string, unknown>> };
+
+    expect(catalog.models.map((model) => model.slug)).toEqual(
+      expect.arrayContaining(["gpt-5.6-sol", "gpt-5.6-terra", DEFAULT_MODEL.id]),
+    );
+    expect(catalog.models.find((model) => model.slug === "gpt-5.6-sol")).toMatchObject({
+      display_name: "GPT-5.6-Sol",
+      native_marker: "preserved",
+    });
+    expect(
+      catalog.models.find((model) => model.slug === DEFAULT_MODEL.id)?.priority,
+    ).toBeGreaterThan(2);
   });
 });

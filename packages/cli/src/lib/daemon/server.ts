@@ -9,7 +9,11 @@ import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
 import { extractToken, readJsonBody, requestPath, writeJson } from "../http-util.js";
 import { handleProxyRequest } from "../claude/proxy.js";
 import { writeAnthropicError, isTogetherApiError } from "../claude/together-call.js";
-import { handleCodexProxyRequest, writeOpenAIError } from "../codex/proxy.js";
+import {
+  handleCodexProxyRequest,
+  writeOpenAIError,
+  type CodexProxyOptions,
+} from "../codex/proxy.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
@@ -411,7 +415,10 @@ async function handleDaemonRequest(
   // user's claude.ai OAuth token when they are logged in, so rewrite the header
   // to the expected token (this also keeps the OAuth credential out of any
   // downstream logging).
-  if (sessionRoute !== undefined) {
+  const preserveNativeCodexAuth =
+    session.agent === "codex-app" &&
+    (session.options as CodexProxyOptions).nativeBaseUrl !== undefined;
+  if (sessionRoute !== undefined && !preserveNativeCodexAuth) {
     req.headers.authorization = `Bearer ${session.options.authToken}`;
     delete req.headers["x-api-key"];
   }

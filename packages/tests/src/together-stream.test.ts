@@ -116,7 +116,7 @@ describe("shared Together SSE transport", () => {
 
     const response = await postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "redacted" },
+      { apiKey: "redacted", fetch: globalThis.fetch },
     );
 
     expect(response.status).toBe(200);
@@ -208,7 +208,7 @@ describe("shared Together SSE transport", () => {
     );
     const response = await postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "redacted" },
+      { apiKey: "redacted", fetch: globalThis.fetch },
     );
     const consume = async () => {
       for await (const _event of readTogetherSseWithRetry(response, async () => sseResponse([]), {

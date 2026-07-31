@@ -32,6 +32,7 @@ describe("daemon session persistence", () => {
             agent: "claude",
             apiKey: "phantom-key",
             baseUrl: "http://protected-proxy.test/together/v1",
+            nativeBaseUrl: "https://chatgpt.example/backend-api/codex",
             modelLabel: GLM_5_2.name,
             modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
             targetModelId: GLM_5_2.id,
@@ -46,13 +47,19 @@ describe("daemon session persistence", () => {
           const restoredStore = await createSessionStore(home);
           const restored = restoredStore.restoreActiveSessions();
           restoredStore.close();
-          process.stdout.write(restored[0]?.baseUrl ?? "missing");
+          process.stdout.write(JSON.stringify({
+            baseUrl: restored[0]?.baseUrl,
+            nativeBaseUrl: restored[0]?.nativeBaseUrl,
+          }));
         `,
         home,
       ],
       { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
     );
 
-    expect(output).toBe("http://protected-proxy.test/together/v1");
+    expect(JSON.parse(output)).toEqual({
+      baseUrl: "http://protected-proxy.test/together/v1",
+      nativeBaseUrl: "https://chatgpt.example/backend-api/codex",
+    });
   });
 });

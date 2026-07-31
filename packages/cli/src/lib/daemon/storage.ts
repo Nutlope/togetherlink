@@ -239,12 +239,12 @@ class SqliteSessionStore implements SessionStore {
       .prepare(`
         INSERT INTO sessions (
           token, agent, pid, started_at, last_seen_at, ended_at, model_label, api_key, base_url,
-          auth_token,
+          auth_token, native_base_url,
           model_id, target_model_id, model_name, model_definition_json,
           claude_code_max_output_tokens, claude_code_max_output_tokens_user_set, debug,
           prompt_tokens, cached_tokens, completion_tokens, cost_usd, cost_summary,
           external_summary, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
           agent = excluded.agent,
           pid = excluded.pid,
@@ -255,6 +255,7 @@ class SqliteSessionStore implements SessionStore {
           api_key = excluded.api_key,
           base_url = excluded.base_url,
           auth_token = excluded.auth_token,
+          native_base_url = excluded.native_base_url,
           model_id = excluded.model_id,
           target_model_id = excluded.target_model_id,
           model_name = excluded.model_name,
@@ -355,6 +356,7 @@ class SqliteSessionStore implements SessionStore {
         api_key TEXT NOT NULL,
         base_url TEXT,
         auth_token TEXT,
+        native_base_url TEXT,
         model_id TEXT,
         target_model_id TEXT,
         model_name TEXT,
@@ -375,6 +377,7 @@ class SqliteSessionStore implements SessionStore {
     `);
     this.addColumnIfMissing("sessions", "last_seen_at", "INTEGER");
     this.addColumnIfMissing("sessions", "base_url", "TEXT");
+    this.addColumnIfMissing("sessions", "native_base_url", "TEXT");
     this.addColumnIfMissing("sessions", "claude_code_max_output_tokens", "INTEGER");
     this.addColumnIfMissing("sessions", "claude_code_max_output_tokens_user_set", "INTEGER");
   }
@@ -432,6 +435,7 @@ function sessionParams(session: SessionPersistInput, updatedAt: number): unknown
     session.apiKey,
     session.baseUrl ?? null,
     session.authToken ?? null,
+    session.nativeBaseUrl ?? null,
     session.modelId ?? null,
     session.targetModelId ?? null,
     session.modelName ?? null,
@@ -464,6 +468,7 @@ type SessionRow = {
   api_key: string;
   base_url: string | null;
   auth_token: string | null;
+  native_base_url: string | null;
   model_id: string | null;
   target_model_id: string | null;
   model_name: string | null;
@@ -487,6 +492,7 @@ function rowToSessionBase(row: SessionRow): StoredSession {
     apiKey: row.api_key,
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     ...(row.auth_token ? { authToken: row.auth_token } : {}),
+    ...(row.native_base_url ? { nativeBaseUrl: row.native_base_url } : {}),
     modelLabel: row.model_label,
     modelDefinition: parseJson(row.model_definition_json, {}) as StoredSession["modelDefinition"],
     ...(row.model_id ? { modelId: row.model_id } : {}),

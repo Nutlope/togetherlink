@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { VISION_MODELS, VISION_PROMPT } from "@togetherlink/models";
-import { postChatCompletion } from "../together-client.js";
+import { postChatCompletion, type TogetherClientOptions } from "../together-client.js";
 
 /**
  * Image interception for the Claude proxy. GLM-5.2 is text-only, so when Claude
@@ -36,6 +36,7 @@ export type VisionRequestOptions = {
   apiKey: string;
   baseUrl: string;
   debug?: boolean | undefined;
+  fetch?: TogetherClientOptions["fetch"];
 };
 
 /** Whether a content block is an image we should intercept. */

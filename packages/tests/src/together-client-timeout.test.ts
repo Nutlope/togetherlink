@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -8,6 +9,8 @@ import {
   postChatCompletionStream,
 } from "../../cli/src/lib/together-client.js";
 import { resolveRequestDiagnosticsPath } from "../../cli/src/lib/request-diagnostics.js";
+
+const togetherOptions = () => ({ apiKey: "redacted", fetch: globalThis.fetch });
 
 describe("Together response-header timeout", () => {
   let temporaryHome: string | undefined;
@@ -49,7 +52,7 @@ describe("Together response-header timeout", () => {
 
     const pending = postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "redacted" },
+      togetherOptions(),
     ).catch((caught: unknown) => caught);
 
     await vi.advanceTimersByTimeAsync(89_999);
@@ -65,6 +68,70 @@ describe("Together response-header timeout", () => {
     expect(response).toBeInstanceOf(Response);
     expect((response as Response).status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("isolates every upstream attempt from the process-global connection pool", async () => {
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postChatCompletion(
+      { model: "fault-injection", messages: [], stream: false },
+      togetherOptions(),
+    );
+    await postChatCompletion(
+      { model: "fault-injection", messages: [], stream: false },
+      togetherOptions(),
+    );
+
+    const firstInit = fetchMock.mock.calls[0]?.[1] as
+      | (RequestInit & { dispatcher?: unknown })
+      | undefined;
+    const secondInit = fetchMock.mock.calls[1]?.[1] as
+      | (RequestInit & { dispatcher?: unknown })
+      | undefined;
+    expect(firstInit?.dispatcher).toBeDefined();
+    expect(secondInit?.dispatcher).toBeDefined();
+    expect(secondInit?.dispatcher).not.toBe(firstInit?.dispatcher);
+  });
+
+  test("uses the owned Node transport even when process-global fetch is broken", async () => {
+    let connectionHeader: string | undefined;
+    const server = http.createServer((request, response) => {
+      connectionHeader = request.headers.connection;
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"id":"ok"}');
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("test server did not bind");
+    }
+    const brokenGlobalFetch = vi.fn(async () => {
+      throw new TypeError("poisoned global fetch");
+    });
+    vi.stubGlobal("fetch", brokenGlobalFetch);
+
+    try {
+      const response = await postChatCompletion(
+        { model: "fault-injection", messages: [], stream: false },
+        {
+          apiKey: "redacted",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ id: "ok" });
+      expect(brokenGlobalFetch).not.toHaveBeenCalled();
+      expect(connectionHeader).toBe("close");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 
   test("rejects a fetch that never returns headers with a typed, persisted diagnostic", async () => {
@@ -86,7 +153,7 @@ describe("Together response-header timeout", () => {
 
     const error = await postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "redacted" },
+      togetherOptions(),
     ).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(TogetherResponseHeaderTimeoutError);
@@ -123,7 +190,7 @@ describe("Together response-header timeout", () => {
 
     const error = await postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "redacted" },
+      togetherOptions(),
       caller.signal,
     ).catch((caught: unknown) => caught);
 
@@ -155,7 +222,7 @@ describe("Together response-header timeout", () => {
 
     await postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "redacted" },
+      togetherOptions(),
       caller.signal,
     );
     caller.abort(new DOMException("Client disconnected", "AbortError"));
@@ -182,7 +249,12 @@ describe("Together response-header timeout", () => {
 
     await postChatCompletionStream(
       { model: "fault-injection", messages: [], stream: true },
-      { apiKey: "secret-never-log", baseUrl: "https://together.test/v1", debug: true },
+      {
+        ...togetherOptions(),
+        apiKey: "secret-never-log",
+        baseUrl: "https://together.test/v1",
+        debug: true,
+      },
     );
 
     const headerLog = stderr.mock.calls
@@ -214,7 +286,7 @@ describe("Together response-header timeout", () => {
 
     const error = await postChatCompletion(
       { model: "fault-injection", messages: [], stream: false },
-      { apiKey: "redacted" },
+      togetherOptions(),
     ).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(TogetherResponseHeaderTimeoutError);

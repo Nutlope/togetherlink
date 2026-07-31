@@ -125,13 +125,13 @@ const codexAppCommands = [
     command: "togetherlink chatgpt",
     label: "Configure",
     description:
-      "Patches ChatGPT Desktop config to route through Together. The change stays active until you restore.",
+      "Adds Together models beside native GPT models in the same picker. The router stays active until you restore.",
   },
   {
     command: "togetherlink chatgpt --restore",
     label: "Restore",
     description:
-      "Brings back your OpenAI / ChatGPT subscription profile and removes the togetherlink config.",
+      "Removes the additive catalog and router, restoring the exact previous Codex config.",
   },
 ];
 
@@ -460,8 +460,8 @@ function Home() {
               </div>
               <p className="m-0 mt-1.5 text-[14.5px] leading-normal text-muted">
                 Also works with the ChatGPT desktop app. Unlike the per-run CLI wrappers above, this
-                persistently patches ChatGPT Desktop config so the app talks to Together. When you
-                want your OpenAI subscription back, run the restore command.
+                persistently adds Together models beside native GPT models. Choose either provider
+                from the same picker; restore removes the router and returns the exact prior config.
               </p>
             </div>
           </div>

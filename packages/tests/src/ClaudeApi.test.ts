@@ -2380,6 +2380,7 @@ function proxyOptions(overrides: Partial<ClaudeProxyOptions> = {}): ClaudeProxyO
     modelName: GLM_5_2.name,
     modelDefinition: GLM_5_2 as ModelDefinition,
     authToken: "local-token",
+    fetch: globalThis.fetch,
     ...overrides,
   };
 }

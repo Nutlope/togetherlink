@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ModelDefinition } from "@togetherlink/models";
+import { Agent, fetch as undiciFetch } from "undici";
 import { TOGETHER_BASE_URL } from "./together-core.js";
 import { backoffMs, parseRetryAfter, sleep } from "./together-retry.js";
 import { persistRequestDiagnostic } from "./request-diagnostics.js";
@@ -9,6 +10,7 @@ import {
   applyContextFit,
   emitContextTrimAlarm,
   newContextFitState,
+  stripHistoricalImages,
 } from "./context-fit.js";
 import type { ContextTrimTelemetryInfo } from "./telemetry.js";
 
@@ -74,6 +76,9 @@ export type TogetherClientOptions = {
   /** Explicit for proxied sessions; defaults only for direct library callers. */
   baseUrl?: string;
   debug?: boolean | undefined;
+  /** Injectable deterministic transport for protocol tests. Production uses
+   * an isolated Undici client under Node and Bun's fetch with no keep-alive. */
+  fetch?: ((input: string, init: RequestInit) => Promise<Response>) | undefined;
 };
 
 /**
@@ -107,6 +112,7 @@ export async function postChatCompletion(
   signal?: AbortSignal,
   fit?: ContextFitConfig,
 ): Promise<Response> {
+  pruneHistoricalImages(payload, options);
   const doFetch = (body: string) =>
     payload.stream === true
       ? streamFetchOnce(body, options, signal)
@@ -178,6 +184,9 @@ export async function postChatCompletionStream(
   body?: string,
   fit?: ContextFitConfig,
 ): Promise<Response> {
+  if (body === undefined) {
+    pruneHistoricalImages(payload, options);
+  }
   const doFetch = (b: string) => streamFetchOnce(b, options, signal);
   if (body !== undefined || !fit) {
     return doFetch(body ?? JSON.stringify(payload));
@@ -240,16 +249,42 @@ async function fetchTogetherResponse(
   timeout.unref?.();
 
   try {
-    const response = await fetch(upstreamUrl, {
+    // A long-lived daemon must not inherit a poisoned process-global Undici
+    // pool. Each attempt owns a dispatcher and closes it as soon as that one
+    // response body completes. `Connection: close` provides the equivalent
+    // isolation under Bun, whose fetch currently ignores Undici dispatchers.
+    const dispatcher = process.versions.bun
+      ? undefined
+      : new Agent({ connections: 1, keepAliveTimeout: 1, keepAliveMaxTimeout: 1 });
+    const requestInit = {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.apiKey}`,
+        Connection: "close",
         "Content-Type": "application/json",
         "X-Client-Request-ID": clientRequestId,
       },
       body,
       signal: controller.signal,
+      ...(dispatcher ? { dispatcher } : {}),
+    } as unknown as RequestInit;
+    const fetchImpl =
+      options.fetch ??
+      (process.versions.bun
+        ? globalThis.fetch
+        : (undiciFetch as unknown as typeof globalThis.fetch));
+    const response = await fetchImpl(upstreamUrl, requestInit).catch(async (error: unknown) => {
+      await dispatcher?.destroy(error instanceof Error ? error : new Error(String(error)));
+      throw error;
     });
+    // close() is graceful: it prevents reuse immediately, then waits for the
+    // active response body to finish or be canceled before releasing sockets.
+    if (dispatcher) {
+      void dispatcher
+        .close()
+        .catch(() => undefined)
+        .finally(() => signal?.removeEventListener("abort", abortFromCaller));
+    }
     const responseRequestId = upstreamRequestId(response);
     responseDiagnostics.set(response, {
       clientRequestId,
@@ -282,6 +317,20 @@ async function fetchTogetherResponse(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function pruneHistoricalImages(
+  payload: Record<string, unknown>,
+  options: TogetherClientOptions,
+): void {
+  const pruned = stripHistoricalImages(payload.messages);
+  if (!pruned) {
+    return;
+  }
+  writeProxyDebugLog("togetherlink proxy", options, "historical images pruned", {
+    removedParts: pruned.removedParts,
+    freedBytes: pruned.freedChars,
+  });
 }
 
 function responseHeaderTimeoutMs(): number {

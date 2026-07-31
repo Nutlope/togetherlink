@@ -150,6 +150,48 @@ describe("daemon lazy codex-app session restore", () => {
     }
   });
 
+  test("preserves ChatGPT auth when a restored app session routes a native GPT model", async () => {
+    let upstreamAuth = "";
+    let upstreamAccount = "";
+    let upstreamPath = "";
+    const upstream = http.createServer((req, res) => {
+      upstreamAuth = String(req.headers.authorization ?? "");
+      upstreamAccount = String(req.headers["chatgpt-account-id"] ?? "");
+      upstreamPath = req.url ?? "";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "native-ok", status: "completed" }));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (typeof address !== "object" || address === null) throw new Error("upstream did not bind");
+
+    try {
+      const restoredRegistration = registration();
+      restoredRegistration.nativeBaseUrl = `http://127.0.0.1:${address.port}/backend-api/codex`;
+      await writeAppRegistration(restoredRegistration, daemon.home);
+      await fetch(`${daemon.url}/internal/sessions/${encodeURIComponent(TOKEN)}`, {
+        method: "DELETE",
+      });
+
+      const response = await fetch(`${daemon.url}/session/${TOKEN}/v1/responses`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer chatgpt-oauth-token",
+          "chatgpt-account-id": "chatgpt-account",
+        },
+        body: JSON.stringify({ model: "gpt-5.6-sol", input: "native" }),
+      });
+
+      expect(response.ok).toBe(true);
+      expect(upstreamPath).toBe("/backend-api/codex/responses");
+      expect(upstreamAuth).toBe("Bearer chatgpt-oauth-token");
+      expect(upstreamAccount).toBe("chatgpt-account");
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+
   test("stops resurrecting the session after restore clears the registration", async () => {
     // `togetherlink codex-app --restore` deletes both the daemon session and
     // the persisted registration; the token must go back to 401.

@@ -80,6 +80,19 @@ export function upsertTopLevelTomlKeys(preamble: string, values: Record<string, 
   return `${prefix}${insertion.join("\n")}${insertion.length > 0 ? "\n" : ""}`;
 }
 
+/** Add top-level keys only when the user has not already configured them. */
+export function insertTopLevelTomlKeys(preamble: string, values: Record<string, string>): string {
+  const existing = new Set<string>();
+  for (const line of preamble.split(/\n/)) {
+    const match = /^\s*([A-Za-z0-9_-]+)\s*=/.exec(line);
+    if (match?.[1]) existing.add(match[1]);
+  }
+  return upsertTopLevelTomlKeys(
+    preamble,
+    Object.fromEntries(Object.entries(values).filter(([key]) => !existing.has(key))),
+  );
+}
+
 export function removeTopLevelTomlKeys(preamble: string, keys: string[]): string {
   const remove = new Set(keys);
   return preamble

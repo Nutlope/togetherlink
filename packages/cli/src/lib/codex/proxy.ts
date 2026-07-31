@@ -1,11 +1,12 @@
 import { type IncomingMessage, type ServerResponse } from "node:http";
-import { type ModelDefinition } from "@togetherlink/models";
+import { findModelById, type ModelDefinition } from "@togetherlink/models";
 import { codexModelCatalog } from "./catalog.js";
 import type { CostTracker } from "../cost.js";
 import { createProxyPerfTracer, type ProxyPerfSink } from "../proxy-perf.js";
-import { readJsonBodyWithSize, requestPath, writeJson } from "../http-util.js";
+import { requestPath, writeJson } from "../http-util.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { objectKeys } from "./content-format.js";
+import { forwardNativeCodexRequest, readDecodedCodexRequest } from "./native-router.js";
 import {
   resolveCodexRequestModel,
   toChatPayload,
@@ -16,6 +17,7 @@ import { callTogetherWithNativeTools } from "./together-call.js";
 import { recordUsage } from "./usage.js";
 import { streamResponseFromTogether } from "./stream.js";
 import type { ResponsesRequest, ResponsesTool } from "./wire-types.js";
+import type { TogetherClientOptions } from "../together-client.js";
 
 export type CodexProxyOptions = {
   apiKey: string;
@@ -26,9 +28,12 @@ export type CodexProxyOptions = {
   modelName: string;
   modelDefinition: ModelDefinition;
   authToken: string;
+  /** When set, unknown/non-Together model ids retain normal ChatGPT routing. */
+  nativeBaseUrl?: string | undefined;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   perfSink?: ProxyPerfSink | undefined;
+  fetch?: TogetherClientOptions["fetch"];
 };
 
 export async function handleCodexProxyRequest(
@@ -58,7 +63,21 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  if (req.method !== "POST" || path !== "/v1/responses") {
+  const nativeOnlyPath = path === "/v1/images/generations" || path === "/v1/images/edits";
+  if (req.method === "POST" && nativeOnlyPath && options.nativeBaseUrl) {
+    const request = await readDecodedCodexRequest(req);
+    await forwardNativeCodexRequest(req, res, {
+      baseUrl: options.nativeBaseUrl,
+      path,
+      body: request.bytes,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+    perf.end({ status: res.statusCode, native: true });
+    return;
+  }
+
+  const responsesPath = path === "/v1/responses" || path === "/v1/responses/compact";
+  if (req.method !== "POST" || !responsesPath) {
     writeOpenAIError(
       res,
       404,
@@ -68,12 +87,36 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  // readJsonBodyWithSize captures the raw inbound byte length — the cheap
-  // signal the self-calibrating token estimator keys on (see cost.ts).
-  const { body: parsedBody, rawBytes } = await perf.span("body_read_parse", () =>
-    readJsonBodyWithSize(req),
-  );
-  const body = parsedBody as ResponsesRequest;
+  // Capture the decoded JSON byte length — the cheap signal the
+  // self-calibrating token estimator keys on (see cost.ts). Built-in OpenAI
+  // traffic may arrive zstd-compressed, so transport bytes are not sufficient.
+  const request = await perf.span("body_read_parse", () => readDecodedCodexRequest(req));
+  const { body, rawBytes } = request;
+  const requestedTogetherModel = body.model ? findModelById(body.model) : undefined;
+  if (options.nativeBaseUrl && body.model && !requestedTogetherModel) {
+    const nativeBody = { ...body } as ResponsesRequest & { previous_response_id?: unknown };
+    if (path !== "/v1/responses/compact") {
+      delete nativeBody.previous_response_id;
+    }
+    await forwardNativeCodexRequest(req, res, {
+      baseUrl: options.nativeBaseUrl,
+      path,
+      body: Buffer.from(JSON.stringify(nativeBody), "utf8"),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+    perf.end({ status: res.statusCode, native: true, model: body.model });
+    return;
+  }
+  if (path === "/v1/responses/compact") {
+    writeOpenAIError(
+      res,
+      400,
+      "invalid_request_error",
+      "Together models do not support the native /responses/compact route.",
+    );
+    perf.end({ status: res.statusCode });
+    return;
+  }
   // Record the inbound byte length for the estimator, then mark a new request
   // (beginRequest resets the per-request delta and arms the first-addUsage
   // calibration). noteRequestBytes must precede beginRequest's first addUsage.

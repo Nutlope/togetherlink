@@ -34,9 +34,41 @@ const CODEX_MODEL_MESSAGES = {
   },
 };
 
-export function codexModelCatalog(): { models: Array<Record<string, unknown>> } {
+export type CodexModelCatalog = { models: Array<Record<string, unknown>> };
+
+export function codexModelCatalog(): CodexModelCatalog {
   return {
     models: CODEX_SUPPORTED_MODELS.map((model, index) => toCodexModelCatalogEntry(model, index)),
+  };
+}
+
+/**
+ * Add Together models to a native Codex catalog without rewriting native
+ * metadata. Together entries are placed after the native picker rows so
+ * enabling TogetherLink does not silently change the user's GPT default.
+ */
+export function mergeCodexModelCatalog(nativeCatalog: CodexModelCatalog): CodexModelCatalog {
+  const nativeModels = nativeCatalog.models.filter(
+    (entry) => typeof entry?.slug === "string" && entry.slug.length > 0,
+  );
+  if (nativeModels.length === 0) {
+    throw new Error("Cannot build an additive Codex catalog from an empty native catalog.");
+  }
+  const priorities = nativeModels
+    .map((entry) => entry.priority)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const firstTogetherPriority = (priorities.length > 0 ? Math.max(...priorities) : 50) + 1;
+  const merged = new Map(nativeModels.map((entry) => [String(entry.slug), entry]));
+  CODEX_SUPPORTED_MODELS.forEach((model, index) => {
+    merged.set(model.id, toCodexModelCatalogEntry(model, firstTogetherPriority + index));
+  });
+  return {
+    models: [...merged.values()].sort((left, right) => {
+      const priority =
+        Number(left.priority ?? Number.MAX_SAFE_INTEGER) -
+        Number(right.priority ?? Number.MAX_SAFE_INTEGER);
+      return priority || String(left.slug).localeCompare(String(right.slug));
+    }),
   };
 }
 
