@@ -72,7 +72,9 @@ describe("Together response-header timeout", () => {
 
   test("isolates every upstream attempt from the process-global connection pool", async () => {
     vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
-    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await postChatCompletion(

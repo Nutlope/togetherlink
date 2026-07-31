@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/run-vitest.mjs",
     "test:live-smoke": "TOGETHERLINK_LIVE_SMOKE=1 node scripts/run-vitest.mjs src/LiveSmoke.test.ts",
     "test:live-codex-resume": "TOGETHERLINK_LIVE_CODEX_RESUME=1 VITEST_FILE_PARALLELISM=0 node scripts/run-vitest.mjs src/LiveCodexResume.test.ts",
