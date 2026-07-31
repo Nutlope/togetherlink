@@ -185,6 +185,13 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       renderDaemonError(res, err, requestAgent);
     });
   });
+  // Node's default requestTimeout (5 min) kills the socket outright once a
+  // client is slow sending a large request body — e.g. a Codex turn with a
+  // multi-million-token cached context. Our own upstream timeouts (Together
+  // response-header/stream timeouts, native passthrough's client-abort) are
+  // the real deadlines; the server shouldn't impose a second, shorter one.
+  server.requestTimeout = 0;
+  server.headersTimeout = 65_000;
 
   await listenOrExitOnRace(server, port);
 
