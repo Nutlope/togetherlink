@@ -273,7 +273,7 @@ async function fetchTogetherResponse(
       (process.versions.bun
         ? globalThis.fetch
         : (undiciFetch as unknown as typeof globalThis.fetch));
-    const response = await fetchImpl(upstreamUrl, requestInit).catch(async (error: unknown) => {
+    let response = await fetchImpl(upstreamUrl, requestInit).catch(async (error: unknown) => {
       await dispatcher?.destroy(error instanceof Error ? error : new Error(String(error)));
       throw error;
     });
@@ -284,6 +284,10 @@ async function fetchTogetherResponse(
         .close()
         .catch(() => undefined)
         .finally(() => signal?.removeEventListener("abort", abortFromCaller));
+    } else if (signal) {
+      response = withResponseBodyCleanup(response, () =>
+        signal.removeEventListener("abort", abortFromCaller),
+      );
     }
     const responseRequestId = upstreamRequestId(response);
     responseDiagnostics.set(response, {
@@ -317,6 +321,53 @@ async function fetchTogetherResponse(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function withResponseBodyCleanup(response: Response, cleanup: () => void): Response {
+  if (!response.body) {
+    cleanup();
+    return response;
+  }
+
+  const reader = response.body.getReader();
+  let finished = false;
+  const finish = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    cleanup();
+    reader.releaseLock();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          finish();
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        finish();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        finish();
+      }
+    },
+  });
+
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 }
 
 function pruneHistoricalImages(

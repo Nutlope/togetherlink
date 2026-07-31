@@ -230,6 +230,39 @@ describe("Together response-header timeout", () => {
     expect(upstreamSignal?.aborted).toBe(true);
   });
 
+  test("removes caller cancellation after a Bun response body completes", async () => {
+    vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
+    const bunVersion = Object.getOwnPropertyDescriptor(process.versions, "bun");
+    Object.defineProperty(process.versions, "bun", {
+      value: "test",
+      configurable: true,
+    });
+    const caller = new AbortController();
+    const removeEventListener = vi.spyOn(caller.signal, "removeEventListener");
+
+    try {
+      const response = await postChatCompletion(
+        { model: "fault-injection", messages: [], stream: false },
+        {
+          apiKey: "redacted",
+          fetch: async () => new Response("ok", { status: 200 }),
+        },
+        caller.signal,
+      );
+      expect(removeEventListener).not.toHaveBeenCalled();
+
+      expect(await response.text()).toBe("ok");
+
+      expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
+    } finally {
+      if (bunVersion) {
+        Object.defineProperty(process.versions, "bun", bunVersion);
+      } else {
+        delete (process.versions as { bun?: string }).bun;
+      }
+    }
+  });
+
   test("logs successful upstream response headers in debug mode without request credentials", async () => {
     vi.stubEnv("TOGETHERLINK_REQUEST_DIAGNOSTICS", "0");
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);

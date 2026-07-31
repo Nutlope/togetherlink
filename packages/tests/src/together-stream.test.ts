@@ -182,6 +182,29 @@ describe("shared Together SSE transport", () => {
     expect(retry).not.toHaveBeenCalled();
   });
 
+  test("cancels the upstream body when the consumer stops after DONE", async () => {
+    const encoder = new TextEncoder();
+    const cancel = vi.fn();
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        },
+        cancel,
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+
+    for await (const event of readTogetherSseWithRetry(response, async () => response, {
+      isOutputStarted: () => false,
+    })) {
+      expect(event.data).toBe("[DONE]");
+      break;
+    }
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   test("stops a turn that stays active without ever completing", async () => {
     vi.stubEnv("TOGETHERLINK_STREAM_IDLE_TIMEOUT_MS", "1000");
     vi.stubEnv("TOGETHERLINK_STREAM_TURN_TIMEOUT_MS", "100");

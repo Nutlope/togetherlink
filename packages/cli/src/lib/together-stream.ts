@@ -196,6 +196,7 @@ async function* readResponseSse(
   turnTimer?.unref?.();
   let buffer = "";
   let sawDone = false;
+  let reachedEof = false;
   try {
     for (;;) {
       throwIfAborted(signal);
@@ -208,6 +209,7 @@ async function* readResponseSse(
         throw turnError;
       }
       if (read.done) {
+        reachedEof = true;
         break;
       }
       buffer += decoder.decode(read.value, { stream: true });
@@ -242,6 +244,9 @@ async function* readResponseSse(
     }
     watchdog.dispose();
     signal?.removeEventListener("abort", cancelForCallerAbort);
+    if (!reachedEof) {
+      await reader.cancel().catch(() => undefined);
+    }
     reader.releaseLock();
   }
 
