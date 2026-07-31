@@ -8,7 +8,7 @@ import { assert } from "./assert.js";
 
 const GLM_5_2 = {
   id: "zai-org/GLM-5.2",
-  name: "GLM 5.2 · default",
+  name: "GLM 5.2",
   anthropicAlias: "together-glm-5-2",
   cost: { input: 1.4, output: 4.4, cache_read: 0.26 },
   limit: { context: 262144, output: 164000 },

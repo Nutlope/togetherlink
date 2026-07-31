@@ -241,8 +241,7 @@ function TogetherClaudeGuide() {
             should say:
           </p>
           <blockquote className="m-0 mt-5 rounded-[12px] bg-code px-5 py-4 font-mono text-[13px] leading-relaxed shadow-[inset_0_0_0_1px_rgba(229,231,235,.95)]">
-            togetherlink ▸ Routing Claude Code → Together AI (Kimi K3 · default · vision · 1M). Not
-            Anthropic.
+            togetherlink ▸ Routing Claude Code → Together AI (Kimi K3 · 1M). Not Anthropic.
           </blockquote>
           <p className="mt-4 text-[14px] leading-relaxed text-muted">
             If you do not see that line, stop and check that you launched{" "}

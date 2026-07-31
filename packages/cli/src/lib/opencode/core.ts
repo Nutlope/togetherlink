@@ -82,7 +82,7 @@ export function buildOpencodeConfigJson({
   const provider: OpencodeProviderConfig = {
     npm: "@ai-sdk/togetherai",
     // Provider label: OpenCode appends this provider `name` to every model
-    // line in the /models picker (e.g. "Kimi K3 · default · vision · 1M  Together AI"). Kept
+    // line in the /models picker (e.g. "Kimi K3 · 1M  Together AI"). Kept
     // as the full brand name; the model display names are kept short so the
     // full suffix still fits without hitting the picker's truncation width
     // (opencode #20968).
