@@ -80,7 +80,7 @@ export function costPerToken(costPerMillion: number): number {
  */
 export const KIMI_K3: ModelDefinition = {
   id: "moonshotai/Kimi-K3",
-  name: "Kimi K3 · 1M",
+  name: "Kimi K3",
   anthropicAlias: "together-kimi-k3",
   cost: { input: 3, output: 15, cache_read: 0.3 },
   limit: { context: 1_048_576, output: 131_072 },
@@ -148,7 +148,7 @@ export const KIMI_K2_6: ModelDefinition = {
  */
 export const MINIMAX_M3: ModelDefinition = {
   id: "MiniMaxAI/MiniMax-M3",
-  name: "MiniMax M3 · 512K",
+  name: "MiniMax M3",
   anthropicAlias: null,
   cost: { input: 0.3, output: 1.2, cache_read: 0.06 },
   limit: { context: 524_288, output: 128_000 },
@@ -166,7 +166,7 @@ export const MINIMAX_M3: ModelDefinition = {
  */
 export const QWEN_3_7_MAX: ModelDefinition = {
   id: "Qwen/Qwen3.7-Max",
-  name: "Qwen 3.7 Max · 1M",
+  name: "Qwen 3.7 Max",
   anthropicAlias: null,
   cost: { input: 2.5, output: 3.75, cache_read: 0.125 },
   limit: { context: 1_000_000, output: 65_536 },
@@ -184,7 +184,7 @@ export const QWEN_3_7_MAX: ModelDefinition = {
  */
 export const DEEPSEEK_V4_PRO: ModelDefinition = {
   id: "deepseek-ai/DeepSeek-V4-Pro",
-  name: "DeepSeek V4 Pro · 512K",
+  name: "DeepSeek V4 Pro",
   anthropicAlias: null,
   cost: { input: 1.74, output: 3.48, cache_read: 0.2 },
   limit: { context: 512_000, output: 384_000 },
