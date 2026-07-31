@@ -4,7 +4,6 @@ import { persistRequestDiagnostic } from "./request-diagnostics.js";
 import { createSseIdleWatchdog, sseEventPayload, takeSseEvents } from "./sse.js";
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
-const DEFAULT_STREAM_TURN_TIMEOUT_MS = 600_000;
 const DEFAULT_STREAM_RETRIES = 1;
 
 export type TogetherSseEvent = {
@@ -131,7 +130,7 @@ export async function* readTogetherSseWithRetry(
       options.onRetry?.({
         attempt,
         maxRetries,
-        timeoutMs: err instanceof TogetherSseTurnTimeoutError ? turnTimeoutMs : idleTimeoutMs,
+        timeoutMs: err instanceof TogetherSseTurnTimeoutError ? err.timeoutMs : idleTimeoutMs,
         reason:
           err instanceof TogetherSseTurnTimeoutError
             ? "turn_timeout"
@@ -157,7 +156,7 @@ export async function* readTogetherSseWithRetry(
 async function* readResponseSse(
   response: Response,
   idleTimeoutMs: number,
-  turnTimeoutMs: number,
+  turnTimeoutMs: number | undefined,
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
   if (!response.body) {
@@ -183,15 +182,18 @@ async function* readResponseSse(
       ),
   );
   let turnError: TogetherSseTurnTimeoutError | undefined;
-  const turnTimer = setTimeout(() => {
-    turnError = new TogetherSseTurnTimeoutError(
-      turnTimeoutMs,
-      diagnostics?.clientRequestId,
-      diagnostics?.upstreamRequestId,
-    );
-    void reader.cancel(turnError).catch(() => undefined);
-  }, turnTimeoutMs);
-  turnTimer.unref?.();
+  const turnTimer =
+    turnTimeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          turnError = new TogetherSseTurnTimeoutError(
+            turnTimeoutMs,
+            diagnostics?.clientRequestId,
+            diagnostics?.upstreamRequestId,
+          );
+          void reader.cancel(turnError).catch(() => undefined);
+        }, turnTimeoutMs);
+  turnTimer?.unref?.();
   let buffer = "";
   let sawDone = false;
   try {
@@ -235,7 +237,9 @@ async function* readResponseSse(
     );
     throw prematureClose;
   } finally {
-    clearTimeout(turnTimer);
+    if (turnTimer !== undefined) {
+      clearTimeout(turnTimer);
+    }
     watchdog.dispose();
     signal?.removeEventListener("abort", cancelForCallerAbort);
     reader.releaseLock();
@@ -340,14 +344,12 @@ function streamIdleTimeoutMs(): number {
     : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
 }
 
-export function streamTurnTimeoutMs(): number {
+export function streamTurnTimeoutMs(): number | undefined {
   const raw =
     process.env.TOGETHERLINK_STREAM_TURN_TIMEOUT_MS ??
     process.env.TOGETHERLINK_CODEX_STREAM_TURN_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0
-    ? Math.max(100, parsed)
-    : DEFAULT_STREAM_TURN_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(100, parsed) : undefined;
 }
 
 function streamRetries(): number {

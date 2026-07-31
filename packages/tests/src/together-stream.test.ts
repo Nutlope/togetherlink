@@ -4,7 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { postChatCompletionStream } from "../../cli/src/lib/together-client.js";
 import { resolveRequestDiagnosticsPath } from "../../cli/src/lib/request-diagnostics.js";
-import { readTogetherSseWithRetry } from "../../cli/src/lib/together-stream.js";
+import {
+  readTogetherSseWithRetry,
+  streamTurnTimeoutMs,
+} from "../../cli/src/lib/together-stream.js";
 
 describe("shared Together SSE transport", () => {
   let temporaryHome: string | undefined;
@@ -16,6 +19,10 @@ describe("shared Together SSE transport", () => {
       await rm(temporaryHome, { recursive: true, force: true });
       temporaryHome = undefined;
     }
+  });
+
+  test("does not impose a total-duration limit by default while a stream is making progress", () => {
+    expect(streamTurnTimeoutMs()).toBeUndefined();
   });
 
   test("retries an idle response before harness output starts", async () => {
