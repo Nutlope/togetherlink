@@ -22,7 +22,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function togetherOptions(apiKey = "k") {
-  return { apiKey, baseUrl: "https://together.test/v1" };
+  return { apiKey, baseUrl: "https://together.test/v1", fetch: globalThis.fetch };
 }
 
 describe("claude/together-call.ts fetchTogether retry contract (#1 characterization)", () => {

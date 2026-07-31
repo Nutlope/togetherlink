@@ -33,6 +33,7 @@ const kimiOverflowMessage =
   "Failed to start generation: The input token count (1394335) exceeds the model's maximum context length (1048576)";
 
 const longText = (n: number) => "old context ".repeat(n);
+const togetherOptions = () => ({ apiKey: "k", fetch: globalThis.fetch });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -228,6 +229,54 @@ describe("applyContextFit ladder", () => {
 });
 
 describe("together-client context-fit retry", () => {
+  test("removes historical images before the first request and keeps every latest-turn image", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ id: "ok", choices: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    const payload: Record<string, unknown> = {
+      model: model.id,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "old turn" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,OLD_A" } },
+            { type: "image_url", image_url: { url: "data:image/png;base64,OLD_B" } },
+          ],
+        },
+        { role: "assistant", content: "I inspected them." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "latest turn" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,NEW_A" } },
+            { type: "image_url", image_url: { url: "data:image/png;base64,NEW_B" } },
+          ],
+        },
+      ],
+    };
+
+    await postChatCompletion(payload, togetherOptions(), undefined, {
+      modelDefinition: model,
+      onContextTrim: () => {},
+    });
+
+    const serialized = JSON.stringify(sentBody);
+    expect(serialized).not.toContain("OLD_A");
+    expect(serialized).not.toContain("OLD_B");
+    expect(serialized).toContain("NEW_A");
+    expect(serialized).toContain("NEW_B");
+    expect(serialized.split(IMAGE_PLACEHOLDER)).toHaveLength(3);
+  });
+
   test("self-heals a context-length 400 and re-posts until it fits", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
@@ -256,7 +305,7 @@ describe("together-client context-fit retry", () => {
         { role: "user", content: "answer please" },
       ],
     };
-    const response = await postChatCompletion(payload, { apiKey: "k" }, undefined, {
+    const response = await postChatCompletion(payload, togetherOptions(), undefined, {
       modelDefinition: model,
       onContextTrim: () => {}, // suppress real stderr/telemetry
     });
@@ -303,7 +352,7 @@ describe("together-client context-fit retry", () => {
     };
     const response = await postChatCompletionStream(
       payload,
-      { apiKey: "k" },
+      togetherOptions(),
       undefined,
       undefined,
       { modelDefinition: model, onContextTrim: () => {} },
@@ -328,7 +377,7 @@ describe("together-client context-fit retry", () => {
     );
     const response = await postChatCompletionStream(
       { model: model.id, messages: [{ role: "user", content: "hi" }] },
-      { apiKey: "k" },
+      togetherOptions(),
       undefined,
       undefined,
       { modelDefinition: model, onContextTrim: () => {} },

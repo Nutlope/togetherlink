@@ -247,6 +247,52 @@ export function stripOldImages(
   return removedParts > 0 ? { removedParts, freedChars } : undefined;
 }
 
+/**
+ * Replace image bodies from every completed user turn while preserving every
+ * image in the latest user turn (including tool results that follow it).
+ *
+ * Coding harnesses resend the complete conversation on every request. Keeping
+ * historical base64 screenshots makes that JSON grow without adding current
+ * visual state, while keeping only one image would break a current turn that
+ * intentionally contains several attachments.
+ */
+export function stripHistoricalImages(
+  messages: unknown,
+): { removedParts: number; freedChars: number } | undefined {
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  let latestUserIndex = -1;
+  for (let index = 0; index < messages.length; index += 1) {
+    if (asFitMessage(messages[index])?.role === "user") {
+      latestUserIndex = index;
+    }
+  }
+  if (latestUserIndex <= 0) {
+    return undefined;
+  }
+
+  let removedParts = 0;
+  let freedChars = 0;
+  for (let messageIndex = 0; messageIndex < latestUserIndex; messageIndex += 1) {
+    const record = asFitMessage(messages[messageIndex]);
+    if (!record || !Array.isArray(record.content)) {
+      continue;
+    }
+    for (let partIndex = 0; partIndex < record.content.length; partIndex += 1) {
+      if (!isImagePart(record.content[partIndex])) {
+        continue;
+      }
+      const before = jsonByteLength(record.content[partIndex]);
+      record.content[partIndex] = { type: "text", text: IMAGE_REMOVED_PLACEHOLDER };
+      const after = jsonByteLength(record.content[partIndex]);
+      freedChars += Math.max(0, before - after);
+      removedParts += 1;
+    }
+  }
+  return removedParts > 0 ? { removedParts, freedChars } : undefined;
+}
+
 function isImagePart(part: unknown): part is FitContentPart {
   if (!part || typeof part !== "object") {
     return false;
@@ -399,8 +445,9 @@ export function applyContextFit(
   const realCharsPerToken = Math.max(1, payloadBytes / Math.max(1, inputTokens));
   const charsToFree = Math.max(1, Math.ceil(tokensToFree * realCharsPerToken));
 
-  // Rung 2: strip old images (keep the most recent one).
-  const stripped = stripOldImages(payload.messages, 1);
+  // Rung 2: strip completed-turn images while preserving every image in the
+  // latest user turn.
+  const stripped = stripHistoricalImages(payload.messages);
   if (stripped) {
     return finish(state, base, "strip_images", stripped.freedChars);
   }

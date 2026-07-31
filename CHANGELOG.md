@@ -3,6 +3,32 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.5 - 2026-07-31
+
+### Changed
+
+- Made the ChatGPT Desktop integration additive: native GPT and Together AI models now share the
+  same Codex picker, while requests route to ChatGPT or Together according to the selected model.
+- Preserved the user's native provider and default model unless `--model` is passed explicitly.
+
+### Fixed
+
+- Isolated Node Together requests from the process-global connection pool and disabled upstream
+  connection reuse under Bun, preventing a poisoned long-lived daemon transport from turning
+  otherwise healthy requests into repeated synthetic `503 fetch failed` responses.
+- Removed embedded image payloads from completed user turns before sending requests upstream while
+  preserving every image in the latest user turn, reducing long-session request size and vision
+  context without breaking multi-image prompts.
+
+### Tests
+
+- Added deterministic coverage for merged native/Together catalogs, zstd-compressed Desktop
+  requests, native ChatGPT pass-through, and strict cross-provider credential isolation.
+- Added deterministic coverage proving Together requests still succeed when global `fetch` is
+  broken and that each Node attempt owns a distinct dispatcher.
+- Added coverage proving historical images are removed before the first upstream request while all
+  current-turn images remain intact.
+
 ## 0.7.4 - 2026-07-30
 
 ### Fixed

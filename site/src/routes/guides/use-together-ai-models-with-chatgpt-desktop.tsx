@@ -19,7 +19,7 @@ const faqs: Faq[] = [
   {
     question: "Can the Codex coding experience in ChatGPT Desktop use Together models?",
     answer:
-      "Yes. TogetherLink's alpha integration adds a dedicated provider to the Codex configuration used by ChatGPT Desktop and routes its model requests to Together AI through a local Responses-compatible proxy. It does not change ordinary ChatGPT conversations.",
+      "Yes. TogetherLink's alpha integration merges Together models into the normal Codex picker. Native GPT models keep using your ChatGPT sign-in, while Together model requests go through a local Responses-compatible router to Together AI. It does not change ordinary ChatGPT conversations.",
   },
   {
     question: "Do I need a Together API key?",
@@ -29,7 +29,7 @@ const faqs: Faq[] = [
   {
     question: "Is this change temporary like the CLI wrappers?",
     answer:
-      "No. ChatGPT Desktop launches separately from TogetherLink, so the provider setting stays in its Codex configuration until you run togetherlink chatgpt --restore.",
+      "No. ChatGPT Desktop launches separately from TogetherLink, so the additive catalog and local router stay in its Codex configuration until you run togetherlink chatgpt --restore. Native GPT models remain available while it is enabled.",
   },
   {
     question: "Can I restore my previous app configuration?",
@@ -52,7 +52,7 @@ const guide = defineGuide({
   ogKey: "together-chatgpt",
   ogAlt: "TogetherLink connecting open models to Codex in the ChatGPT Desktop app",
   datePublished: "2026-07-21T12:00:00+02:00",
-  dateModified: "2026-07-21T12:00:00+02:00",
+  dateModified: "2026-07-31T18:00:00+02:00",
   faqs,
 });
 
@@ -74,9 +74,10 @@ function ChatGptDesktopGuide() {
             {guide.title}
           </h1>
           <p className="m-0 mt-6 max-w-[740px] text-pretty text-[18px] leading-relaxed text-muted">
-            Bring open models into the Codex coding experience in ChatGPT Desktop with a local
-            proxy, an automatic backup, and one command to restore your previous app configuration.
-            Ordinary ChatGPT conversations are not changed.
+            Add open models beside Sol, Terra, Luna, and your other native GPT choices in the Codex
+            picker. A local router sends each model to the right provider, while an automatic backup
+            and one restore command keep the change reversible. Ordinary ChatGPT conversations are
+            not changed.
           </p>
           <GuideByline guide={guide} />
         </div>
@@ -91,12 +92,13 @@ function ChatGptDesktopGuide() {
             Alpha integration
           </div>
           <h2 id="alpha-heading" className="m-0 mt-2 text-[27px] font-semibold tracking-[-.025em]">
-            This setup persists until you restore it
+            Native GPT and Together models stay in one picker
           </h2>
           <p className="m-0 mt-3 text-[14.5px] leading-relaxed text-muted">
-            Commands such as <code>tcodex</code> apply Together settings to one terminal session.
-            ChatGPT Desktop runs separately, so its Codex provider setting must stay in the app
-            configuration until you restore it. TogetherLink backs up the previous file first.
+            TogetherLink preserves the built-in OpenAI provider, merges native and Together model
+            metadata, and routes requests by the selected model. The router configuration persists
+            because ChatGPT Desktop runs separately from the CLI. TogetherLink backs up the previous
+            file first.
           </p>
         </section>
 
@@ -109,8 +111,8 @@ function ChatGptDesktopGuide() {
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
             Install ChatGPT Desktop with the Codex coding workspace and complete the normal OpenAI
-            sign-in. The current custom-provider model picker still checks that sign-in even though
-            Together AI handles and bills the model requests.
+            sign-in. That session continues to serve and bill native GPT choices. Together AI serves
+            and bills only the Together models you select.
           </p>
           <p className="mt-4 border-l-2 border-[#e34d13] pl-5 text-[14px] leading-relaxed text-muted">
             This guide currently targets macOS. The code path and generated configuration were
@@ -154,15 +156,15 @@ function ChatGptDesktopGuide() {
             {[
               [
                 "Codex configuration",
-                "Updates the active model, provider, and generated catalog path in ~/.codex/config.toml. TogetherLink backs up the previous file first.",
+                "Adds a local OpenAI-base-URL router and generated catalog path in ~/.codex/config.toml. Your native provider and default model are preserved unless you pass --model.",
               ],
               [
-                "Provider",
-                "Adds a managed TogetherLink provider pointing at the local Responses proxy.",
+                "Routing",
+                "Native GPT slugs keep their ChatGPT authentication; Together slugs use the Together API key. Credentials are never forwarded across providers.",
               ],
               [
                 "Model catalog",
-                "Writes ~/.codex/togetherlink-codex-app-models.json so the model picker knows the available Together models.",
+                "Writes ~/.codex/togetherlink-codex-app-models.json with native GPT metadata plus the available Together models.",
               ],
               [
                 "Backup",
@@ -170,7 +172,7 @@ function ChatGptDesktopGuide() {
               ],
               [
                 "Active provider",
-                "Keeps using the TogetherLink provider until you run the restore command.",
+                "Keeps the built-in OpenAI provider active so native GPT models remain selectable.",
               ],
             ].map(([label, body]) => (
               <div
@@ -189,17 +191,18 @@ function ChatGptDesktopGuide() {
             Verify before opening a task
           </div>
           <h2 id="verify-heading" className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]">
-            Check the managed provider without exposing your key
+            Check the additive router without exposing your key
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
-            This command prints the three managed top-level settings. The provider should be
-            <code> togetherlink_codex_app</code>, the model should be a Together model, and the
-            catalog path should point to the generated JSON file.
+            This command prints the managed routing settings. The provider should remain
+            <code> openai</code> (or be absent, which means the built-in default), your existing
+            model should remain selected unless you passed <code>--model</code>, and the catalog
+            path should point to the generated JSON file.
           </p>
           <div className="mt-5">
             <CommandBlock
               command={
-                "grep -E '^(model|model_provider|model_catalog_json) =' ~/.codex/config.toml"
+                "grep -E '^(model|model_provider|model_catalog_json|openai_base_url) =' ~/.codex/config.toml"
               }
             />
           </div>
@@ -237,8 +240,8 @@ function ChatGptDesktopGuide() {
             Make another model the default
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
-            The generated catalog lets you switch models in the app. To change the default model and
-            rewrite the managed configuration, rerun setup with <code>--model</code> after
+            The generated catalog lets you switch between GPT and Together models in the app. To
+            make a Together model the default, rerun setup with <code>--model</code> after
             <code> chatgpt</code>.
           </p>
           <div className="mt-5 space-y-4">

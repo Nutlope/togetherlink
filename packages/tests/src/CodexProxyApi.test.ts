@@ -2287,10 +2287,12 @@ async function postResponses(
   proxyOptions: CodexProxyOptions = options,
 ): Promise<Record<string, any>> {
   const server = http.createServer((req, res) => {
-    handleCodexProxyRequest(req, res, proxyOptions).catch((error) => {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-    });
+    handleCodexProxyRequest(req, res, { ...proxyOptions, fetch: globalThis.fetch }).catch(
+      (error) => {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      },
+    );
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -2312,7 +2314,7 @@ async function postResponses(
 
 async function postResponsesText(body: unknown): Promise<string> {
   const server = http.createServer((req, res) => {
-    handleCodexProxyRequest(req, res, options).catch((error) => {
+    handleCodexProxyRequest(req, res, { ...options, fetch: globalThis.fetch }).catch((error) => {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     });
@@ -2339,7 +2341,7 @@ async function postResponsesStreamingTimeline(
   body: unknown,
 ): Promise<Array<{ atMs: number; text: string }>> {
   const server = http.createServer((req, res) => {
-    handleCodexProxyRequest(req, res, options).catch((error) => {
+    handleCodexProxyRequest(req, res, { ...options, fetch: globalThis.fetch }).catch((error) => {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     });

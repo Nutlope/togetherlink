@@ -23,6 +23,7 @@ describe("Claude vision description", () => {
     const result = await describeImage(testImage(), {
       apiKey: "test-key",
       baseUrl: "https://api.together.ai/v1",
+      fetch: globalThis.fetch,
     });
     const elapsedMs = performance.now() - started;
 
@@ -52,6 +53,7 @@ describe("Claude vision description", () => {
     const result = await describeImage(testImage(), {
       apiKey: "test-key",
       baseUrl: "https://api.together.ai/v1",
+      fetch: globalThis.fetch,
     });
     const elapsedMs = performance.now() - started;
 
@@ -73,6 +75,7 @@ describe("Claude vision description", () => {
     await describeImage(testImage(), {
       apiKey: "test-key",
       baseUrl: "http://vision-upstream.test/together/v1",
+      fetch: globalThis.fetch,
     });
 
     expect(urls).toEqual(["http://vision-upstream.test/together/v1/chat/completions"]);
@@ -95,6 +98,7 @@ describe("Claude vision description", () => {
     const result = await describeImage(testImage(), {
       apiKey: "test-key",
       baseUrl: "http://vision-upstream.test/together/v1",
+      fetch: globalThis.fetch,
     });
 
     expect(result.description).toContain("all vision models failed");

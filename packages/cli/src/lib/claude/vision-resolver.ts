@@ -1,5 +1,6 @@
 import { CostTracker } from "../cost.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
+import type { TogetherClientOptions } from "../together-client.js";
 import {
   describeImage,
   imageBlockKey,
@@ -15,6 +16,7 @@ type ClaudeVisionOptions = {
   baseUrl: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  fetch?: TogetherClientOptions["fetch"];
 };
 
 /**
@@ -129,6 +131,7 @@ export async function resolveImageBlocks(
         apiKey: options.apiKey,
         baseUrl: options.baseUrl,
         debug: options.debug,
+        fetch: options.fetch,
       });
       debugLog(options, "vision describe done", {
         key,

@@ -20,6 +20,7 @@ import {
   removeManagedBlock as tomlRemoveManagedBlock,
   removeTomlSections,
   splitTomlPreamble,
+  insertTopLevelTomlKeys,
   upsertTopLevelTomlKeys,
   removeTopLevelTomlKeys,
   tomlString,
@@ -36,11 +37,13 @@ import {
   launchCodexApp,
   codexAppLaunchMessage,
 } from "./codex-app/process.js";
+import { writeMergedCodexAppCatalog, mergedCodexAppCatalogJson } from "./codex-app/catalog.js";
+import { DEFAULT_CODEX_NATIVE_BASE_URL, nativeCodexBaseUrl } from "./codex/native-router.js";
+import type { CodexModelCatalog } from "./codex/catalog.js";
 
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
 const CODEX_APP_CONFIG_MARKER_START = "# >>> togetherlink codex-app alpha >>>";
 const CODEX_APP_CONFIG_MARKER_END = "# <<< togetherlink codex-app alpha <<<";
-const CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND = true;
 const BACKUP_MANIFEST = "latest.json";
 
 type BackupEntry = {
@@ -74,9 +77,13 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const sessionToken = codexAppSessionToken(authToken);
   const telemetrySessionId = sessionToken;
   const startedAt = Date.now();
+  const configPath = codexConfigPath(ctx.home);
+  const currentConfig = (await readTextIfExists(configPath)) ?? "";
+  const configBase = await originalCodexAppConfig(ctx.home, configPath, currentConfig);
+  const nativeBaseUrl = nativeCodexBaseUrl(configBase);
   const { url: proxyUrl } = await ensureDaemon();
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionToken);
-  const catalogPath = await writePersistentModelCatalog(ctx.home);
+  const { path: catalogPath, modelCount } = await writePersistentModelCatalog(ctx.home);
 
   const registration: RegisterSessionRequest = {
     token: sessionToken,
@@ -89,6 +96,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
+    nativeBaseUrl,
     ...(process.env.TOGETHERLINK_DEBUG === "1" ? { debug: true } : {}),
   };
   await registerDaemonSession(proxyUrl, registration);
@@ -97,16 +105,15 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   // rebuild the session on demand (restart, idle reap) from disk.
   await writeAppRegistration(registration, togetherlinkHomeDir(ctx.home));
 
-  const configPath = codexConfigPath(ctx.home);
   const backup = await backupCodexAppConfig(ctx.home, configPath);
-  const existing = await readTextIfExists(configPath);
-  const next = buildCodexAppConfig(existing ?? "", {
-    modelId: selectedModel.definition.id,
+  const next = buildCodexAppConfig(configBase, {
+    ...(ctx.main ? { modelId: selectedModel.definition.id } : {}),
     providerId: CODEX_APP_PROVIDER_ID,
     providerName: "Togetherlink",
     baseUrl: `${agentProxyUrl}/v1`,
     bearerToken: authToken,
     catalogPath,
+    nativeBaseUrl,
   });
   await writeTextAtomic(configPath, next);
   // Codex caches remote model metadata in models_cache.json. If a previous
@@ -132,9 +139,8 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     metadata: {
       integration: "codex-app",
       providerId: CODEX_APP_PROVIDER_ID,
-      providerAuthWorkaround: CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND,
-      workaroundIssue: "openai/codex#10867",
-      catalogModelCount: codexAppModelCatalogCount(),
+      additiveModelRouter: true,
+      catalogModelCount: modelCount,
       proxySessionRegistered: true,
       launchAttempted: launch.launchAttempted,
       launched: launch.launched,
@@ -145,8 +151,10 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     },
   });
   const intro = [
-    "ChatGPT App profile changed to Togetherlink. (alpha)",
-    `Model: ${selectedModel.definition.name}`,
+    "Together AI models added to the ChatGPT App picker. (alpha)",
+    ctx.main
+      ? `Default model changed to: ${selectedModel.definition.name}`
+      : `Native GPT default preserved; Together default available: ${selectedModel.definition.name}`,
     "Start a task or open a repository in ChatGPT App as usual.",
     "Restore your previous ChatGPT App profile with: togetherlink chatgpt --restore",
     `Backup: ${backup}`,
@@ -161,12 +169,13 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
 export function buildCodexAppConfig(
   rawConfig: string,
   options: {
-    modelId: string;
+    modelId?: string;
     providerId: string;
     providerName: string;
     baseUrl: string;
     bearerToken: string;
     catalogPath: string;
+    nativeBaseUrl?: string;
   },
 ): string {
   const withoutManagedBlock = tomlRemoveManagedBlock(
@@ -182,20 +191,27 @@ export function buildCodexAppConfig(
   ]);
   const withGenericDefaults = applyCodexGenericUserDefaults(withoutLegacyTables);
   const [preamble, rest] = splitTomlPreamble(withGenericDefaults);
-  const managedPreamble = upsertTopLevelTomlKeys(preamble, {
+  const managedValues: Record<string, string> = {
     // Per-model context windows live in the generated model catalog; do not
     // emit global `model_context_window`/`model_auto_compact_token_limit`
     // overrides here. A global override is tied to whichever model was
     // selected when this config was written, so switching models inside
     // ChatGPT Desktop leaves the override stale and clamps the displayed
     // context length (e.g. every 262k model gets stuck at ~249k).
-    model: tomlString(options.modelId),
-    model_provider: tomlString(options.providerId),
+    openai_base_url: tomlString(options.baseUrl),
     model_catalog_json: tomlString(options.catalogPath),
+  };
+  if (options.modelId) managedValues.model = tomlString(options.modelId);
+  const managedPreamble = upsertTopLevelTomlKeys(preamble, managedValues);
+  const withNativeRealtime = insertTopLevelTomlKeys(managedPreamble, {
+    // `openai_base_url` intentionally points at the Responses router. Voice
+    // and realtime traffic must stay on OpenAI's native endpoints.
+    experimental_realtime_webrtc_call_base_url: tomlString(
+      options.nativeBaseUrl ?? DEFAULT_CODEX_NATIVE_BASE_URL,
+    ),
+    experimental_realtime_ws_base_url: tomlString("https://api.openai.com/v1"),
   });
-  const cleanedPreamble = removeTopLevelTomlKeys(managedPreamble, [
-    "model_reasoning_effort",
-    "openai_base_url",
+  const cleanedPreamble = removeTopLevelTomlKeys(withNativeRealtime, [
     "profile",
     // Strip legacy global context-window overrides that were emitted by early
     // versions of the togetherlink managed config. They become stale the
@@ -205,16 +221,13 @@ export function buildCodexAppConfig(
   ]);
   const providerBlock = [
     CODEX_APP_CONFIG_MARKER_START,
-    "# togetherlink codex-app configures a dedicated alpha provider for ChatGPT Desktop.",
+    "# TogetherLink keeps the built-in OpenAI provider active and routes by model slug.",
     `[model_providers.${options.providerId}]`,
     `name = ${tomlString(options.providerName)}`,
     `base_url = ${tomlString(options.baseUrl)}`,
     'wire_api = "responses"',
-    "# ChatGPT Desktop currently gates its model picker on provider auth state.",
-    "# Setting this true is a Desktop workaround for custom providers; the",
-    "# actual model requests still go to the local Togetherlink base_url above.",
-    "# See https://github.com/openai/codex/issues/10867",
-    `requires_openai_auth = ${CODEX_APP_REQUIRES_OPENAI_AUTH_WORKAROUND ? "true" : "false"}`,
+    "# This table is inert while model_provider remains openai; it documents the",
+    "# local external-model route without replacing ChatGPT authentication.",
     CODEX_APP_CONFIG_MARKER_END,
     "",
   ].join("\n");
@@ -243,6 +256,7 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
     }
   }
   await rm(modelCatalogPath(home), { force: true });
+  await rm(nativeModelCatalogPath(home), { force: true });
   await rm(appSessionLockPath(home), { force: true });
   // Drop the persisted registration so the daemon stops lazily resurrecting
   // the codex-app session after the user restores their original profile.
@@ -321,23 +335,50 @@ async function backupCodexAppConfig(home: string, configPath: string): Promise<s
   return backupFiles(home, [configPath]);
 }
 
-async function writePersistentModelCatalog(home: string): Promise<string> {
-  const file = modelCatalogPath(home);
-  await writeTextAtomic(file, `${codexAppModelCatalogJson()}\n`);
-  return file;
-}
-
-export function codexAppModelCatalogJson(): string {
-  return codexModelCatalogJson();
-}
-
-function codexAppModelCatalogCount(): number {
-  try {
-    const parsed = JSON.parse(codexAppModelCatalogJson()) as { models?: unknown[] };
-    return Array.isArray(parsed.models) ? parsed.models.length : 0;
-  } catch {
-    return 0;
+/**
+ * Migrate the old replacement-provider setup from its preserved pre-Together
+ * backup. Building the additive config on top of the old managed file would
+ * leave `model_provider = togetherlink_codex_app` selected and still hide GPT.
+ */
+async function originalCodexAppConfig(
+  home: string,
+  configPath: string,
+  current: string,
+): Promise<string> {
+  if (
+    !(await isManagedCodexAppConfig(
+      home,
+      configPath,
+      CODEX_APP_CONFIG_MARKER_START,
+      modelCatalogPath(home),
+    ))
+  ) {
+    return current;
   }
+  const rawManifest = await readTextIfExists(path.join(backupDir(home), BACKUP_MANIFEST));
+  if (!rawManifest) return current;
+  try {
+    const manifest = JSON.parse(rawManifest) as BackupManifest;
+    const entry = manifest.files.find((candidate) => candidate.path === configPath);
+    if (entry?.existed && entry.backupPath) {
+      return (await readTextIfExists(entry.backupPath)) ?? current;
+    }
+    return entry && !entry.existed ? "" : current;
+  } catch {
+    return current;
+  }
+}
+
+async function writePersistentModelCatalog(
+  home: string,
+): Promise<{ path: string; modelCount: number }> {
+  const file = modelCatalogPath(home);
+  const modelCount = await writeMergedCodexAppCatalog(home, file, nativeModelCatalogPath(home));
+  return { path: file, modelCount };
+}
+
+export function codexAppModelCatalogJson(nativeCatalog?: CodexModelCatalog): string {
+  return nativeCatalog ? mergedCodexAppCatalogJson(nativeCatalog) : codexModelCatalogJson();
 }
 
 function codexConfigPath(home: string): string {
@@ -362,6 +403,10 @@ function backupDir(home: string): string {
 
 function modelCatalogPath(home: string): string {
   return path.join(home, ".codex", "togetherlink-codex-app-models.json");
+}
+
+function nativeModelCatalogPath(home: string): string {
+  return path.join(home, ".codex", "togetherlink-codex-app-native-models.json");
 }
 
 /**

@@ -129,6 +129,8 @@ export type RegisterSessionRequest = {
   apiKey: string;
   /** Resolved by the launcher. Optional only for persisted/older registrations. */
   baseUrl?: string;
+  /** Native ChatGPT Codex backend used only by the additive desktop router. */
+  nativeBaseUrl?: string;
   modelLabel: string;
   modelDefinition: ModelDefinition;
   /** Proxied-agent model alias/target for proxy routing. */
@@ -391,6 +393,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       modelName: req.modelName ?? req.modelLabel,
       modelDefinition: req.modelDefinition,
       authToken: req.authToken ?? req.token,
+      ...(req.nativeBaseUrl !== undefined ? { nativeBaseUrl: req.nativeBaseUrl } : {}),
       ...(req.claudeCodeMaxOutputTokens !== undefined
         ? { claudeCodeMaxOutputTokens: req.claudeCodeMaxOutputTokens }
         : {}),
@@ -479,6 +482,10 @@ function toPersistedSession(state: SessionState): PersistedSession {
   if (state.options !== undefined) {
     base.modelId = state.options.modelId;
     base.targetModelId = state.options.targetModelId;
+    const codexOptions = state.options as CodexProxyOptions;
+    if (state.agent === "codex-app" && codexOptions.nativeBaseUrl !== undefined) {
+      base.nativeBaseUrl = codexOptions.nativeBaseUrl;
+    }
     base.modelName = state.options.modelName;
     if (state.agent === "claude") {
       const claudeOptions = state.options as ClaudeProxyOptions;

@@ -19,6 +19,7 @@ import { streamAnthropicFromTogether } from "./stream.js";
 import { extractImageBlocks, resolveImageBlocks } from "./vision-resolver.js";
 import { callTogetherChatCompletions } from "./chat-completions.js";
 import { tuneClaudeCompactionRequest } from "./compaction.js";
+import type { TogetherClientOptions } from "../together-client.js";
 
 import type {
   AnthropicCountTokensRequest,
@@ -43,6 +44,7 @@ export type ClaudeProxyOptions = {
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   perfSink?: ProxyPerfSink | undefined;
+  fetch?: TogetherClientOptions["fetch"];
 };
 
 /**

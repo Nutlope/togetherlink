@@ -61,7 +61,7 @@ export function toChatPayload(
   requestModel: ResolvedCodexRequestModel,
   estimatedInputTokens: number,
 ): Record<string, unknown> {
-  const messages = toChatMessages(body, options, toolTranslation);
+  const messages = toChatMessages(body, options, toolTranslation, requestModel);
   const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
   const messagesWithNativePrompt =
     toolTranslation.nativeTools.length > 0
@@ -122,11 +122,14 @@ function toChatMessages(
   body: ResponsesRequest,
   options: CodexTranslateOptions,
   toolTranslation: CodexToolTranslation,
+  requestModel?: ResolvedCodexRequestModel,
 ): ChatMessage[] {
+  const selectedName = requestModel?.definition.name ?? options.modelName;
+  const selectedId = requestModel?.targetModelId ?? options.targetModelId;
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${CODEX_IDENTITY_PROMPT}\nSelected Together backend: ${options.modelName} (${options.targetModelId}).`,
+      content: `${CODEX_IDENTITY_PROMPT}\nSelected Together backend: ${selectedName} (${selectedId}).`,
     },
   ];
   if (body.instructions) {

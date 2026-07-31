@@ -46,10 +46,11 @@ export default defineHarness({
 
     const modelId = ctx.main ?? OPENCODE_DEFAULT_MODEL;
     const baseUrl = resolveTogetherBaseUrl();
+    const timeoutMs = streamTurnTimeoutMs();
     const configJson = buildOpencodeConfigJson({
       modelId,
       baseUrl,
-      timeoutMs: streamTurnTimeoutMs(),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
     const env = buildOpencodeEnv({ apiKey, configJson });
 
