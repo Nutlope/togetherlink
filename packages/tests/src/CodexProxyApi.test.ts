@@ -186,6 +186,50 @@ describe("Codex Responses proxy tool compatibility", () => {
     ]);
   });
 
+  test.each(["/v1/responses", "/v1/images/generations", "/v1/alpha/search"])(
+    "rejects browser-originated POSTs before routing %s",
+    async (path) => {
+      const upstream = vi.fn();
+      const response = await requestCodexPath(
+        path,
+        { model: GLM_5_2.id, input: "browser request" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex", fetch: upstream },
+        { origin: "https://attacker.example", "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: {
+          type: "browser_request_rejected",
+          message: "Browser-originated requests are not accepted by the local Codex router.",
+        },
+      });
+      expect(upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["/v1/responses", "/v1/images/generations", "/v1/alpha/search"])(
+    "rejects non-JSON media types before routing %s",
+    async (path) => {
+      const upstream = vi.fn();
+      const response = await requestCodexPath(
+        path,
+        { model: GLM_5_2.id, input: "wrong media type" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex", fetch: upstream },
+        { "content-type": "text/plain" },
+      );
+
+      expect(response.status).toBe(415);
+      expect(await response.json()).toEqual({
+        error: {
+          type: "unsupported_media_type",
+          message: "Codex router requests require Content-Type: application/json.",
+        },
+      });
+      expect(upstream).not.toHaveBeenCalled();
+    },
+  );
+
   test("all models compact before Together tokenizer rejects (1.8x mismatch)", async () => {
     const catalog = await getModels();
     expect(catalog.models.length).toBeGreaterThan(0);
@@ -2422,13 +2466,25 @@ async function postCodexPath(
   proxyOptions: CodexProxyOptions,
   headers: Record<string, string> = {},
 ): Promise<Record<string, any>> {
+  const response = await requestCodexPath(path, body, proxyOptions, headers);
+  expect(response.ok).toBe(true);
+  return (await response.json()) as Record<string, any>;
+}
+
+async function requestCodexPath(
+  path: string,
+  body: unknown,
+  proxyOptions: CodexProxyOptions,
+  headers: Record<string, string> = {},
+): Promise<Response> {
   const server = http.createServer((req, res) => {
-    handleCodexProxyRequest(req, res, { ...proxyOptions, fetch: globalThis.fetch }).catch(
-      (error) => {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-      },
-    );
+    handleCodexProxyRequest(req, res, {
+      ...proxyOptions,
+      fetch: proxyOptions.fetch ?? globalThis.fetch,
+    }).catch((error) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -2436,13 +2492,11 @@ async function postCodexPath(
     throw new Error("test server did not bind");
   }
   try {
-    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+    return await fetch(`http://127.0.0.1:${address.port}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     });
-    expect(response.ok).toBe(true);
-    return (await response.json()) as Record<string, any>;
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

@@ -91,6 +91,15 @@ export async function handleCodexProxyRequest(
 
   const nativeOnlyPath =
     path === "/v1/images/generations" || path === "/v1/images/edits" || path === "/v1/alpha/search";
+  const memoriesPath = path === "/v1/memories/trace_summarize";
+  const responsesPath = path === "/v1/responses" || path === "/v1/responses/compact";
+  if (
+    req.method === "POST" &&
+    (nativeOnlyPath || memoriesPath || responsesPath) &&
+    !requireCodexTransport(req, res)
+  ) {
+    return;
+  }
   if (req.method === "POST" && nativeOnlyPath && options.nativeBaseUrl) {
     const request = await readDecodedCodexRequest(req);
     await forwardNativeCodexRequest(req, res, {
@@ -103,7 +112,7 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  if (req.method === "POST" && path === "/v1/memories/trace_summarize") {
+  if (req.method === "POST" && memoriesPath) {
     const request = await perf.span("body_read_parse", () => readDecodedCodexRequest(req));
     const body = request.body as CodexMemoriesRequest;
     const requestedTogetherModel = body.model ? findModelById(body.model) : options.modelDefinition;
@@ -151,7 +160,6 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  const responsesPath = path === "/v1/responses" || path === "/v1/responses/compact";
   if (req.method !== "POST" || !responsesPath) {
     writeOpenAIError(
       res,
@@ -320,6 +328,33 @@ export async function handleCodexProxyRequest(
   );
   writeJson(res, 200, responseBody);
   perf.end({ status: res.statusCode, stream: false });
+}
+
+function requireCodexTransport(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.headers.origin || req.headers["sec-fetch-site"]) {
+    writeOpenAIError(
+      res,
+      403,
+      "browser_request_rejected",
+      "Browser-originated requests are not accepted by the local Codex router.",
+    );
+    return false;
+  }
+
+  const contentType = String(req.headers["content-type"] ?? "")
+    .split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType !== "application/json") {
+    writeOpenAIError(
+      res,
+      415,
+      "unsupported_media_type",
+      "Codex router requests require Content-Type: application/json.",
+    );
+    return false;
+  }
+  return true;
 }
 
 function summarizeResponsesTools(

@@ -69,7 +69,10 @@ poisoned active stream instead of running without a bound.
 **Wire format** — the request/response shape an agent CLI speaks. Claude speaks
 the Anthropic Messages API (`/v1/messages`); Codex speaks the OpenAI Responses
 API (`/v1/responses`). The translation lives in each harness's
-`translate-request.ts` / `translate-response.ts` / `stream.ts`.
+`translate-request.ts` / `translate-response.ts` / `stream.ts`. Codex remote
+context checkpoints live in `codex/compaction.ts`, durable trace summarization
+lives in `codex/memories.ts`, and native-only ChatGPT endpoint forwarding lives
+in `codex/native-router.ts`.
 
 **Error contract** — each harness renders errors in its own wire shape. The
 daemon's catch-all dispatches by `session.agent` and renders Anthropic errors
