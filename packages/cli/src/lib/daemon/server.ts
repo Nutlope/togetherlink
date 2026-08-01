@@ -185,6 +185,15 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       renderDaemonError(res, err, requestAgent);
     });
   });
+  // The built-in OpenAI provider advertises Responses-over-WebSocket even
+  // when `openai_base_url` points at this HTTP/SSE-only loopback proxy. Codex
+  // treats 426 as an immediate signal to fall back to HTTP for the session;
+  // without an upgrade listener Node handles the handshake as an ordinary
+  // unauthenticated GET, leaves it alive, and Codex retries five timeouts.
+  server.on("upgrade", (_req, socket) => {
+    socket.on("error", () => {});
+    socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  });
   // Node's default requestTimeout (5 min) kills the socket outright once a
   // client is slow sending a large request body — e.g. a Codex turn with a
   // multi-million-token cached context. Our own upstream timeouts (Together

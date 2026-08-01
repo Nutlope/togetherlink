@@ -3,6 +3,18 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.6 - 2026-08-01
+
+### Fixed
+
+- Rejected unsupported Codex Responses WebSocket upgrades immediately with `426 Upgrade Required`,
+  allowing ChatGPT Desktop to fall back to HTTP/SSE without repeated reconnect timeouts.
+
+### Tests
+
+- Added a loopback daemon regression proving WebSocket upgrades receive `426`, close immediately,
+  and remain covered by the core release gauntlet.
+
 ## 0.7.5 - 2026-07-31
 
 ### Changed
