@@ -364,5 +364,3 @@ export function startDaemonSessionKeepalive(
     },
   };
 }
-
-export { CLAUDE_LOCAL_PROXY_HOST };

@@ -42,7 +42,7 @@ let activeSessions: SessionRegistry = defaultSessions;
  */
 const responsesWebsocketServer = new WebSocketServer({ noServer: true });
 
-export const DEFAULT_DAEMON_PORT = 7878;
+const DEFAULT_DAEMON_PORT = 7878;
 
 /** How often the daemon sweeps for sessions whose launcher has died. */
 const SESSION_REAP_INTERVAL_MS = 30_000;

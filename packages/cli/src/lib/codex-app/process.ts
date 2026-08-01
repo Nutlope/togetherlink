@@ -94,7 +94,7 @@ async function shouldRestartCodexApp(reason: CodexAppLaunchReason): Promise<bool
   return restart === true;
 }
 
-export async function openCodexApp(): Promise<boolean> {
+async function openCodexApp(): Promise<boolean> {
   const launchedViaCodex = await spawnDetached("codex", ["app", process.cwd()]);
   if (launchedViaCodex) {
     return true;
@@ -118,7 +118,7 @@ export async function openCodexApp(): Promise<boolean> {
   return false;
 }
 
-export async function isCodexAppRunning(): Promise<boolean> {
+async function isCodexAppRunning(): Promise<boolean> {
   if (process.platform === "darwin") {
     return Boolean(await runningMacosAppName());
   }
@@ -128,7 +128,7 @@ export async function isCodexAppRunning(): Promise<boolean> {
   return false;
 }
 
-export async function quitCodexApp(): Promise<boolean> {
+async function quitCodexApp(): Promise<boolean> {
   if (process.platform === "darwin") {
     const name = await runningMacosAppName();
     if (!name) {

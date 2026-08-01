@@ -304,7 +304,7 @@ function toChatHistoryToolName(
     : sourceName;
 }
 
-export function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTranslation {
+function translateCodexTools(tools: ResponsesTool[] | undefined): CodexToolTranslation {
   const translated: CodexToolTranslation["tools"] = [];
   const mappings = new Map<string, CodexToolMapping>();
   const nativeTools: CodexToolMapping[] = [];

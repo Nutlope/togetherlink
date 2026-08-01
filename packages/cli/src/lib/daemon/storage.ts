@@ -73,7 +73,7 @@ export async function createSessionStore(home = togetherlinkHome()): Promise<Ses
   return new ResilientSessionStore(new MemorySessionStore());
 }
 
-export function resolveSessionDatabasePath(home = togetherlinkHome()): string {
+function resolveSessionDatabasePath(home = togetherlinkHome()): string {
   return path.join(home, DATABASE_FILE);
 }
 

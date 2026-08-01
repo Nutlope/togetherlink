@@ -234,10 +234,7 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
   return result;
 }
 
-export async function printSessionCost(
-  proxyUrl: string,
-  authToken: string,
-): Promise<SessionCostResult> {
+async function printSessionCost(proxyUrl: string, authToken: string): Promise<SessionCostResult> {
   try {
     const response = await daemonFetch(
       `${proxyUrl}/internal/sessions/${encodeURIComponent(authToken)}/cost`,
@@ -269,6 +266,6 @@ export async function printSessionCost(
   return {};
 }
 
-export function randomLocalProxyToken(): string {
+function randomLocalProxyToken(): string {
   return `togetherlink-${randomBytes(24).toString("base64url")}`;
 }

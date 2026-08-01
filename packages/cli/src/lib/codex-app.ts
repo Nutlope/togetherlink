@@ -482,7 +482,7 @@ function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
 }
 
-export const CODEX_APP_ALPHA_STATUS = {
+const CODEX_APP_ALPHA_STATUS = {
   providerId: CODEX_APP_PROVIDER_ID,
   defaultModel: CODEX_DEFAULT_MODEL,
 };

@@ -28,7 +28,7 @@ export async function readGlobalConfig(home = os.homedir()): Promise<GlobalConfi
   };
 }
 
-export async function writeGlobalConfig(home: string, config: GlobalConfig): Promise<void> {
+async function writeGlobalConfig(home: string, config: GlobalConfig): Promise<void> {
   await writeJsonAtomic(globalConfigPath(home), config);
 }
 

@@ -3,9 +3,9 @@ import type { AddressInfo } from "node:net";
 import { SELECTABLE_MODELS, TOGETHER_BASE_URL, VISION_PRIMARY } from "@togetherlink/models";
 import type { ModelDefinition } from "@togetherlink/models";
 
-export const GROK_API_KEY_ENV = "TOGETHER_API_KEY";
-export const GROK_XAI_API_KEY_ENV = "XAI_API_KEY";
-export const GROK_MAX_COMPLETION_TOKENS = 8192;
+const GROK_API_KEY_ENV = "TOGETHER_API_KEY";
+const GROK_XAI_API_KEY_ENV = "XAI_API_KEY";
+const GROK_MAX_COMPLETION_TOKENS = 8192;
 export const GROK_IDENTITY_RULE =
   "Grok Build is only the terminal harness. You are the selected Together AI model via togetherlink, not Grok or an xAI model. For identity questions, name the selected backend and Together AI; never claim xAI built or serves you.";
 

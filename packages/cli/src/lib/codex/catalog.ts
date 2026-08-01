@@ -62,7 +62,7 @@ export function codexModelCatalogJson(): string {
   return JSON.stringify(codexModelCatalog());
 }
 
-export function toCodexModelCatalogEntry(
+function toCodexModelCatalogEntry(
   model: { id: string; definition: ModelDefinition },
   priority = 50,
 ): Record<string, unknown> {

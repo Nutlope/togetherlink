@@ -35,7 +35,7 @@ const CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 const CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 const DEFAULT_CLAUDE_NORMAL_MAX_OUTPUT_TOKENS = 28_000;
 
-export function clampRequestedMaxTokens(
+function clampRequestedMaxTokens(
   maxTokens: number | undefined,
   model: ModelDefinition,
 ): number | undefined {

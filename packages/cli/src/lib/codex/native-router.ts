@@ -3,8 +3,8 @@ import { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } f
 import type { ResponsesRequest } from "./wire-types.js";
 
 export const DEFAULT_CODEX_NATIVE_BASE_URL = "https://chatgpt.com/backend-api/codex";
-export const DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES = 64 * 1024 * 1024;
-export const DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES = 64 * 1024 * 1024;
+const DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES = 64 * 1024 * 1024;
+const DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES = 64 * 1024 * 1024;
 
 export type CodexRequestLimits = {
   maxEncodedBytes: number;
@@ -173,7 +173,7 @@ export async function forwardNativeCodexRequest(
 }
 
 /** Preserve native auth/account headers, but never arbitrary client headers. */
-export function nativeRequestHeaders(
+function nativeRequestHeaders(
   incoming: IncomingHttpHeaders,
   contentLength: number,
 ): Record<string, string> {

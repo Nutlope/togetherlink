@@ -39,7 +39,7 @@ import type { ContextTrimTelemetryInfo } from "./telemetry.js";
 // errors remain terminal because replaying them only delays the same failure.
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
-export const MAX_RETRIES = 3;
+const MAX_RETRIES = 3;
 const DEFAULT_STREAM_RETRIES = 1;
 const DEFAULT_RESPONSE_HEADER_RETRIES = 0;
 const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 120_000;
