@@ -187,24 +187,37 @@ describe("Codex Responses proxy tool compatibility", () => {
   });
 
   test.each(["/v1/responses", "/v1/images/generations", "/v1/alpha/search"])(
-    "rejects browser-originated POSTs before routing %s",
+    "does not reject Chromium/Electron-style fetch metadata headers on %s",
     async (path) => {
-      const upstream = vi.fn();
+      // ChatGPT Desktop is Electron/Chromium-based, so its legitimate
+      // requests carry `origin` and `sec-fetch-site` just like a browser tab
+      // would. Rejecting on those headers 403'd every Desktop request,
+      // including brand-new chats (incident 2026-08-01) — the per-session
+      // URL token is the real auth boundary, not these headers.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url.startsWith("http://127.0.0.1:")) {
+            return realFetch(url, init);
+          }
+          return jsonResponse({
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          });
+        }),
+      );
       const response = await requestCodexPath(
         path,
-        { model: GLM_5_2.id, input: "browser request" },
-        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex", fetch: upstream },
-        { origin: "https://attacker.example", "content-type": "application/json" },
+        { model: GLM_5_2.id, input: "electron request" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex" },
+        {
+          origin: "https://chatgpt.com",
+          "sec-fetch-site": "cross-site",
+          "content-type": "application/json",
+        },
       );
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: {
-          type: "browser_request_rejected",
-          message: "Browser-originated requests are not accepted by the local Codex router.",
-        },
-      });
-      expect(upstream).not.toHaveBeenCalled();
+      expect(response.status).not.toBe(403);
     },
   );
 

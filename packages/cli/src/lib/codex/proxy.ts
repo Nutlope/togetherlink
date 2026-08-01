@@ -310,16 +310,13 @@ export async function handleCodexProxyRequest(
 }
 
 function requireCodexTransport(req: IncomingMessage, res: ServerResponse): boolean {
-  if (req.headers.origin || req.headers["sec-fetch-site"]) {
-    writeOpenAIError(
-      res,
-      403,
-      "browser_request_rejected",
-      "Browser-originated requests are not accepted by the local Codex router.",
-    );
-    return false;
-  }
-
+  // Do NOT gate on `origin` / `sec-fetch-site`: ChatGPT Desktop is a
+  // Chromium/Electron client, so its legitimate fetches carry the same Fetch
+  // Metadata headers a browser tab would send. There is no header-based way
+  // to tell it apart from a malicious web page; the per-session URL token is
+  // the actual auth boundary here. A prior attempt to reject on those headers
+  // 403'd every Desktop request, including brand-new chats (see incident
+  // 2026-08-01).
   const contentType = String(req.headers["content-type"] ?? "")
     .split(";", 1)[0]
     ?.trim()
