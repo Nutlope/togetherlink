@@ -1,9 +1,11 @@
 import http, { type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import type { Duplex } from "node:stream";
 import { once } from "node:events";
 import { statSync } from "node:fs";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { WebSocketServer } from "ws";
 import { VERSION } from "../version.js";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
 import { extractToken, readJsonBody, requestPath, writeJson } from "../http-util.js";
@@ -14,6 +16,7 @@ import {
   writeOpenAIError,
   type CodexProxyOptions,
 } from "../codex/proxy.js";
+import { handleCodexResponsesWebsocket } from "../codex/responses-websocket.js";
 import { CodexRequestError } from "../codex/native-router.js";
 import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
@@ -32,6 +35,12 @@ import {
 
 /** Active registry — runDaemon may override this with an injected one. */
 let activeSessions: SessionRegistry = defaultSessions;
+
+/**
+ * Stateless WS handshake helper (`noServer: true` never binds its own socket),
+ * so one instance is safely shared across every `runDaemon()` call/http.Server.
+ */
+const responsesWebsocketServer = new WebSocketServer({ noServer: true });
 
 export const DEFAULT_DAEMON_PORT = 7878;
 
@@ -199,13 +208,16 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       renderDaemonError(res, err, requestAgent);
     });
   });
-  // Managed ChatGPT Desktop config disables Responses-over-WebSocket, but
-  // older configs and other built-in-provider clients can still attempt an
-  // upgrade against this HTTP/SSE-only loopback proxy. Reject those immediately
-  // instead of letting Node treat the handshake as a long-lived ordinary GET.
-  server.on("upgrade", (_req, socket) => {
-    socket.on("error", () => {});
-    socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  // Codex/ChatGPT Desktop's Responses-over-WebSocket transport is only
+  // supported for the codex/codex-app `/v1/responses` route, which is the
+  // only place we can usefully terminate it (Together has no upstream WS to
+  // relay to — see codex/responses-websocket.ts). Everything else (other
+  // paths, other agents, unresolved sessions) gets the same immediate 426
+  // rejection as before instead of hanging as a long-lived ordinary GET.
+  server.on("upgrade", (req, socket, head) => {
+    handleDaemonUpgrade(req, socket, head).catch(() => {
+      socket.destroy();
+    });
   });
   // Node's default requestTimeout (5 min) kills the socket outright once a
   // client is slow sending a large request body — e.g. a Codex turn with a
@@ -508,6 +520,45 @@ function localSessionRoute(
     },
   };
 }
+
+const REJECT_UPGRADE =
+  "HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+
+async function handleDaemonUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+): Promise<void> {
+  const path_ = requestPath(req);
+  const sessionRoute = localSessionRoute(req, path_);
+  // localSessionRoute rewrites req.url to the inner path in place when it
+  // matches, so re-reading it now gives the path with /session/<token>
+  // stripped — same trick handleDaemonRequest's downstream handlers rely on.
+  const innerPath = sessionRoute ? requestPath(req) : undefined;
+  if (innerPath !== "/v1/responses") {
+    socket.on("error", () => {});
+    socket.end(REJECT_UPGRADE);
+    return;
+  }
+
+  const token = sessionRoute!.token;
+  const session = activeSessions.get(token) ?? (await restoreAppSession(token));
+  if (
+    !session ||
+    (session.agent !== "codex" && session.agent !== "codex-app") ||
+    session.options === undefined
+  ) {
+    socket.on("error", () => {});
+    socket.end(REJECT_UPGRADE);
+    return;
+  }
+
+  const options = session.options as CodexProxyOptions;
+  responsesWebsocketServer.handleUpgrade(req, socket, head, (ws) => {
+    handleCodexResponsesWebsocket(ws, options);
+  });
+}
+
 async function registerSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = (await readJsonBody(req)) as RegisterSessionRequest;
   // Agent-neutral core: every session needs a non-empty token + apiKey, a

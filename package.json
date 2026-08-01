@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
+    "@types/ws": "^8.5.13",
     "lefthook": "2.1.9",
     "oxfmt": "0.57.0",
     "turbo": "^2.10.1",
