@@ -53,13 +53,13 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
     expect(first?.supports_search_tool).toBe(true);
-    const expectedLimit = Math.floor(DEFAULT_MODEL.limit.context / 1.8);
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
-      limit: expectedLimit,
+      limit: 10_000,
     });
-    expect(first?.auto_compact_token_limit).toBe(expectedLimit);
-    expect(first?.effective_context_window_percent).toBe(56);
+    expect(first?.context_window).toBe(1_048_576);
+    expect(first?.auto_compact_token_limit).toBe(900_000);
+    expect(first?.effective_context_window_percent).toBe(95);
     expect(first?.comp_hash).toBeNull();
     expect(first?.use_responses_lite).toBe(false);
   });
@@ -230,16 +230,83 @@ describe("Codex Responses proxy tool compatibility", () => {
     },
   );
 
-  test("all models compact before Together tokenizer rejects (1.8x mismatch)", async () => {
+  test("advertises native-style truncation and model-specific compaction limits", async () => {
     const catalog = await getModels();
     expect(catalog.models.length).toBeGreaterThan(0);
     for (const m of catalog.models as Array<Record<string, unknown>>) {
-      const ctx = m.context_window as number;
-      const expectedLimit = Math.floor(ctx / 1.8);
-      expect(m.auto_compact_token_limit).toBe(expectedLimit);
-      expect(m.effective_context_window_percent).toBe(56);
-      expect((m.truncation_policy as { limit: number }).limit).toBe(expectedLimit);
+      expect(m.effective_context_window_percent).toBe(95);
+      expect(m.truncation_policy).toEqual({ mode: "tokens", limit: 10_000 });
     }
+    const compactLimitByModel = Object.fromEntries(
+      (catalog.models as Array<Record<string, unknown>>).map((model) => [
+        model.slug,
+        model.auto_compact_token_limit,
+      ]),
+    );
+    expect(compactLimitByModel).toMatchObject({
+      [DEFAULT_MODEL.id]: 900_000,
+      [GLM_5_2.id]: 235_000,
+      [MINIMAX_M3.id]: 470_000,
+      [QWEN_3_7_MAX.id]: 880_000,
+    });
+  });
+
+  test("forwards historical images without rewriting the conversation", async () => {
+    const requests: Array<{ messages?: unknown[] }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)) as { messages?: unknown[] });
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: DEFAULT_MODEL.id,
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "Inspect the original." },
+              { type: "input_image", image_url: "data:image/png;base64,OLDER_IMAGE" },
+            ],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "I inspected it." }],
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "Compare it with this one." },
+              { type: "input_image", image_url: "data:image/png;base64,NEWER_IMAGE" },
+            ],
+          },
+        ],
+      },
+      {
+        ...options,
+        modelId: DEFAULT_MODEL.id,
+        targetModelId: DEFAULT_MODEL.id,
+        modelName: DEFAULT_MODEL.name,
+        modelDefinition: DEFAULT_MODEL,
+      },
+    );
+
+    const upstreamBody = JSON.stringify(requests[0]);
+    expect(upstreamBody).toContain("OLDER_IMAGE");
+    expect(upstreamBody).toContain("NEWER_IMAGE");
+    expect(upstreamBody).not.toContain("togetherlink removed an older image");
   });
 
   test("preserves prior reasoning items when translating Codex history", async () => {
@@ -2341,71 +2408,53 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response.incomplete_details).toEqual({ reason: "max_output_tokens" });
   });
 
-  test("trims old context and retries when input alone exceeds the context window", async () => {
-    const requests: Array<{ body: any }> = [];
+  test("surfaces context overflow without mutating or retrying the request", async () => {
     let callCount = 0;
+    const upstreamBodies: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.startsWith("http://127.0.0.1:")) {
           return realFetch(url, init);
         }
-        if (url.includes("/api/telemetry")) {
-          return new Response(null, { status: 204 });
-        }
-        const body = JSON.parse(String(init?.body));
-        requests.push({ body });
         callCount += 1;
-        if (callCount === 1) {
-          // Together rejects: input alone (325k) exceeds the 262k window.
-          return new Response(
-            JSON.stringify({
-              error: {
-                message:
-                  "This model's maximum context length is 262,144 tokens. (325,611 input tokens, 0 output tokens).",
-              },
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        // After trim, succeed.
-        return jsonResponse({
-          choices: [{ message: { content: "Done after trim." }, finish_reason: "stop" }],
-          usage: { prompt_tokens: 200, completion_tokens: 5, total_tokens: 205 },
-        });
+        upstreamBodies.push(JSON.stringify(JSON.parse(String(init?.body))));
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                "This model's maximum context length is 262,144 tokens. (325,611 input tokens, 0 output tokens).",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
       }),
     );
 
-    const longText = "x".repeat(200_000);
-    const longReply = "y".repeat(200_000);
-    const response = await postResponses({
+    const response = await postResponsesText({
       model: GLM_5_2.id,
+      stream: true,
       input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: longText }] },
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "x".repeat(200_000) }],
+        },
         {
           type: "message",
           role: "assistant",
-          content: [{ type: "output_text", text: longReply }],
+          content: [{ type: "output_text", text: "y".repeat(200_000) }],
         },
         { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
       ],
     });
 
-    // Two upstream calls: first 400, retry after input trim succeeded.
-    expect(callCount).toBe(2);
-    expect(response.status).toBe("completed");
-    expect(response.output[0]).toMatchObject({
-      type: "message",
-      role: "assistant",
-      content: [{ type: "output_text", text: "Done after trim.", annotations: [] }],
-    });
-    // The retry payload must have trimmed old context (trim marker inserted).
-    const retryMessages = requests[1]?.body?.messages;
-    expect(retryMessages).toBeDefined();
-    const hasTrimMarker = retryMessages.some(
-      (m: any) => typeof m.content === "string" && m.content.includes("[togetherlink trimmed"),
-    );
-    expect(hasTrimMarker).toBe(true);
+    expect(callCount).toBe(1);
+    expect(response).toContain('"type":"response.failed"');
+    expect(response).toContain('"code":"context_length_exceeded"');
+    expect(upstreamBodies).toHaveLength(1);
+    expect(response).not.toContain("togetherlink trimmed older context");
+    expect(upstreamBodies[0]).not.toContain("togetherlink trimmed older context");
   });
 });
 

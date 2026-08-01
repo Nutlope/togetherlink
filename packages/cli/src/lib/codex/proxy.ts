@@ -132,11 +132,6 @@ export async function handleCodexProxyRequest(
       perf.end({ status: res.statusCode });
       return;
     }
-    // One memory request fans out to one Together call per trace, so no single
-    // usage record corresponds to the complete inbound byte count. Clear the
-    // calibration sample for this request rather than poisoning the estimator
-    // with whole-request bytes divided by only the first trace's tokens.
-    options.costTracker?.noteRequestBytes(0);
     options.costTracker?.beginRequest();
     const definition = requestedTogetherModel ?? options.modelDefinition;
     const targetModelId = requestedTogetherModel?.id ?? options.targetModelId;
@@ -170,11 +165,10 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  // Capture the decoded JSON byte length — the cheap signal the
-  // self-calibrating token estimator keys on (see cost.ts). Built-in OpenAI
-  // traffic may arrive zstd-compressed, so transport bytes are not sufficient.
+  // Decode the Responses body before resolving native versus Together routing.
+  // Built-in OpenAI traffic may arrive zstd-compressed.
   const request = await perf.span("body_read_parse", () => readDecodedCodexRequest(req));
-  const { body, rawBytes } = request;
+  const { body } = request;
   const requestedTogetherModel = body.model ? findModelById(body.model) : undefined;
   if (options.nativeBaseUrl && body.model && !requestedTogetherModel) {
     const nativeBody = { ...body } as ResponsesRequest & { previous_response_id?: unknown };
@@ -193,18 +187,7 @@ export async function handleCodexProxyRequest(
     perf.end({ status: res.statusCode, native: true, model: body.model });
     return;
   }
-  // Record the inbound byte length for the estimator, then mark a new request
-  // (beginRequest resets the per-request delta and arms the first-addUsage
-  // calibration). noteRequestBytes must precede beginRequest's first addUsage.
-  options.costTracker?.noteRequestBytes(rawBytes);
   options.costTracker?.beginRequest();
-  // Estimate input tokens from the raw byte length via the calibrated estimator
-  // (or rawBytes/4 fallback when there is no calibration history). O(1) — this
-  // replaces the per-turn full-payload JSON.stringify the old defaultMaxOutputTokens
-  // performed. Threading it here lets toChatPayload clamp max_tokens near the
-  // window without re-serializing messages + tools.
-  const estimatedInputTokens =
-    options.costTracker?.tokenEstimator.estimate(rawBytes) ?? Math.ceil(rawBytes / 4);
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     if (upstreamAbort.signal.aborted) {
@@ -229,7 +212,6 @@ export async function handleCodexProxyRequest(
       Boolean(body.stream),
       toolTranslation,
       requestModel,
-      estimatedInputTokens,
     );
     return { nativeToolCount, toolTranslation, requestModel, translatedPayload };
   });
@@ -250,7 +232,6 @@ export async function handleCodexProxyRequest(
         false,
         { tools: [], mappings: new Map(), nativeTools: [] },
         requestModel,
-        estimatedInputTokens,
       ),
       requestModel.definition,
     );
@@ -259,7 +240,6 @@ export async function handleCodexProxyRequest(
         compactPayload,
         { tools: [], mappings: new Map(), nativeTools: [] },
         options,
-        requestModel.definition,
         upstreamAbort.signal,
       ),
     );
@@ -317,7 +297,6 @@ export async function handleCodexProxyRequest(
         translatedPayload,
         toolTranslation,
         options,
-        requestModel.definition,
         upstreamAbort.signal,
       ),
     { nativeToolCount },
@@ -376,8 +355,9 @@ export function writeOpenAIError(
   status: number,
   type: string,
   message: string,
+  code?: string,
 ): void {
-  writeJson(res, status, { error: { type, message } });
+  writeJson(res, status, { error: { type, ...(code ? { code } : {}), message } });
 }
 
 function debugLog(

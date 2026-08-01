@@ -15,6 +15,7 @@ import {
   type CodexProxyOptions,
 } from "../codex/proxy.js";
 import { CodexRequestError } from "../codex/native-router.js";
+import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
@@ -137,6 +138,10 @@ export function renderDaemonError(
   agent: string | undefined,
 ): void {
   if (agent === "codex" || agent === "codex-app") {
+    if (err instanceof CodexTogetherError) {
+      writeOpenAIError(res, err.status, err.type, err.message, err.code);
+      return;
+    }
     if (err instanceof CodexRequestError) {
       writeOpenAIError(
         res,

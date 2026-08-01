@@ -50,7 +50,7 @@ type StreamTurnResult =
       text: string;
       finishReason?: string | null | undefined;
     }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; errorCode?: string };
 
 class SseIdleTimeoutError extends Error {
   constructor(readonly timeoutMs: number) {
@@ -166,7 +166,7 @@ export async function streamResponseFromTogether(
     throw err;
   }
   if (!turn.ok) {
-    return failStream(res, responseId, turn.status, turn.error);
+    return failStream(res, responseId, turn.status, turn.error, turn.errorCode);
   }
   return completeStreamResponse(
     res,
@@ -195,12 +195,19 @@ async function streamTogetherTurn(
 ): Promise<StreamTurnResult> {
   const upstreamResult = await (perf?.span(
     "upstream_fetch",
-    () => fetchTogetherChat(payload, options, modelDefinition, signal),
+    () => fetchTogetherChat(payload, options, signal),
     { stream: true },
-  ) ?? fetchTogetherChat(payload, options, modelDefinition, signal));
+  ) ?? fetchTogetherChat(payload, options, signal));
   if (!upstreamResult.ok) {
-    const message = `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}`;
-    return { ok: false, status: upstreamResult.status, error: message };
+    const message = `Together API returned ${upstreamResult.status}: ${
+      upstreamResult.errorMessage ?? upstreamResult.text.slice(0, 1000)
+    }`;
+    return {
+      ok: false,
+      status: upstreamResult.status,
+      error: message,
+      ...(upstreamResult.errorCode ? { errorCode: upstreamResult.errorCode } : {}),
+    };
   }
   const upstream = upstreamResult.response;
   if (!upstream.body) {
@@ -220,7 +227,7 @@ async function streamTogetherTurn(
   for await (const eventData of readTogetherSseWithRetry(
     upstream,
     async () => {
-      const retried = await fetchTogetherChat(payload, options, modelDefinition, signal);
+      const retried = await fetchTogetherChat(payload, options, signal);
       return retried.ok
         ? retried.response
         : new Response(retried.text, {
@@ -404,7 +411,7 @@ async function streamResponseWithNativeTools(
       throw err;
     }
     if (!turn.ok) {
-      return failStream(res, responseId, turn.status, turn.error);
+      return failStream(res, responseId, turn.status, turn.error, turn.errorCode);
     }
     usage = mergeUsage(usage, turn.usage);
     lastFinishReason = turn.finishReason;
@@ -703,10 +710,15 @@ function failStream(
   responseId: string,
   status: number,
   message: string,
+  code?: string,
 ): StreamProxyResult {
   writeResponsesSse(res, "response.failed", {
     type: "response.failed",
-    response: { id: responseId, status: "failed", error: { message } },
+    response: {
+      id: responseId,
+      status: "failed",
+      error: { ...(code ? { code } : {}), message },
+    },
   });
   res.end();
   return { ok: false, status, error: message };

@@ -10,7 +10,6 @@ import {
   applyContextFit,
   emitContextTrimAlarm,
   newContextFitState,
-  stripHistoricalImages,
 } from "./context-fit.js";
 import type { ContextTrimTelemetryInfo } from "./telemetry.js";
 
@@ -112,7 +111,6 @@ export async function postChatCompletion(
   signal?: AbortSignal,
   fit?: ContextFitConfig,
 ): Promise<Response> {
-  pruneHistoricalImages(payload, options);
   const doFetch = (body: string) =>
     payload.stream === true
       ? streamFetchOnce(body, options, signal)
@@ -184,9 +182,6 @@ export async function postChatCompletionStream(
   body?: string,
   fit?: ContextFitConfig,
 ): Promise<Response> {
-  if (body === undefined) {
-    pruneHistoricalImages(payload, options);
-  }
   const doFetch = (b: string) => streamFetchOnce(b, options, signal);
   if (body !== undefined || !fit) {
     return doFetch(body ?? JSON.stringify(payload));
@@ -367,20 +362,6 @@ function withResponseBodyCleanup(response: Response, cleanup: () => void): Respo
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
-  });
-}
-
-function pruneHistoricalImages(
-  payload: Record<string, unknown>,
-  options: TogetherClientOptions,
-): void {
-  const pruned = stripHistoricalImages(payload.messages);
-  if (!pruned) {
-    return;
-  }
-  writeProxyDebugLog("togetherlink proxy", options, "historical images pruned", {
-    removedParts: pruned.removedParts,
-    freedBytes: pruned.freedChars,
   });
 }
 

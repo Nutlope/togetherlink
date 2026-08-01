@@ -154,7 +154,14 @@ export type CodexToolTranslation = {
 
 export type TogetherChatResult =
   | { ok: true; response: Response; error?: undefined }
-  | { ok: false; status: number; text: string; error?: undefined };
+  | {
+      ok: false;
+      status: number;
+      text: string;
+      errorCode?: string;
+      errorMessage?: string;
+      error?: undefined;
+    };
 
 export type StreamProxyResult =
   | { ok: true; status?: number }

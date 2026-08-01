@@ -5,13 +5,11 @@ import {
   contextLengthOverflow,
   dropOldestTurns,
   newContextFitState,
-  stripOldImages,
   trimPayloadMessages,
 } from "../../cli/src/lib/context-fit.js";
 import { postChatCompletion, postChatCompletionStream } from "../../cli/src/lib/together-client.js";
 
 const TRIM_MARKER = "[togetherlink trimmed older context to fit the model window]";
-const IMAGE_PLACEHOLDER = "[togetherlink removed an older image to fit the model window]";
 
 const model: ModelDefinition = {
   id: "test/fit-model",
@@ -71,32 +69,6 @@ describe("trimPayloadMessages", () => {
     expect(messages[0]?.content).toBe("keep me");
     const part = (messages[1]?.content as Array<{ type: string; text?: string }>)[0];
     expect(part?.text).toContain(TRIM_MARKER);
-  });
-});
-
-describe("stripOldImages", () => {
-  test("keeps the most recent image and placeholders older ones", () => {
-    const messages = [
-      {
-        role: "user",
-        content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAA" } }],
-      },
-      { role: "assistant", content: "ok" },
-      {
-        role: "user",
-        content: [{ type: "image_url", image_url: { url: "data:image/png;base64,BBB" } }],
-      },
-    ];
-    const result = stripOldImages(messages, 1);
-    expect(result?.removedParts).toBe(1);
-    const first = (messages[0]?.content as Array<{ type: string; text?: string }>)[0];
-    const last = (messages[2]?.content as Array<{ type: string; image_url?: unknown }>)[0];
-    expect(first).toEqual({ type: "text", text: IMAGE_PLACEHOLDER });
-    expect(last?.image_url).toBeDefined(); // most recent image preserved
-  });
-
-  test("returns undefined when nothing to strip", () => {
-    expect(stripOldImages([{ role: "user", content: "no images" }], 1)).toBeUndefined();
   });
 });
 
@@ -168,14 +140,17 @@ describe("applyContextFit ladder", () => {
     expect(retriedFirstUser).toContain(TRIM_MARKER);
   });
 
-  test("rung 2: strips old images when input exceeds the window", () => {
+  test("preserves historical images while trimming old text", () => {
     const payload: Record<string, unknown> = {
       model: model.id,
       max_tokens: 4000,
       messages: [
         {
           role: "user",
-          content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAA" } }],
+          content: [
+            { type: "text", text: longText(3000) },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
+          ],
         },
         {
           role: "user",
@@ -189,10 +164,12 @@ describe("applyContextFit ladder", () => {
       model,
       newContextFitState(payload),
     );
-    expect(outcome.action).toBe("strip_images");
+    expect(outcome.action).toBe("trim_text");
+    expect(JSON.stringify(payload.messages)).toContain("AAA");
+    expect(JSON.stringify(payload.messages)).toContain("BBB");
   });
 
-  test("rung 4: drops oldest turns when text can't be trimmed further", () => {
+  test("rung 3: drops oldest turns when text can't be trimmed further", () => {
     const payload: Record<string, unknown> = {
       model: model.id,
       max_tokens: 4000,
@@ -229,7 +206,7 @@ describe("applyContextFit ladder", () => {
 });
 
 describe("together-client context-fit retry", () => {
-  test("removes historical images before the first request and keeps every latest-turn image", async () => {
+  test("preserves historical and latest-turn images before the first request", async () => {
     let sentBody: Record<string, unknown> | undefined;
     vi.stubGlobal(
       "fetch",
@@ -270,11 +247,11 @@ describe("together-client context-fit retry", () => {
     });
 
     const serialized = JSON.stringify(sentBody);
-    expect(serialized).not.toContain("OLD_A");
-    expect(serialized).not.toContain("OLD_B");
+    expect(serialized).toContain("OLD_A");
+    expect(serialized).toContain("OLD_B");
     expect(serialized).toContain("NEW_A");
     expect(serialized).toContain("NEW_B");
-    expect(serialized.split(IMAGE_PLACEHOLDER)).toHaveLength(3);
+    expect(serialized).not.toContain("togetherlink removed an older image");
   });
 
   test("self-heals a context-length 400 and re-posts until it fits", async () => {

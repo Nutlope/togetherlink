@@ -70,7 +70,6 @@ export async function summarizeTogetherMemories(
       memoryPayload(trace, body.reasoning, targetModelId, modelDefinition),
       EMPTY_CODEX_TOOL_TRANSLATION,
       options,
-      modelDefinition,
       signal,
     );
     output.push(memoryOutput(response));

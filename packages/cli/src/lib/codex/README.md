@@ -14,3 +14,16 @@ approvals_reviewer = "auto_review"
 ```
 
 If `~/.codex/config.toml` already has any content, leave it untouched, even if it does not include `approval_policy`. If the user passes `--ignore-user-config` through to Codex, skip even the first-run seed.
+
+## History ownership
+
+The Codex proxy forwards conversation history, including historical images,
+without deleting, summarizing, or retrying with modified content. Codex owns
+context accounting and compaction; TogetherLink only maps Together context
+errors to the standard Responses error contract.
+
+Future investigation: if live long-running sessions show that repeated
+computer-use or tool-result screenshots cause material Together failures,
+evaluate retiring only stale tool-generated images after their observations are
+captured in text. Do not remove user attachments or introduce request rewriting
+without reproducible long-session evidence.

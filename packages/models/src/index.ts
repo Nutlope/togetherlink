@@ -62,6 +62,8 @@ export type ModelDefinition = {
   temperature: boolean;
   /** Supports tool/function calling. */
   tool_call: boolean;
+  /** Optional Codex history-compaction threshold from provider-specific model metadata. */
+  codexAutoCompactTokenLimit?: number;
   modalities: ModelModalities;
 };
 
@@ -90,6 +92,7 @@ export const KIMI_K3: ModelDefinition = {
   defaultReasoningEffort: "high",
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 900_000,
   modalities: { input: ["text", "image"], output: ["text"] },
 };
 
@@ -108,6 +111,7 @@ export const GLM_5_2: ModelDefinition = {
   reasoning: true,
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 235_000,
   modalities: { input: ["text"], output: ["text"] },
 };
 
@@ -138,6 +142,7 @@ export const KIMI_K2_6: ModelDefinition = {
   reasoning: true,
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 235_000,
   modalities: { input: ["text", "image"], output: ["text"] },
 };
 
@@ -156,6 +161,7 @@ export const MINIMAX_M3: ModelDefinition = {
   reasoning: true,
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 470_000,
   modalities: { input: ["text", "image"], output: ["text"] },
 };
 
@@ -174,6 +180,7 @@ export const QWEN_3_7_MAX: ModelDefinition = {
   reasoning: true,
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 880_000,
   modalities: { input: ["text", "image"], output: ["text"] },
 };
 
@@ -192,6 +199,7 @@ export const DEEPSEEK_V4_PRO: ModelDefinition = {
   reasoning: true,
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 450_000,
   modalities: { input: ["text"], output: ["text"] },
 };
 
@@ -220,6 +228,7 @@ export const KIMI_K2_7_CODE: ModelDefinition = {
   reasoning: true,
   temperature: true,
   tool_call: true,
+  codexAutoCompactTokenLimit: 235_000,
   modalities: { input: ["text", "image"], output: ["text"] },
 };
 

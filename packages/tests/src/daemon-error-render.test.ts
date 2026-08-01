@@ -3,6 +3,7 @@ import { type ServerResponse } from "node:http";
 import { renderDaemonError } from "@togetherlink/cli/dist/lib/daemon/server.js";
 import { TogetherResponseHeaderTimeoutError } from "@togetherlink/cli/dist/lib/together-client.js";
 import { CodexRequestError } from "@togetherlink/cli/dist/lib/codex/native-router.js";
+import { CodexTogetherError } from "@togetherlink/cli/dist/lib/codex/together-call.js";
 import type { TogetherApiError } from "@togetherlink/cli/dist/lib/claude/wire-types.js";
 
 // A minimal ServerResponse stub: capture statusCode + the JSON body written.
@@ -116,6 +117,37 @@ describe("daemon error rendering (#2 — error contract at the seam)", () => {
     expect(parsed.error.type).toBe("timeout_error");
     expect(parsed.error.message).toContain("request-456");
     expect(parsed.type).toBeUndefined();
+  });
+
+  test("Codex agent + Together context overflow preserves the standard error code", () => {
+    const m = mockRes();
+    renderDaemonError(
+      m.res,
+      new CodexTogetherError(
+        400,
+        "This model's maximum context length was exceeded.",
+        "context_length_exceeded",
+      ),
+      "codex-app",
+    );
+    expect(m.statusCode).toBe(400);
+    const parsed = JSON.parse(m.body);
+    expect(parsed.error).toEqual({
+      type: "invalid_request_error",
+      code: "context_length_exceeded",
+      message: "This model's maximum context length was exceeded.",
+    });
+  });
+
+  test("Codex agent + Together rate limit keeps the OpenAI error category", () => {
+    const m = mockRes();
+    renderDaemonError(m.res, new CodexTogetherError(429, "slow down", "rate_limit"), "codex");
+    expect(m.statusCode).toBe(429);
+    expect(JSON.parse(m.body).error).toEqual({
+      type: "rate_limit_error",
+      code: "rate_limit",
+      message: "slow down",
+    });
   });
 
   test("Codex agent + rejected oversized request → OpenAI 413 request_too_large", () => {

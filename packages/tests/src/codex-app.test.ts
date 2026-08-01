@@ -209,13 +209,14 @@ describe("Codex App alpha config", () => {
     expect(first?.use_responses_lite).toBe(false);
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
-    // Truncation limit is the context window divided by the Codex↔Together
-    // tokenizer-mismatch ratio, so Codex compacts before Together's
-    // server-side tokenizer rejects. See codex/catalog.ts.
+    // Match native Codex tool-output truncation while leaving conversation
+    // compaction to the model-specific catalog metadata.
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
-      limit: Math.floor(DEFAULT_MODEL.limit.context / 1.8),
+      limit: 10_000,
     });
+    expect(first?.auto_compact_token_limit).toBe(900_000);
+    expect(first?.effective_context_window_percent).toBe(95);
     expect(first?.comp_hash).toBeNull();
     // model_messages MUST be an object (not null) so Codex Desktop can resolve
     // the requested personality instead of warning and falling back.
