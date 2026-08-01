@@ -158,9 +158,17 @@ export async function forwardNativeCodexRequest(
         await new Promise<void>((resolve) => res.once("drain", resolve));
       }
     }
-    res.end();
+  } catch {
+    // Client disconnect (abort) or a broken upstream stream. Headers are
+    // already sent on this connection at this point (writeHead above), so
+    // there's no error response left to send — just stop. Letting this throw
+    // used to reach the daemon's top-level catch-all, which tried to write a
+    // second response on the same connection and crashed the whole process.
   } finally {
     reader.releaseLock();
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
 }
 

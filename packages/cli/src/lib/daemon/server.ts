@@ -146,6 +146,17 @@ export function renderDaemonError(
   err: unknown,
   agent: string | undefined,
 ): void {
+  if (res.headersSent) {
+    // A streaming response (Codex SSE, native passthrough) already sent
+    // headers before this error hit; the client has a partial response on
+    // this connection, so a fresh error body can't be written on top of it.
+    // Writing one anyway throws ERR_HTTP_HEADERS_SENT, which — uncaught here —
+    // used to crash the whole daemon process for every active session.
+    if (!res.writableEnded) {
+      res.end();
+    }
+    return;
+  }
   if (agent === "codex" || agent === "codex-app") {
     if (err instanceof CodexTogetherError) {
       writeOpenAIError(res, err.status, err.type, err.message, err.code);
@@ -205,7 +216,22 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
         requestAgent = a;
       },
     }).catch((err: unknown) => {
-      renderDaemonError(res, err, requestAgent);
+      if (debug) {
+        process.stderr.write(
+          `[togetherlink daemon] request error (${requestAgent ?? "unknown"}): ${
+            err instanceof Error ? (err.stack ?? err.message) : String(err)
+          }\n`,
+        );
+      }
+      try {
+        renderDaemonError(res, err, requestAgent);
+      } catch {
+        // A response-write failure here must never take the daemon down —
+        // it's shared across every active session, not just this request.
+        if (!res.writableEnded) {
+          res.destroy();
+        }
+      }
     });
   });
   // Codex/ChatGPT Desktop's Responses-over-WebSocket transport is only
