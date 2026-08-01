@@ -3,6 +3,34 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.7 - 2026-08-01
+
+### Added
+
+- Completed the ChatGPT Codex endpoint matrix with native image generation/editing and alpha-search
+  pass-through, local Together-backed Responses compaction v1/v2, memory trace summarization, and
+  compatibility aliases with or without the `/v1` prefix.
+
+### Changed
+
+- Simplified Codex context handling so conversation history and historical images pass through
+  unchanged while Codex owns compaction; TogetherLink now advertises model-specific compaction
+  thresholds and the native-style 10k tool-output truncation policy.
+- Sanitized provider-specific response items and tool/search payloads at the OpenAI-Together
+  boundary without mutating ordinary conversation history.
+
+### Fixed
+
+- Preserved Together context-length and HTTP error codes in Responses errors instead of hiding
+  them behind generic proxy failures.
+- Rejected unsupported WebSocket and non-SSE Responses transports immediately so ChatGPT Desktop
+  can fall back cleanly instead of failing later in a turn.
+
+### Tests
+
+- Added deterministic coverage for compaction v1/v2, memories, native route pass-through, response
+  item normalization, transport validation, context metadata, and error propagation.
+
 ## 0.7.6 - 2026-08-01
 
 ### Fixed
