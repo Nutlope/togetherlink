@@ -188,6 +188,12 @@ export function buildCodexAppConfig(
     `profiles."${options.providerId}"`,
     `model_providers.${options.providerId}`,
     `model_providers."${options.providerId}"`,
+    // A short-lived TogetherLink build tried to disable Responses WebSockets
+    // by overriding the built-in provider. Current Codex reserves this ID and
+    // rejects the entire config if that table remains, so clean it up while
+    // retaining the supported HTTP 426 transport fallback in the daemon.
+    "model_providers.openai",
+    'model_providers."openai"',
   ]);
   const withGenericDefaults = applyCodexGenericUserDefaults(withoutLegacyTables);
   const [preamble, rest] = splitTomlPreamble(withGenericDefaults);

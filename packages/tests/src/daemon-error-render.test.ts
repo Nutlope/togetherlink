@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { type ServerResponse } from "node:http";
 import { renderDaemonError } from "@togetherlink/cli/dist/lib/daemon/server.js";
 import { TogetherResponseHeaderTimeoutError } from "@togetherlink/cli/dist/lib/together-client.js";
+import { CodexRequestError } from "@togetherlink/cli/dist/lib/codex/native-router.js";
 import type { TogetherApiError } from "@togetherlink/cli/dist/lib/claude/wire-types.js";
 
 // A minimal ServerResponse stub: capture statusCode + the JSON body written.
@@ -114,6 +115,20 @@ describe("daemon error rendering (#2 — error contract at the seam)", () => {
     const parsed = JSON.parse(m.body);
     expect(parsed.error.type).toBe("timeout_error");
     expect(parsed.error.message).toContain("request-456");
+    expect(parsed.type).toBeUndefined();
+  });
+
+  test("Codex agent + rejected oversized request → OpenAI 413 request_too_large", () => {
+    const m = mockRes();
+    renderDaemonError(
+      m.res,
+      new CodexRequestError(413, "Decoded Codex request body is too large."),
+      "codex-app",
+    );
+    expect(m.statusCode).toBe(413);
+    const parsed = JSON.parse(m.body);
+    expect(parsed.error.type).toBe("request_too_large");
+    expect(parsed.error.message).toBe("Decoded Codex request body is too large.");
     expect(parsed.type).toBeUndefined();
   });
 

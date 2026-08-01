@@ -64,6 +64,11 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.use_responses_lite).toBe(false);
   });
 
+  test("serves the model catalog with and without the /v1 prefix", async () => {
+    const [versioned, alias] = await Promise.all([getModels("/v1/models"), getModels("/models")]);
+    expect(alias).toEqual(versioned);
+  });
+
   test("routes chat completions through the session upstream base URL", async () => {
     const urls: string[] = [];
     vi.stubGlobal(
@@ -80,16 +85,105 @@ describe("Codex Responses proxy tool compatibility", () => {
       }),
     );
 
-    const response = await postResponses(
-      {
-        model: GLM_5_2.id,
-        input: [{ type: "message", role: "user", content: "route me" }],
-      },
-      { ...options, baseUrl: "http://codex-upstream.test/together/v1" },
+    for (const path of ["/v1/responses", "/responses"]) {
+      const response = await postCodexPath(
+        path,
+        {
+          model: GLM_5_2.id,
+          input: [{ type: "message", role: "user", content: "route me" }],
+        },
+        { ...options, baseUrl: "http://codex-upstream.test/together/v1" },
+      );
+      expect(response.status).toBe("completed");
+    }
+
+    expect(urls).toEqual([
+      "http://codex-upstream.test/together/v1/chat/completions",
+      "http://codex-upstream.test/together/v1/chat/completions",
+    ]);
+  });
+
+  test("forwards Codex search requests to the native ChatGPT endpoint", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push({ url, init });
+        return jsonResponse({ results: [{ title: "Native search result" }] });
+      }),
     );
 
-    expect(response.status).toBe("completed");
-    expect(urls).toEqual(["http://codex-upstream.test/together/v1/chat/completions"]);
+    for (const path of ["/v1/alpha/search", "/alpha/search"]) {
+      const response = await postCodexPath(
+        path,
+        { query: "Together AI" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex" },
+        {
+          authorization: "Bearer native-chatgpt-token",
+          "chatgpt-account-id": "acct_test",
+        },
+      );
+      expect(response).toEqual({ results: [{ title: "Native search result" }] });
+    }
+
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request.url).toBe("https://chatgpt.com/backend-api/codex/alpha/search");
+      expect(request.init?.method).toBe("POST");
+      expect(request.init?.headers).toMatchObject({
+        authorization: "Bearer native-chatgpt-token",
+        "chatgpt-account-id": "acct_test",
+      });
+      expect(JSON.parse(String(request.init?.body))).toEqual({ query: "Together AI" });
+    }
+  });
+
+  test("accepts image generation and editing with and without the /v1 prefix", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(url);
+        return jsonResponse({ data: [{ b64_json: "aW1hZ2U=" }] });
+      }),
+    );
+    const nativeOptions = {
+      ...options,
+      nativeBaseUrl: "https://chatgpt.com/backend-api/codex",
+    };
+
+    for (const path of [
+      "/v1/images/generations",
+      "/images/generations",
+      "/v1/images/edits",
+      "/images/edits",
+    ]) {
+      const response = await postCodexPath(
+        path,
+        {
+          model: "gpt-image-2",
+          prompt: "add a red hat",
+          ...(path.endsWith("/edits")
+            ? { images: [{ image_url: "data:image/png;base64,aW1hZ2U=" }] }
+            : {}),
+        },
+        nativeOptions,
+      );
+      expect(response.data).toEqual([{ b64_json: "aW1hZ2U=" }]);
+    }
+
+    expect(requests).toEqual([
+      "https://chatgpt.com/backend-api/codex/images/generations",
+      "https://chatgpt.com/backend-api/codex/images/generations",
+      "https://chatgpt.com/backend-api/codex/images/edits",
+      "https://chatgpt.com/backend-api/codex/images/edits",
+    ]);
   });
 
   test("all models compact before Together tokenizer rejects (1.8x mismatch)", async () => {
@@ -990,8 +1084,16 @@ describe("Codex Responses proxy tool compatibility", () => {
       ],
     });
 
-    expect(response).toContain("response.failed");
-    expect(response).toContain("without a finish reason");
+    const failedLine = response
+      .split("\n")
+      .find((line) => line.startsWith("data: ") && line.includes('"response.failed"'));
+    expect(failedLine).toBeDefined();
+    const failedData = JSON.parse(failedLine!.replace(/^data: /, ""));
+    expect(failedData.response.status).toBe("failed");
+    expect(failedData.response.error).toEqual({
+      message: "Together stream ended without a finish reason.",
+    });
+    expect(failedData).not.toHaveProperty("error");
     expect(response).not.toContain("response.completed");
   });
 
@@ -2153,19 +2255,21 @@ describe("Codex Responses proxy tool compatibility", () => {
       ],
     });
 
-    // The turn was truncated by max_tokens — Codex must see "incomplete".
-    // Parse the response.completed event JSON and check the top-level status.
+    // The turn was truncated by max_tokens — Codex must receive the terminal
+    // response.incomplete event that its Responses parser handles as truncation.
     // (Individual output items have their own item-level "completed" status —
     // we only care about the response.status field, not string-matching.)
-    const completedLine = response
+    const incompleteLine = response
       .split("\n")
-      .find((l) => l.startsWith("data: ") && l.includes('"response.completed"'));
-    expect(completedLine).toBeDefined();
-    const completedData = JSON.parse(completedLine!.replace(/^data: /, ""));
-    expect(completedData.response.status).toBe("incomplete");
-    expect(completedData.response.incomplete_details).toEqual({
+      .find((line) => line.startsWith("data: ") && line.includes('"response.incomplete"'));
+    expect(incompleteLine).toBeDefined();
+    const incompleteData = JSON.parse(incompleteLine!.replace(/^data: /, ""));
+    expect(incompleteData.type).toBe("response.incomplete");
+    expect(incompleteData.response.status).toBe("incomplete");
+    expect(incompleteData.response.incomplete_details).toEqual({
       reason: "max_output_tokens",
     });
+    expect(response).not.toContain('"response.completed"');
   });
 
   test("returns status incomplete when upstream finish_reason is length (non-streaming)", async () => {
@@ -2261,7 +2365,7 @@ describe("Codex Responses proxy tool compatibility", () => {
   });
 });
 
-async function getModels(): Promise<Record<string, any>> {
+async function getModels(path = "/v1/models"): Promise<Record<string, any>> {
   const server = http.createServer((req, res) => {
     handleCodexProxyRequest(req, res, options).catch((error) => {
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -2274,7 +2378,7 @@ async function getModels(): Promise<Record<string, any>> {
     throw new Error("test server did not bind");
   }
   try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/v1/models`);
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
     expect(response.ok).toBe(true);
     return (await response.json()) as Record<string, any>;
   } finally {
@@ -2303,6 +2407,38 @@ async function postResponses(
     const response = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.ok).toBe(true);
+    return (await response.json()) as Record<string, any>;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+async function postCodexPath(
+  path: string,
+  body: unknown,
+  proxyOptions: CodexProxyOptions,
+  headers: Record<string, string> = {},
+): Promise<Record<string, any>> {
+  const server = http.createServer((req, res) => {
+    handleCodexProxyRequest(req, res, { ...proxyOptions, fetch: globalThis.fetch }).catch(
+      (error) => {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      },
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    throw new Error("test server did not bind");
+  }
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     });
     expect(response.ok).toBe(true);

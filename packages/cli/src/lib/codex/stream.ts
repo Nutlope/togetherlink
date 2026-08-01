@@ -670,8 +670,9 @@ function completeStreamResponse(
   // successful completion. This prevents the "model says one sentence then
   // stops" bug where a truncated turn looked like a finished turn.
   const isLengthTruncated = finishReason === "length";
-  writeResponsesSse(res, "response.completed", {
-    type: "response.completed",
+  const terminalEvent = isLengthTruncated ? "response.incomplete" : "response.completed";
+  writeResponsesSse(res, terminalEvent, {
+    type: terminalEvent,
     response: {
       id: responseId,
       object: "response",
@@ -705,8 +706,7 @@ function failStream(
 ): StreamProxyResult {
   writeResponsesSse(res, "response.failed", {
     type: "response.failed",
-    response: { id: responseId, status: "failed" },
-    error: { message },
+    response: { id: responseId, status: "failed", error: { message } },
   });
   res.end();
   return { ok: false, status, error: message };

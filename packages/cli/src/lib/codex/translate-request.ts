@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { findModelById, MINIMAX_M3, type ModelDefinition } from "@togetherlink/models";
+import {
+  findModelById,
+  isVisionModel,
+  MINIMAX_M3,
+  type ModelDefinition,
+} from "@togetherlink/models";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
@@ -7,12 +12,13 @@ import {
   stringArray,
   withNativeToolSystemPrompt as withSharedNativeToolSystemPrompt,
 } from "../exa-search.js";
-import { stringifyUnknown } from "./content-format.js";
+import { normalizeTogetherCompactionItem } from "./compaction.js";
 import type {
   ChatContentPart,
   ChatMessage,
   CodexToolMapping,
   CodexToolTranslation,
+  ResponsesContentPart,
   ResponsesInputItem,
   ResponsesRequest,
   ResponsesTextConfig,
@@ -62,7 +68,7 @@ export function toChatPayload(
   estimatedInputTokens: number,
 ): Record<string, unknown> {
   const messages = toChatMessages(body, options, toolTranslation, requestModel);
-  const translatedReasoningEffort = reasoningEffort(body, requestModel.definition);
+  const translatedReasoningEffort = codexReasoningEffort(body.reasoning, requestModel.definition);
   const messagesWithNativePrompt =
     toolTranslation.nativeTools.length > 0
       ? withNativeToolSystemPrompt(messages, toolTranslation.nativeTools)
@@ -158,7 +164,14 @@ function toChatMessages(
       ...(reasoning ? { reasoning_content: reasoning } : {}),
     });
   };
-  for (const item of body.input ?? []) {
+  for (const rawItem of body.input ?? []) {
+    const item = normalizeTogetherCompactionItem(rawItem);
+    if (!item) {
+      continue;
+    }
+    if (item.type === "additional_tools") {
+      continue;
+    }
     if (item.type === "reasoning") {
       const reasoning = stringifyResponsesContent(item.content);
       if (reasoning) {
@@ -204,13 +217,44 @@ function toChatMessages(
       });
       continue;
     }
+    if (item.type === "local_shell_call") {
+      pendingToolCalls.push({
+        id: item.call_id ?? item.id ?? `call_${randomUUID().replaceAll("-", "")}`,
+        type: "function",
+        function: {
+          name: "local_shell",
+          arguments: localShellArguments(item.action),
+        },
+      });
+      continue;
+    }
     flushPendingToolCalls();
+    if (item.type === "agent_message") {
+      messages.push({ role: "assistant", content: agentMessageHistory(item) });
+      continue;
+    }
+    if (item.type === "web_search_call") {
+      messages.push({ role: "assistant", content: webSearchHistory(item) });
+      continue;
+    }
+    if (item.type === "image_generation_call") {
+      messages.push(imageGenerationHistory(item, requestModel?.definition));
+      continue;
+    }
+    if (item.type === "context_compaction") {
+      messages.push({
+        role: "assistant",
+        content:
+          "[Conversation context was compacted in an opaque format unavailable to this Together model.]",
+      });
+      continue;
+    }
     if (item.type === "tool_search_output") {
       messages.push({
         role: "tool",
         tool_call_id: item.call_id ?? "",
         content: `Loaded tools: ${
-          (item.tools ?? [])
+          responseTools(item.tools)
             .map((tool) => tool.name)
             .filter(Boolean)
             .join(", ") || "none"
@@ -222,7 +266,7 @@ function toChatMessages(
       messages.push({
         role: "tool",
         tool_call_id: item.call_id ?? "",
-        content: stringifyUnknown(item.output),
+        content: toChatToolOutput(item.output, requestModel?.definition ?? options.modelDefinition),
       });
       continue;
     }
@@ -382,7 +426,9 @@ export function translateCodexRequestTools(body: ResponsesRequest): CodexToolTra
     typeof body.input === "string"
       ? []
       : (body.input ?? []).flatMap((item) =>
-          item.type === "tool_search_output" ? (item.tools ?? []) : [],
+          item.type === "tool_search_output" || item.type === "additional_tools"
+            ? responseTools(item.tools)
+            : [],
         );
   const combined = [...visibleTools];
   const seen = new Set(combined.map(toolIdentity));
@@ -398,6 +444,13 @@ export function translateCodexRequestTools(body: ResponsesRequest): CodexToolTra
 
 function toolIdentity(tool: ResponsesTool): string {
   return `${tool.type ?? ""}:${tool.name ?? ""}`;
+}
+
+function responseTools(tools: unknown[] | undefined): ResponsesTool[] {
+  return (tools ?? []).filter(
+    (tool): tool is ResponsesTool =>
+      Boolean(tool) && typeof tool === "object" && !Array.isArray(tool),
+  );
 }
 
 function toChatFunctionTool(
@@ -493,6 +546,9 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
       ) {
         return part.text ?? "";
       }
+      if (part.type === "input_audio") {
+        return "[Audio input is unavailable to the selected Together model.]";
+      }
       return "";
     })
     .filter(Boolean)
@@ -559,6 +615,12 @@ function toChatMessageContent(
       if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
         return part.text ? { type: "text", text: part.text } : undefined;
       }
+      if (part.type === "input_audio") {
+        return {
+          type: "text",
+          text: "[Audio input is unavailable to the selected Together model.]",
+        };
+      }
       if (
         (part.type === "input_image" || part.type === "image_url") &&
         typeof part.image_url === "string"
@@ -574,6 +636,139 @@ function toChatMessageContent(
       return undefined;
     })
     .filter((part): part is ChatContentPart => part !== undefined);
+}
+
+function agentMessageHistory(item: ResponsesInputItem): string {
+  const author = item.author?.trim() || "unknown agent";
+  const recipient = item.recipient?.trim() || "unknown recipient";
+  const content = Array.isArray(item.content) ? item.content : [];
+  const parts = content.flatMap((part) => {
+    if (part.type === "input_text" && part.text) {
+      return [part.text];
+    }
+    if (part.type === "encrypted_content") {
+      return ["[encrypted content unavailable to this Together model]"];
+    }
+    return [];
+  });
+  const readable = parts.join("\n") || "[agent message content unavailable]";
+  return `Agent message from ${author} to ${recipient}: ${readable}`;
+}
+
+function toChatToolOutput(output: unknown, model: ModelDefinition): string | ChatContentPart[] {
+  if (typeof output === "string") {
+    return output;
+  }
+  if (!Array.isArray(output)) {
+    return "[Unsupported structured tool output omitted.]";
+  }
+
+  const parts: ChatContentPart[] = [];
+  for (const rawPart of output) {
+    if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) {
+      parts.push({ type: "text", text: "[Unsupported structured tool output omitted.]" });
+      continue;
+    }
+    const part = rawPart as ResponsesContentPart;
+    if (part.type === "input_text" && typeof part.text === "string") {
+      parts.push({ type: "text", text: part.text });
+    } else if (part.type === "input_image" && typeof part.image_url === "string") {
+      parts.push(
+        isVisionModel(model)
+          ? {
+              type: "image_url",
+              image_url: {
+                url: part.image_url,
+                ...(part.detail ? { detail: part.detail } : {}),
+              },
+            }
+          : {
+              type: "text",
+              text: "[Image output is unavailable to the selected Together model.]",
+            },
+      );
+    } else if (part.type === "input_audio") {
+      parts.push({
+        type: "text",
+        text: "[Audio output is unavailable to the selected Together model.]",
+      });
+    } else if (part.type === "encrypted_content") {
+      parts.push({ type: "text", text: "[Encrypted tool output is unavailable.]" });
+    } else {
+      parts.push({ type: "text", text: "[Unsupported structured tool output omitted.]" });
+    }
+  }
+  return parts.length > 0 ? parts : "[Tool returned no model-readable output.]";
+}
+
+function localShellArguments(action: ResponsesInputItem["action"]): string {
+  if (!action || action.type !== "exec") {
+    return "{}";
+  }
+  const command = Array.isArray(action.command)
+    ? action.command.filter((part): part is string => typeof part === "string")
+    : [];
+  return JSON.stringify({
+    type: "exec",
+    command,
+    ...(typeof action.timeout_ms === "number" ? { timeout_ms: action.timeout_ms } : {}),
+    ...(typeof action.working_directory === "string"
+      ? { working_directory: action.working_directory }
+      : {}),
+    ...(isStringRecord(action.env) ? { env: action.env } : {}),
+    ...(typeof action.user === "string" ? { user: action.user } : {}),
+  });
+}
+
+function webSearchHistory(item: ResponsesInputItem): string {
+  const action = item.action;
+  const kind = typeof action?.type === "string" ? action.type : "unknown action";
+  const detail =
+    typeof action?.query === "string"
+      ? action.query
+      : Array.isArray(action?.queries)
+        ? action.queries.filter((query): query is string => typeof query === "string").join(", ")
+        : typeof action?.url === "string"
+          ? action.url
+          : "details unavailable";
+  return `[Web search ${item.status ?? "recorded"}: ${kind} - ${detail}]`;
+}
+
+function imageGenerationHistory(
+  item: ResponsesInputItem,
+  model: ModelDefinition | undefined,
+): ChatMessage {
+  const prompt = item.revised_prompt?.trim();
+  const description = `Image generation ${item.status ?? "recorded"}${prompt ? `: ${prompt}` : ""}`;
+  const marker = `[${description}.]`;
+  const result = item.result?.trim();
+  if (result && model && isVisionModel(model)) {
+    return {
+      role: "user",
+      content: [
+        { type: "text", text: marker },
+        {
+          type: "image_url",
+          image_url: {
+            url: result.startsWith("data:") ? result : `data:image/png;base64,${result}`,
+          },
+        },
+      ],
+    };
+  }
+  return {
+    role: "assistant",
+    content: `[${description}. Result omitted.]`,
+  };
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every((item) => typeof item === "string")
+  );
 }
 
 function toChatToolChoice(toolChoice: unknown, toolTranslation: CodexToolTranslation): unknown {
@@ -629,8 +824,11 @@ function toChatResponseFormat(text: ResponsesTextConfig | undefined): unknown {
   return undefined;
 }
 
-function reasoningEffort(body: ResponsesRequest, model: ModelDefinition): string | undefined {
-  const effort = body.reasoning?.effort;
+export function codexReasoningEffort(
+  reasoning: ResponsesRequest["reasoning"],
+  model: ModelDefinition,
+): string | undefined {
+  const effort = reasoning?.effort;
   if (!model.reasoning) {
     return undefined;
   }

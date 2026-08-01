@@ -6,7 +6,22 @@ import { createProxyPerfTracer, type ProxyPerfSink } from "../proxy-perf.js";
 import { requestPath, writeJson } from "../http-util.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { objectKeys } from "./content-format.js";
+import {
+  compactionInput,
+  compactionSummary,
+  isTogetherCompactionV2,
+  normalizeNativeCompactionInput,
+  togetherCompactionResponse,
+  togetherV1CompactOutput,
+  toTogetherCompactionPayload,
+  writeTogetherCompactionSse,
+} from "./compaction.js";
 import { forwardNativeCodexRequest, readDecodedCodexRequest } from "./native-router.js";
+import {
+  invalidMemoryTraces,
+  summarizeTogetherMemories,
+  type CodexMemoriesRequest,
+} from "./memories.js";
 import {
   resolveCodexRequestModel,
   toChatPayload,
@@ -18,6 +33,16 @@ import { recordUsage } from "./usage.js";
 import { streamResponseFromTogether } from "./stream.js";
 import type { ResponsesRequest, ResponsesTool } from "./wire-types.js";
 import type { TogetherClientOptions } from "../together-client.js";
+
+const CODEX_V1_ALIAS_PATHS = new Set([
+  "/models",
+  "/responses",
+  "/responses/compact",
+  "/alpha/search",
+  "/images/generations",
+  "/images/edits",
+  "/memories/trace_summarize",
+]);
 
 export type CodexProxyOptions = {
   apiKey: string;
@@ -41,7 +66,8 @@ export async function handleCodexProxyRequest(
   res: ServerResponse,
   options: CodexProxyOptions,
 ): Promise<void> {
-  const path = requestPath(req);
+  const requestedPath = requestPath(req);
+  const path = CODEX_V1_ALIAS_PATHS.has(requestedPath) ? `/v1${requestedPath}` : requestedPath;
   const perf = createProxyPerfTracer(
     "codex.proxy",
     {
@@ -63,7 +89,8 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  const nativeOnlyPath = path === "/v1/images/generations" || path === "/v1/images/edits";
+  const nativeOnlyPath =
+    path === "/v1/images/generations" || path === "/v1/images/edits" || path === "/v1/alpha/search";
   if (req.method === "POST" && nativeOnlyPath && options.nativeBaseUrl) {
     const request = await readDecodedCodexRequest(req);
     await forwardNativeCodexRequest(req, res, {
@@ -73,6 +100,54 @@ export async function handleCodexProxyRequest(
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
     perf.end({ status: res.statusCode, native: true });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/memories/trace_summarize") {
+    const request = await perf.span("body_read_parse", () => readDecodedCodexRequest(req));
+    const body = request.body as CodexMemoriesRequest;
+    const requestedTogetherModel = body.model ? findModelById(body.model) : options.modelDefinition;
+    if (options.nativeBaseUrl && body.model && !requestedTogetherModel) {
+      await forwardNativeCodexRequest(req, res, {
+        baseUrl: options.nativeBaseUrl,
+        path,
+        body: request.bytes,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+      perf.end({ status: res.statusCode, native: true, model: body.model });
+      return;
+    }
+    const invalidTraces = invalidMemoryTraces(body.traces);
+    if (invalidTraces) {
+      writeOpenAIError(res, 400, "invalid_request_error", invalidTraces);
+      perf.end({ status: res.statusCode });
+      return;
+    }
+    // One memory request fans out to one Together call per trace, so no single
+    // usage record corresponds to the complete inbound byte count. Clear the
+    // calibration sample for this request rather than poisoning the estimator
+    // with whole-request bytes divided by only the first trace's tokens.
+    options.costTracker?.noteRequestBytes(0);
+    options.costTracker?.beginRequest();
+    const definition = requestedTogetherModel ?? options.modelDefinition;
+    const targetModelId = requestedTogetherModel?.id ?? options.targetModelId;
+    const upstreamAbort = new AbortController();
+    const abort = () =>
+      upstreamAbort.abort(new DOMException("Codex client disconnected.", "AbortError"));
+    req.once("aborted", abort);
+    res.once("close", () => {
+      if (!res.writableEnded) abort();
+    });
+    const summarized = await summarizeTogetherMemories(
+      body,
+      targetModelId,
+      definition,
+      options,
+      upstreamAbort.signal,
+      (usage) => recordUsage(usage, options, definition),
+    );
+    writeJson(res, 200, { output: summarized.output });
+    perf.end({ status: res.statusCode, traces: body.traces.length, model: targetModelId });
     return;
   }
 
@@ -95,6 +170,9 @@ export async function handleCodexProxyRequest(
   const requestedTogetherModel = body.model ? findModelById(body.model) : undefined;
   if (options.nativeBaseUrl && body.model && !requestedTogetherModel) {
     const nativeBody = { ...body } as ResponsesRequest & { previous_response_id?: unknown };
+    if (body.input !== undefined) {
+      nativeBody.input = normalizeNativeCompactionInput(body.input);
+    }
     if (path !== "/v1/responses/compact") {
       delete nativeBody.previous_response_id;
     }
@@ -105,16 +183,6 @@ export async function handleCodexProxyRequest(
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
     perf.end({ status: res.statusCode, native: true, model: body.model });
-    return;
-  }
-  if (path === "/v1/responses/compact") {
-    writeOpenAIError(
-      res,
-      400,
-      "invalid_request_error",
-      "Together models do not support the native /responses/compact route.",
-    );
-    perf.end({ status: res.statusCode });
     return;
   }
   // Record the inbound byte length for the estimator, then mark a new request
@@ -129,6 +197,20 @@ export async function handleCodexProxyRequest(
   // window without re-serializing messages + tools.
   const estimatedInputTokens =
     options.costTracker?.tokenEstimator.estimate(rawBytes) ?? Math.ceil(rawBytes / 4);
+  const upstreamAbort = new AbortController();
+  const markClientDisconnected = () => {
+    if (upstreamAbort.signal.aborted) {
+      return;
+    }
+    debugLog(options, "codex client disconnected; aborting upstream request", {});
+    upstreamAbort.abort(new DOMException("Codex client disconnected.", "AbortError"));
+  };
+  req.once("aborted", markClientDisconnected);
+  res.once("close", () => {
+    if (!res.writableEnded) {
+      markClientDisconnected();
+    }
+  });
   const translated = perf.spanSync("translate_request", () => {
     const toolTranslation = translateCodexRequestTools(body);
     const nativeToolCount = toolTranslation.nativeTools.length;
@@ -144,20 +226,51 @@ export async function handleCodexProxyRequest(
     return { nativeToolCount, toolTranslation, requestModel, translatedPayload };
   });
   const { nativeToolCount, toolTranslation, requestModel, translatedPayload } = translated;
-  const upstreamAbort = new AbortController();
-  const markClientDisconnected = () => {
-    if (upstreamAbort.signal.aborted) {
-      return;
+
+  const compactV1 = path === "/v1/responses/compact";
+  const compactV2 = isTogetherCompactionV2(body);
+  if (compactV1 || compactV2) {
+    const compactBody: ResponsesRequest = { ...body, tools: [] };
+    const normalizedInput = compactionInput(body);
+    if (normalizedInput !== undefined) {
+      compactBody.input = normalizedInput;
     }
-    debugLog(options, "codex client disconnected; aborting upstream request", {});
-    upstreamAbort.abort(new DOMException("Codex client disconnected.", "AbortError"));
-  };
-  req.once("aborted", markClientDisconnected);
-  res.once("close", () => {
-    if (!res.writableEnded) {
-      markClientDisconnected();
+    const compactPayload = toTogetherCompactionPayload(
+      toChatPayload(
+        compactBody,
+        options,
+        false,
+        { tools: [], mappings: new Map(), nativeTools: [] },
+        requestModel,
+        estimatedInputTokens,
+      ),
+      requestModel.definition,
+    );
+    const chatResponse = await perf.span("compaction_upstream_fetch", () =>
+      callTogetherWithNativeTools(
+        compactPayload,
+        { tools: [], mappings: new Map(), nativeTools: [] },
+        options,
+        requestModel.definition,
+        upstreamAbort.signal,
+      ),
+    );
+    recordUsage(chatResponse.usage, options, requestModel.definition);
+    const summary = compactionSummary(chatResponse);
+    if (compactV1) {
+      writeJson(res, 200, togetherV1CompactOutput(body.input, summary));
+    } else if (body.stream) {
+      writeTogetherCompactionSse(res, body.model ?? options.modelId, summary);
+    } else {
+      writeJson(res, 200, togetherCompactionResponse(body.model ?? options.modelId, summary));
     }
-  });
+    perf.end({
+      status: res.statusCode,
+      compaction: compactV1 ? "v1" : "v2",
+      stream: compactV2 && Boolean(body.stream),
+    });
+    return;
+  }
   debugLog(options, "responses request", () => ({
     model: body.model,
     targetModel: requestModel.targetModelId,

@@ -14,6 +14,7 @@ import {
   writeOpenAIError,
   type CodexProxyOptions,
 } from "../codex/proxy.js";
+import { CodexRequestError } from "../codex/native-router.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
@@ -136,6 +137,15 @@ export function renderDaemonError(
   agent: string | undefined,
 ): void {
   if (agent === "codex" || agent === "codex-app") {
+    if (err instanceof CodexRequestError) {
+      writeOpenAIError(
+        res,
+        err.status,
+        err.status === 413 ? "request_too_large" : "invalid_request_error",
+        err.message,
+      );
+      return;
+    }
     if (err instanceof TogetherResponseHeaderTimeoutError) {
       writeOpenAIError(res, 504, "timeout_error", err.message);
       return;
@@ -171,11 +181,10 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   activeSessions = options.sessions ?? defaultSessions;
   const restored = await activeSessions.restorePersisted();
 
-  // Per-request agent context: handleDaemonRequest sets this so the catch-all
-  // renders errors in the wire format the client actually speaks. Without it,
-  // Codex (Responses API) errors were being mis-rendered as Anthropic errors.
-  let requestAgent: string | undefined;
   const server = http.createServer((req, res) => {
+    // This context must be request-local: concurrent Claude and Codex requests
+    // can fail in either order and still need their own wire-format error.
+    let requestAgent: string | undefined;
     handleDaemonRequest(req, res, {
       debug,
       setAgent: (a) => {
@@ -185,11 +194,10 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       renderDaemonError(res, err, requestAgent);
     });
   });
-  // The built-in OpenAI provider advertises Responses-over-WebSocket even
-  // when `openai_base_url` points at this HTTP/SSE-only loopback proxy. Codex
-  // treats 426 as an immediate signal to fall back to HTTP for the session;
-  // without an upgrade listener Node handles the handshake as an ordinary
-  // unauthenticated GET, leaves it alive, and Codex retries five timeouts.
+  // Managed ChatGPT Desktop config disables Responses-over-WebSocket, but
+  // older configs and other built-in-provider clients can still attempt an
+  // upgrade against this HTTP/SSE-only loopback proxy. Reject those immediately
+  // instead of letting Node treat the handshake as a long-lived ordinary GET.
   server.on("upgrade", (_req, socket) => {
     socket.on("error", () => {});
     socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
@@ -267,7 +275,8 @@ async function handleDaemonRequest(
 ): Promise<void> {
   const path_ = requestPath(req);
   if (opts.debug) {
-    process.stderr.write(`[togetherlink daemon] ${req.method} ${path_}\n`);
+    const loggedPath = path_.replace(/^\/session\/[^/]+(?=\/|$)/, "/session/[REDACTED]");
+    process.stderr.write(`[togetherlink daemon] ${req.method} ${loggedPath}\n`);
   }
 
   // Unauthenticated liveness + health (must work before any session exists).

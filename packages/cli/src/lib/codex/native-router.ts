@@ -3,6 +3,23 @@ import { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } f
 import type { ResponsesRequest } from "./wire-types.js";
 
 export const DEFAULT_CODEX_NATIVE_BASE_URL = "https://chatgpt.com/backend-api/codex";
+export const DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES = 64 * 1024 * 1024;
+
+export type CodexRequestLimits = {
+  maxEncodedBytes: number;
+  maxDecodedBytes: number;
+};
+
+export class CodexRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "CodexRequestError";
+    this.status = status;
+  }
+}
 
 const FORWARD_REQUEST_HEADERS = new Set([
   "authorization",
@@ -12,14 +29,18 @@ const FORWARD_REQUEST_HEADERS = new Set([
   "session_id",
   "session-id",
   "thread-id",
+  "version",
   "x-client-request-id",
   "x-codex-beta-features",
+  "x-codex-image-turn-id",
   "x-codex-installation-id",
   "x-codex-parent-thread-id",
   "x-codex-turn-metadata",
   "x-codex-turn-state",
   "x-codex-window-id",
   "x-oai-attestation",
+  "x-openai-internal-codex-responses-lite",
+  "x-openai-memgen-request",
   "x-openai-subagent",
   "x-responsesapi-include-timing-metrics",
 ]);
@@ -31,6 +52,7 @@ const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   "keep-alive",
   "proxy-authenticate",
   "proxy-authorization",
+  "set-cookie",
   "te",
   "trailer",
   "transfer-encoding",
@@ -48,16 +70,37 @@ export type DecodedCodexRequest = {
  * OpenAI provider. Recent desktop builds can send zstd bodies; custom provider
  * traffic normally arrives as plain JSON.
  */
-export async function readDecodedCodexRequest(req: IncomingMessage): Promise<DecodedCodexRequest> {
+export async function readDecodedCodexRequest(
+  req: IncomingMessage,
+  limits: CodexRequestLimits = {
+    maxEncodedBytes: DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES,
+    maxDecodedBytes: DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES,
+  },
+): Promise<DecodedCodexRequest> {
   const chunks: Buffer[] = [];
+  let encodedBytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    encodedBytes += bytes.length;
+    if (encodedBytes > limits.maxEncodedBytes) {
+      throw new CodexRequestError(413, "Codex request body is too large.");
+    }
+    chunks.push(bytes);
   }
   const encoded = Buffer.concat(chunks);
-  const bytes = decodeBody(encoded, req.headers["content-encoding"]);
+  const bytes = decodeBody(encoded, req.headers["content-encoding"], limits.maxDecodedBytes);
   const text = bytes.toString("utf8");
+  let body: ResponsesRequest;
+  try {
+    body = (text ? JSON.parse(text) : {}) as ResponsesRequest;
+  } catch {
+    throw new CodexRequestError(400, "Codex request body must contain valid JSON.");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new CodexRequestError(400, "Codex request body must be a JSON object.");
+  }
   return {
-    body: (text ? JSON.parse(text) : {}) as ResponsesRequest,
+    body,
     bytes,
     // The token estimator needs the JSON payload size, not the compressed
     // transport size used by the built-in provider.
@@ -86,7 +129,8 @@ export async function forwardNativeCodexRequest(
 
   const fetchImpl =
     options.fetch ?? ((input: string, init: RequestInit) => globalThis.fetch(input, init));
-  const target = `${options.baseUrl.replace(/\/+$/, "")}${nativePath(options.path)}`;
+  const search = new URL(req.url ?? options.path, "http://togetherlink.local").search;
+  const target = `${options.baseUrl.replace(/\/+$/, "")}${nativePath(options.path)}${search}`;
   const upstream = await fetchImpl(target, {
     method: req.method ?? "POST",
     headers: nativeRequestHeaders(req.headers, options.body.length),
@@ -152,7 +196,11 @@ function nativePath(path: string): string {
   return withoutV1 || "/";
 }
 
-function decodeBody(raw: Buffer, contentEncoding: string | string[] | undefined): Buffer {
+function decodeBody(
+  raw: Buffer,
+  contentEncoding: string | string[] | undefined,
+  maxDecodedBytes: number,
+): Buffer {
   const encodings = (
     Array.isArray(contentEncoding) ? contentEncoding.join(",") : (contentEncoding ?? "")
   )
@@ -161,37 +209,62 @@ function decodeBody(raw: Buffer, contentEncoding: string | string[] | undefined)
     .filter((value) => value && value !== "identity")
     .reverse();
   let decoded = raw;
-  for (const encoding of encodings) {
-    if (encoding === "gzip" || encoding === "x-gzip") {
-      decoded = zlib.gunzipSync(decoded);
-    } else if (encoding === "deflate") {
-      decoded = zlib.inflateSync(decoded);
-    } else if (encoding === "br") {
-      decoded = zlib.brotliDecompressSync(decoded);
-    } else if (encoding === "zstd") {
-      decoded = zstdDecompress(decoded);
-    } else {
-      throw new Error(`Unsupported Codex request Content-Encoding: ${encoding}.`);
+  try {
+    for (const encoding of encodings) {
+      const options = { maxOutputLength: maxDecodedBytes };
+      if (encoding === "gzip" || encoding === "x-gzip") {
+        decoded = zlib.gunzipSync(decoded, options);
+      } else if (encoding === "deflate") {
+        decoded = zlib.inflateSync(decoded, options);
+      } else if (encoding === "br") {
+        decoded = zlib.brotliDecompressSync(decoded, options);
+      } else if (encoding === "zstd") {
+        decoded = zstdDecompress(decoded, maxDecodedBytes);
+      } else {
+        throw new CodexRequestError(
+          415,
+          `Unsupported Codex request Content-Encoding: ${encoding}.`,
+        );
+      }
+      assertDecodedBodySize(decoded, maxDecodedBytes);
     }
+  } catch (error) {
+    if (error instanceof CodexRequestError) {
+      throw error;
+    }
+    if (isZlibOutputLimitError(error)) {
+      throw new CodexRequestError(413, "Decoded Codex request body is too large.");
+    }
+    throw new CodexRequestError(400, "Codex request body compression is invalid.");
   }
+  assertDecodedBodySize(decoded, maxDecodedBytes);
   return decoded;
 }
 
-function zstdDecompress(value: Buffer): Buffer {
+function zstdDecompress(value: Buffer, maxOutputLength: number): Buffer {
   const nodeZstd = (
     zlib as typeof zlib & {
-      zstdDecompressSync?: (input: Uint8Array) => Buffer;
+      zstdDecompressSync?: (input: Uint8Array, options?: { maxOutputLength?: number }) => Buffer;
     }
   ).zstdDecompressSync;
-  if (nodeZstd) return Buffer.from(nodeZstd(value));
+  if (nodeZstd) return Buffer.from(nodeZstd(value, { maxOutputLength }));
 
-  const bunZstd = (
-    globalThis as {
-      Bun?: { zstdDecompressSync?: (input: Uint8Array) => Uint8Array };
-    }
-  ).Bun?.zstdDecompressSync;
-  if (bunZstd) return Buffer.from(bunZstd(value));
-  throw new Error(
-    "This Codex Desktop request uses zstd compression, but the TogetherLink runtime cannot decode zstd. Use the TogetherLink installer (Bun) or Node 22.15+.",
+  throw new CodexRequestError(
+    415,
+    "This runtime cannot safely decode the Codex zstd request within the configured size limit. Use the current TogetherLink installer or Node 22.15+.",
+  );
+}
+
+function assertDecodedBodySize(value: Buffer, maxDecodedBytes: number): void {
+  if (value.length > maxDecodedBytes) {
+    throw new CodexRequestError(413, "Decoded Codex request body is too large.");
+  }
+}
+
+function isZlibOutputLimitError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as Error & { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE"
   );
 }
