@@ -1,9 +1,12 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebSocket, RawData } from "ws";
 import { consumeSseLines } from "../sse.js";
+import { findModelById } from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "./proxy.js";
+import { relayNativeCodexWebsocket } from "./native-websocket-relay.js";
 
 /**
  * Codex/ChatGPT Desktop's Responses-over-WebSocket transport has no Together
@@ -23,9 +26,21 @@ import { handleCodexProxyRequest, type CodexProxyOptions } from "./proxy.js";
 const RESPONSES_WEBSOCKET_REPLAY_REQUIRED_CODE = 1012;
 const RESPONSES_WEBSOCKET_REPLAY_REQUIRED_REASON = "upstream requires HTTP replay";
 
-export function handleCodexResponsesWebsocket(ws: WebSocket, options: CodexProxyOptions): void {
+export function handleCodexResponsesWebsocket(
+  ws: WebSocket,
+  options: CodexProxyOptions,
+  upgradeHeaders: Record<string, string | string[] | undefined> = {},
+): void {
   let activeSink: WebSocketSseSink | undefined;
   let queue: Promise<void> = Promise.resolve();
+  let lastRequest: Record<string, unknown> | undefined;
+  let lastResponseId: string | undefined;
+  let lastResponseOutput: unknown[] = [];
+  // Lazily created on the first turn whose model is not a curated Together
+  // model: a true WS<->WS relay to the native ChatGPT backend (the same
+  // approach CLIProxyAPI's CodexWebsocketsExecutor uses), kept open across
+  // turns so native incremental `previous_response_id` turns keep working.
+  let nativeRelay: { send(body: Record<string, unknown>): void; close(): void } | undefined;
 
   ws.on("message", (raw: RawData) => {
     queue = queue.then(() => processTurn(raw)).catch((err) => sendFatalError(ws, err));
@@ -33,6 +48,7 @@ export function handleCodexResponsesWebsocket(ws: WebSocket, options: CodexProxy
 
   ws.on("close", () => {
     activeSink?.emit("close");
+    nativeRelay?.close();
   });
 
   async function processTurn(raw: RawData): Promise<void> {
@@ -40,7 +56,7 @@ export function handleCodexResponsesWebsocket(ws: WebSocket, options: CodexProxy
     if (payload === undefined) {
       throw new Error("Codex websocket message must be a valid JSON object.");
     }
-    const { type, ...body } = payload;
+    const { type, ...rawBody } = payload;
     if (type !== undefined && type !== "response.create") {
       ws.close(
         RESPONSES_WEBSOCKET_REPLAY_REQUIRED_CODE,
@@ -48,20 +64,162 @@ export function handleCodexResponsesWebsocket(ws: WebSocket, options: CodexProxy
       );
       return;
     }
+    const body = expandIncrementalRequest(rawBody, lastRequest, lastResponseId, lastResponseOutput);
+    if (body === undefined) {
+      sendPreviousResponseNotFound(ws);
+      return;
+    }
+    if (body.generate === false) {
+      delete body.generate;
+      delete body.previous_response_id;
+      lastRequest = cloneJsonObject(body);
+      lastResponseId = sendPrewarmCompleted(ws, body, options.modelId);
+      lastResponseOutput = [];
+      return;
+    }
+    delete body.generate;
+    delete body.previous_response_id;
+
+    // Native OpenAI models have no Together upstream; relay the turn over a
+    // real upstream WebSocket instead of the HTTP/SSE proxy so the client
+    // keeps its native transport, auth headers, and incremental turns.
+    if (isNativeRelayTurn(body, options)) {
+      const relay = ensureNativeRelay();
+      lastRequest = undefined;
+      lastResponseId = undefined;
+      lastResponseOutput = [];
+      relay.send({ ...body, type: "response.create" });
+      return;
+    }
+
     // The WS transport is inherently event-streamed; force it regardless of
     // what the client set, so every reachable code path inside the proxy
     // writes SSE-framed events instead of a single JSON body.
     body.stream = true;
 
     const req = fakeCodexRequest(body);
-    const sink = new WebSocketSseSink(ws);
+    let completedResponse: Record<string, unknown> | undefined;
+    const sink = new WebSocketSseSink(ws, (event) => {
+      if (event.type === "response.completed" || event.type === "response.incomplete") {
+        completedResponse = asRecord(event.response);
+      }
+    });
     activeSink = sink;
     try {
       await handleCodexProxyRequest(req, sink as unknown as ServerResponse, options);
     } finally {
       activeSink = undefined;
     }
+    if (completedResponse !== undefined) {
+      const responseId = completedResponse.id;
+      lastRequest = cloneJsonObject(body);
+      lastResponseId = typeof responseId === "string" ? responseId : undefined;
+      lastResponseOutput = Array.isArray(completedResponse.output)
+        ? cloneJsonArray(completedResponse.output)
+        : [];
+    }
   }
+
+  function isNativeRelayTurn(body: Record<string, unknown>, opts: CodexProxyOptions): boolean {
+    if (opts.nativeBaseUrl === undefined) {
+      return false;
+    }
+    const model = body.model;
+    return typeof model === "string" && model !== "" && findModelById(model) === undefined;
+  }
+
+  function ensureNativeRelay(): { send(body: Record<string, unknown>): void; close(): void } {
+    if (nativeRelay === undefined) {
+      nativeRelay = relayNativeCodexWebsocket(ws, options, upgradeHeaders);
+    }
+    return nativeRelay;
+  }
+}
+
+function expandIncrementalRequest(
+  body: Record<string, unknown>,
+  lastRequest: Record<string, unknown> | undefined,
+  lastResponseId: string | undefined,
+  lastResponseOutput: unknown[],
+): Record<string, unknown> | undefined {
+  const previousResponseId = body.previous_response_id;
+  if (typeof previousResponseId !== "string" || previousResponseId === "") {
+    return cloneJsonObject(body);
+  }
+  if (lastRequest === undefined || previousResponseId !== lastResponseId) {
+    return undefined;
+  }
+  const previousInput = Array.isArray(lastRequest.input) ? lastRequest.input : [];
+  const incrementalInput = Array.isArray(body.input) ? body.input : [];
+  return {
+    ...cloneJsonObject(body),
+    input: cloneJsonArray([...previousInput, ...lastResponseOutput, ...incrementalInput]),
+  };
+}
+
+function sendPrewarmCompleted(
+  ws: WebSocket,
+  body: Record<string, unknown>,
+  defaultModel: string,
+): string {
+  const responseId = `resp_${randomUUID().replaceAll("-", "")}`;
+  const createdAt = Math.floor(Date.now() / 1_000);
+  const model = typeof body.model === "string" ? body.model : defaultModel;
+  const created = {
+    id: responseId,
+    object: "response",
+    created_at: createdAt,
+    status: "in_progress",
+    model,
+    output: [],
+  };
+  ws.send(JSON.stringify({ type: "response.created", response: created }));
+  ws.send(
+    JSON.stringify({
+      type: "response.completed",
+      response: {
+        ...created,
+        status: "completed",
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
+          output_tokens_details: { reasoning_tokens: 0 },
+        },
+      },
+    }),
+  );
+  return responseId;
+}
+
+function sendPreviousResponseNotFound(ws: WebSocket): void {
+  ws.send(
+    JSON.stringify({
+      type: "error",
+      status: 409,
+      error: {
+        type: "invalid_request_error",
+        code: "previous_response_not_found",
+        param: "previous_response_id",
+        message:
+          "Previous response is not available on this websocket; resend the full conversation input.",
+      },
+    }),
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function cloneJsonObject(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function cloneJsonArray(value: unknown[]): unknown[] {
+  return JSON.parse(JSON.stringify(value)) as unknown[];
 }
 
 function parseMessage(raw: RawData): (Record<string, unknown> & { type?: unknown }) | undefined {
@@ -115,10 +273,12 @@ class WebSocketSseSink extends EventEmitter {
   readonly socket = undefined;
   private buffer = "";
   private readonly ws: WebSocket;
+  private readonly onEvent: ((event: Record<string, unknown>) => void) | undefined;
 
-  constructor(ws: WebSocket) {
+  constructor(ws: WebSocket, onEvent?: (event: Record<string, unknown>) => void) {
     super();
     this.ws = ws;
+    this.onEvent = onEvent;
   }
 
   writeHead(status: number): this {
@@ -131,6 +291,14 @@ class WebSocketSseSink extends EventEmitter {
   write(chunk: string | Buffer): boolean {
     this.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
     this.buffer = consumeSseLines(this.buffer, (data) => {
+      try {
+        const event = asRecord(JSON.parse(data));
+        if (event !== undefined) {
+          this.onEvent?.(event);
+        }
+      } catch {
+        // Forward non-JSON data unchanged; the client owns protocol validation.
+      }
       if (this.ws.readyState === this.ws.OPEN) {
         this.ws.send(data);
       }

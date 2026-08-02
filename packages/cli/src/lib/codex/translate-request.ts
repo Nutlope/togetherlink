@@ -77,7 +77,9 @@ export function toChatPayload(
     max_tokens: body.max_output_tokens ?? requestModel.definition.limit.output,
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
-    tool_choice: toChatToolChoice(body.tool_choice, toolTranslation),
+    ...(toolTranslation.tools.length > 0
+      ? { tool_choice: toChatToolChoice(body.tool_choice, toolTranslation) }
+      : {}),
     response_format: toChatResponseFormat(body.text),
     ...(translatedReasoningEffort ? { reasoning_effort: translatedReasoningEffort } : {}),
     chat_template_kwargs: { clear_thinking: false },

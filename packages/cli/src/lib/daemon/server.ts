@@ -581,7 +581,10 @@ async function handleDaemonUpgrade(
 
   const options = session.options as CodexProxyOptions;
   responsesWebsocketServer.handleUpgrade(req, socket, head, (ws) => {
-    handleCodexResponsesWebsocket(ws, options);
+    // Forward the upgrade's headers so the native WS<->WS relay can reuse the
+    // client's auth/session headers on its upstream dial (the HTTP path gets
+    // these from the request itself; WS turns have no per-message headers).
+    handleCodexResponsesWebsocket(ws, options, req.headers);
   });
 }
 

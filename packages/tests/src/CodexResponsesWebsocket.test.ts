@@ -4,6 +4,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
 import { handleCodexResponsesWebsocket } from "../../cli/src/lib/codex/responses-websocket.js";
+import { nativeWebsocketUrl } from "../../cli/src/lib/codex/native-websocket-relay.js";
 import type { CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 
 const options: CodexProxyOptions = {
@@ -78,18 +79,220 @@ describe("Codex Responses WebSocket", () => {
       await close();
     }
   });
+
+  test("relays a native (non-Together) model turn over a real upstream websocket", async () => {
+    const upstream = await startFakeNativeUpstream();
+    try {
+      const { events, close } = await runWebsocketTurn(
+        {
+          type: "response.create",
+          model: "gpt-5.2-codex",
+          input: [{ type: "message", role: "user", content: "hello" }],
+        },
+        {
+          nativeBaseUrl: upstream.httpBaseUrl,
+          upgradeHeaders: {
+            authorization: "Bearer native-chatgpt-token",
+            "chatgpt-account-id": "acct_123",
+            "openai-beta": "responses_websockets=2026-02-06",
+            originator: "codex_cli_rs",
+            session_id: "sess_abc",
+            "user-agent": "codex-tui/0.146.0",
+            // Must NOT leak upstream: not part of the relay whitelist.
+            "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            cookie: "session=secret",
+          },
+        },
+      );
+      try {
+        // The client receives the upstream's native event frames verbatim.
+        expect(events.map((event) => event.type)).toEqual([
+          "response.created",
+          "response.output_text.delta",
+          "response.completed",
+        ]);
+        const completed = events[events.length - 1] as {
+          response: { status: string; model: string };
+        };
+        expect(completed.response.status).toBe("completed");
+        expect(completed.response.model).toBe("gpt-5.2-codex");
+
+        // The upstream saw the turn as response.create with the model intact.
+        const turn = await upstream.receivedTurn;
+        expect(turn.type).toBe("response.create");
+        expect(turn.model).toBe("gpt-5.2-codex");
+
+        // Auth/session headers from the client's upgrade were relayed; the
+        // beta flag is forced; untrusted headers were dropped.
+        const headers = await upstream.receivedHeaders;
+        expect(headers["authorization"]).toBe("Bearer native-chatgpt-token");
+        expect(headers["chatgpt-account-id"]).toBe("acct_123");
+        expect(headers["session_id"]).toBe("sess_abc");
+        expect(headers["originator"]).toBe("codex_cli_rs");
+        expect(headers["openai-beta"]).toContain("responses_websockets=");
+        expect(headers["cookie"]).toBeUndefined();
+      } finally {
+        await close();
+      }
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  test("forces the responses_websockets beta flag when the client upgrade lacks it", async () => {
+    const upstream = await startFakeNativeUpstream();
+    try {
+      const { close } = await runWebsocketTurn(
+        { type: "response.create", model: "gpt-5.2", input: [] },
+        { nativeBaseUrl: upstream.httpBaseUrl, upgradeHeaders: {} },
+      );
+      await close();
+      const headers = await upstream.receivedHeaders;
+      expect(headers["openai-beta"]).toBe("responses_websockets=2026-02-06");
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  test("keeps the Together HTTP/SSE path when nativeBaseUrl is not configured", async () => {
+    const fetchSpy = vi.fn(async () =>
+      sseResponse([
+        { choices: [{ index: 0, delta: { content: "hi" } }] },
+        {
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // No nativeBaseUrl: even an unknown model id must stay on the HTTP/SSE
+    // proxy path (which resolves it to the session default model), never a
+    // websocket dial.
+    const { ws, close } = await openWebsocket();
+    try {
+      const events: Array<Record<string, unknown>> = [];
+      const done = new Promise<void>((resolve) => {
+        ws.on("message", (raw) => {
+          const event = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+          events.push(event);
+          if (
+            event.type === "response.completed" ||
+            event.type === "response.failed" ||
+            event.type === "error"
+          ) {
+            resolve();
+          }
+        });
+      });
+      ws.send(
+        JSON.stringify({
+          type: "response.create",
+          model: "gpt-5.2-codex",
+          input: [{ type: "message", role: "user", content: "hello" }],
+        }),
+      );
+      await done;
+      expect(events.some((event) => event.type === "response.completed")).toBe(true);
+      expect(fetchSpy).toHaveBeenCalled();
+    } finally {
+      await close();
+    }
+  });
 });
+
+test("nativeWebsocketUrl maps the native base URL onto wss/ws /responses", () => {
+  expect(nativeWebsocketUrl("https://chatgpt.com/backend-api/codex")).toBe(
+    "wss://chatgpt.com/backend-api/codex/responses",
+  );
+  expect(nativeWebsocketUrl("https://chatgpt.com/backend-api/codex/")).toBe(
+    "wss://chatgpt.com/backend-api/codex/responses",
+  );
+  expect(nativeWebsocketUrl("http://127.0.0.1:9999/backend-api/codex")).toBe(
+    "ws://127.0.0.1:9999/backend-api/codex/responses",
+  );
+});
+
+type FakeNativeUpstream = {
+  httpBaseUrl: string;
+  receivedTurn: Promise<Record<string, unknown>>;
+  receivedHeaders: Promise<http.IncomingHttpHeaders>;
+  close: () => Promise<void>;
+};
+
+/** Minimal stand-in for wss://chatgpt.com/backend-api/codex/responses. */
+async function startFakeNativeUpstream(): Promise<FakeNativeUpstream> {
+  const wss = new WebSocketServer({ noServer: true });
+  const server = http.createServer((_req, res) => {
+    res.writeHead(404);
+    res.end();
+  });
+  let resolveTurn!: (turn: Record<string, unknown>) => void;
+  let resolveHeaders!: (headers: http.IncomingHttpHeaders) => void;
+  const receivedTurn = new Promise<Record<string, unknown>>((resolve) => {
+    resolveTurn = resolve;
+  });
+  const receivedHeaders = new Promise<http.IncomingHttpHeaders>((resolve) => {
+    resolveHeaders = resolve;
+  });
+  server.on("upgrade", (req, socket, head) => {
+    resolveHeaders(req.headers);
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.on("message", (raw) => {
+        const turn = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        resolveTurn(turn);
+        const model = typeof turn.model === "string" ? turn.model : "unknown";
+        ws.send(
+          JSON.stringify({
+            type: "response.created",
+            response: { id: "resp_native", status: "in_progress", model, output: [] },
+          }),
+        );
+        ws.send(
+          JSON.stringify({
+            type: "response.output_text.delta",
+            delta: "native hi",
+          }),
+        );
+        ws.send(
+          JSON.stringify({
+            type: "response.completed",
+            response: { id: "resp_native", status: "completed", model, output: [] },
+          }),
+        );
+      });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    httpBaseUrl: `http://127.0.0.1:${port}/backend-api/codex`,
+    receivedTurn,
+    receivedHeaders,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
 
 async function runWebsocketTurn(
   message: Record<string, unknown>,
+  extras: {
+    nativeBaseUrl?: string;
+    upgradeHeaders?: Record<string, string>;
+  } = {},
 ): Promise<{ events: Array<Record<string, unknown>>; close: () => Promise<void> }> {
-  const { ws, close } = await openWebsocket();
+  const { ws, close } = await openWebsocket(extras);
   const events: Array<Record<string, unknown>> = [];
   const done = new Promise<void>((resolve, reject) => {
     ws.on("message", (raw) => {
       const event = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
       events.push(event);
-      if (event.type === "response.completed" || event.type === "response.failed") {
+      if (
+        event.type === "response.completed" ||
+        event.type === "response.failed" ||
+        event.type === "error"
+      ) {
         resolve();
       }
     });
@@ -101,7 +304,12 @@ async function runWebsocketTurn(
   return { events, close };
 }
 
-async function openWebsocket(): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
+async function openWebsocket(
+  extras: {
+    nativeBaseUrl?: string;
+    upgradeHeaders?: Record<string, string>;
+  } = {},
+): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
   const wss = new WebSocketServer({ noServer: true });
   const server = http.createServer((_req, res) => {
     res.writeHead(404);
@@ -113,7 +321,15 @@ async function openWebsocket(): Promise<{ ws: WebSocket; close: () => Promise<vo
       // so it picks up whatever vi.stubGlobal("fetch", ...) each test
       // installed. together-client.ts's default fetch is undici's direct
       // import, not globalThis.fetch, so stubGlobal alone wouldn't reach it.
-      handleCodexResponsesWebsocket(ws, { ...options, fetch: globalThis.fetch });
+      handleCodexResponsesWebsocket(
+        ws,
+        {
+          ...options,
+          fetch: globalThis.fetch,
+          ...(extras.nativeBaseUrl ? { nativeBaseUrl: extras.nativeBaseUrl } : {}),
+        },
+        extras.upgradeHeaders ?? {},
+      );
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
