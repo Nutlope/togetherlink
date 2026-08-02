@@ -199,6 +199,56 @@ describe("Codex Responses WebSocket", () => {
       await close();
     }
   });
+
+  test("switches from a Together turn to a native model without leaking previous_response_id", async () => {
+    const upstream = await startFakeNativeUpstream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse([
+          { choices: [{ index: 0, delta: { content: "together hi" } }] },
+          {
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+          },
+        ]),
+      ),
+    );
+    try {
+      const { ws, close } = await openWebsocket({
+        nativeBaseUrl: upstream.httpBaseUrl,
+        upgradeHeaders: {},
+      });
+      try {
+        const togetherEvents = await collectTurn(ws, {
+          type: "response.create",
+          model: GLM_5_2.id,
+          input: [{ type: "message", role: "user", content: "hello" }],
+        });
+        const togetherResponseId = responseId(togetherEvents);
+
+        // Mid-thread model switch: the client chains off the Together-minted
+        // response id. The native relay must not forward it — the upstream
+        // ChatGPT backend cannot resolve it.
+        const nativeEvents = await collectTurn(ws, {
+          type: "response.create",
+          model: "gpt-5.2-codex",
+          previous_response_id: togetherResponseId,
+          input: [{ type: "message", role: "user", content: "switch models" }],
+        });
+        expect(nativeEvents.at(-1)?.type).toBe("response.completed");
+
+        const turn = await upstream.receivedTurn;
+        expect(turn.type).toBe("response.create");
+        expect(turn.model).toBe("gpt-5.2-codex");
+        expect(turn.previous_response_id).toBeUndefined();
+      } finally {
+        await close();
+      }
+    } finally {
+      await upstream.close();
+    }
+  });
 });
 
 test("nativeWebsocketUrl maps the native base URL onto wss/ws /responses", () => {
@@ -355,4 +405,37 @@ function sseResponse(chunks: unknown[]): Response {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });
+}
+
+function collectTurn(
+  ws: WebSocket,
+  message: Record<string, unknown>,
+): Promise<Array<Record<string, unknown>>> {
+  const events: Array<Record<string, unknown>> = [];
+  return new Promise((resolve, reject) => {
+    const onMessage = (raw: WebSocket.RawData) => {
+      const event = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+      events.push(event);
+      if (
+        event.type === "response.completed" ||
+        event.type === "response.failed" ||
+        event.type === "error"
+      ) {
+        ws.off("message", onMessage);
+        resolve(events);
+      }
+    };
+    ws.on("message", onMessage);
+    ws.once("error", reject);
+    ws.send(JSON.stringify(message));
+  });
+}
+
+function responseId(events: Array<Record<string, unknown>>): string {
+  const completed = events.find((event) => event.type === "response.completed");
+  const response = completed?.response as Record<string, unknown> | undefined;
+  if (typeof response?.id !== "string") {
+    throw new Error("WebSocket response completed without a response id");
+  }
+  return response.id;
 }

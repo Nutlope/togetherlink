@@ -65,6 +65,35 @@ describe("Codex additive native/Together router", () => {
     expect(upstream[0]?.body.previous_response_id).toBeUndefined();
   });
 
+  test("strips store:false so Together-minted item ids in replayed input resolve upstream", async () => {
+    const upstream: Array<Record<string, unknown>> = [];
+    const response = await requestProxy(
+      {
+        model: "gpt-5.6-sol",
+        store: false,
+        input: [
+          // Minted by the Together proxy on an earlier turn (translate-response.ts);
+          // the native backend cannot resolve it when store is false.
+          {
+            id: "rs_3fe9445861074864aede0b7de5e61afa",
+            type: "reasoning",
+            summary: [],
+            content: [],
+          },
+          { type: "message", role: "user", content: "continue" },
+        ],
+      },
+      { Authorization: "Bearer chatgpt-oauth" },
+      async (_url, init) => {
+        upstream.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return jsonResponse({ id: "native-response", status: "completed" });
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(upstream[0]?.store).toBeUndefined();
+  });
+
   test("preserves native endpoint query strings", async () => {
     let upstreamUrl: string | undefined;
     const response = await requestProxy(
