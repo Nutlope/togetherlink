@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type ServerResponse } from "node:http";
 import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty, stringifyUnknown } from "./content-format.js";
+import type { ExaSearchOutcome } from "../exa-search.js";
 import type {
   ChatResponse,
   CodexToolTranslation,
@@ -110,6 +111,78 @@ export function openTextOutputItem(res: ServerResponse, state: StreamOutputState
     output_index: state.textOutputIndex,
     content_index: 0,
     part: { type: "output_text", text: "", annotations: [] },
+  });
+}
+
+/** Visible web_search_call output item, mirroring what the native ChatGPT
+ * path surfaces in the app for a search turn: the item carries the query and
+ * action, and (once done) the sources the proxy's Exa search returned. */
+export function webSearchCallItem(
+  id: string,
+  status: "in_progress" | "completed" | "failed",
+  query: string,
+  outcome?: ExaSearchOutcome,
+): Record<string, unknown> {
+  const action: Record<string, unknown> = { type: "search", query };
+  const sources = (outcome?.results ?? [])
+    .map((result) => result.url)
+    .filter((url): url is string => typeof url === "string" && url !== "")
+    .map((url) => ({ url }));
+  return {
+    id,
+    type: "web_search_call",
+    status,
+    action,
+    ...(sources.length > 0 ? { sources } : {}),
+  };
+}
+
+/** Emit the full web_search_call lifecycle (item added → in_progress →
+ * searching) up to the point where the search is running. Returns the item id
+ * and its output index so the caller can close it out afterwards. */
+export function openWebSearchCallItem(
+  res: ServerResponse,
+  state: StreamOutputState,
+  query: string,
+): { itemId: string; outputIndex: number } {
+  const itemId = `wsc_${randomUUID().replaceAll("-", "")}`;
+  const outputIndex = state.nextOutputIndex;
+  state.nextOutputIndex += 1;
+  writeResponsesSse(res, "response.output_item.added", {
+    type: "response.output_item.added",
+    output_index: outputIndex,
+    item: webSearchCallItem(itemId, "in_progress", query),
+  });
+  writeResponsesSse(res, "response.web_search_call.in_progress", {
+    type: "response.web_search_call.in_progress",
+    item_id: itemId,
+    output_index: outputIndex,
+  });
+  writeResponsesSse(res, "response.web_search_call.searching", {
+    type: "response.web_search_call.searching",
+    item_id: itemId,
+    output_index: outputIndex,
+  });
+  return { itemId, outputIndex };
+}
+
+export function completeWebSearchCallItem(
+  res: ServerResponse,
+  itemId: string,
+  outputIndex: number,
+  query: string,
+  outcome: ExaSearchOutcome,
+): void {
+  const status = outcome.errorCode === undefined ? "completed" : "failed";
+  writeResponsesSse(res, "response.web_search_call.completed", {
+    type: "response.web_search_call.completed",
+    item_id: itemId,
+    output_index: outputIndex,
+  });
+  writeResponsesSse(res, "response.output_item.done", {
+    type: "response.output_item.done",
+    output_index: outputIndex,
+    item: webSearchCallItem(itemId, status, query, outcome),
   });
 }
 

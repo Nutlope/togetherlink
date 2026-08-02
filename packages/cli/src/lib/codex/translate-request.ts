@@ -8,10 +8,11 @@ import {
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
-  runExaSearch as runSharedExaSearch,
+  runExaSearchDetailed as runSharedExaSearchDetailed,
   stringArray,
   withNativeToolSystemPrompt as withSharedNativeToolSystemPrompt,
 } from "../exa-search.js";
+import type { ExaSearchOutcome } from "../exa-search.js";
 import { normalizeTogetherCompactionItem } from "./compaction.js";
 import type {
   ChatContentPart,
@@ -507,7 +508,18 @@ export async function runCodexExaSearch(
   tool: ResponsesTool,
   options: DebugOptions,
 ): Promise<string> {
-  return runSharedExaSearch({
+  return (await runCodexExaSearchDetailed(input, tool, options)).text;
+}
+
+/** Detailed variant: same search, but keeps the parsed query + results so the
+ * streaming proxy can surface a visible `web_search_call` output item (query,
+ * action, sources) matching what the native ChatGPT path shows in the app. */
+export async function runCodexExaSearchDetailed(
+  input: unknown,
+  tool: ResponsesTool,
+  options: DebugOptions,
+): Promise<ExaSearchOutcome> {
+  return runSharedExaSearchDetailed({
     query: input,
     allowedDomains: stringArray((tool as { allowed_domains?: unknown }).allowed_domains),
     blockedDomains: stringArray((tool as { blocked_domains?: unknown }).blocked_domains),

@@ -1623,6 +1623,23 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(reasoningIndex).toBeGreaterThan(-1);
     expect(textIndex).toBeGreaterThan(-1);
     expect(completedIndex).toBeGreaterThan(textIndex);
+
+    // The proxy's intercepted Exa search is surfaced as a visible
+    // web_search_call item with the full lifecycle, matching the native
+    // ChatGPT search card instead of being hidden in the text stream.
+    const addedIndex = response.indexOf("response.output_item.added");
+    const inProgressIndex = response.indexOf("response.web_search_call.in_progress");
+    const searchingIndex = response.indexOf("response.web_search_call.searching");
+    const searchCompletedIndex = response.indexOf("response.web_search_call.completed");
+    expect(addedIndex).toBeGreaterThan(-1);
+    expect(inProgressIndex).toBeGreaterThan(addedIndex);
+    expect(searchingIndex).toBeGreaterThan(inProgressIndex);
+    expect(searchCompletedIndex).toBeGreaterThan(searchingIndex);
+    expect(searchCompletedIndex).toBeLessThan(completedIndex);
+    expect(response).toContain('"type":"web_search_call"');
+    expect(response).toContain('"action":{"type":"search","query":"Codex docs"}');
+    expect(response).toContain("https://developers.openai.com/codex");
+
     expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
     expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
     expect(requests[2]?.body.messages.at(-1)).toMatchObject({

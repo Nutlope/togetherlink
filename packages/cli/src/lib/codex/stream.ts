@@ -15,14 +15,17 @@ import {
 } from "../together-stream.js";
 import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty } from "./content-format.js";
-import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
+import { codexNativeToolMaxUses, runCodexExaSearchDetailed } from "./translate-request.js";
 import {
+  completeWebSearchCallItem,
   messageOutputItem,
   openReasoningOutputItem,
   openTextOutputItem,
+  openWebSearchCallItem,
   reasoningOutputItem,
   responseToolCallOutputItem,
   toResponsesUsage,
+  webSearchCallItem,
 } from "./translate-response.js";
 import { fetchTogetherChat } from "./together-call.js";
 import { recordUsage } from "./usage.js";
@@ -371,6 +374,7 @@ async function streamResponseWithNativeTools(
   const nativeToolUses = new Map<string, number>();
   let usage: ChatResponse["usage"] | undefined;
   let lastFinishReason: string | null | undefined;
+  const nativeSearchItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
     let turn: StreamTurnResult;
@@ -439,12 +443,16 @@ async function streamResponseWithNativeTools(
         arguments: toolCall.arguments || "{}",
       },
     }));
-    const nativeResultMessages = await runNativeToolCalls(
+    const nativeRun = await runNativeToolCalls(
+      res,
       nativeToolCalls,
       nativeToolUses,
       toolTranslation,
       options,
+      outputState,
     );
+    const nativeResultMessages = nativeRun.results;
+    nativeSearchItems.push(...nativeRun.items);
 
     if (nativeToolCalls.length !== turn.toolCalls.length) {
       const nativeText = nativeResultMessages
@@ -479,6 +487,7 @@ async function streamResponseWithNativeTools(
         modelDefinition,
         toolTranslation,
         turn.finishReason,
+        nativeSearchItems,
       );
     }
 
@@ -515,6 +524,7 @@ async function streamResponseWithNativeTools(
     modelDefinition,
     toolTranslation,
     lastFinishReason,
+    nativeSearchItems,
   );
 }
 
@@ -572,12 +582,18 @@ function streamOutputStarted(outputState: StreamOutputState): boolean {
 }
 
 async function runNativeToolCalls(
+  res: ServerResponse,
   nativeToolCalls: PendingToolCall[],
   nativeToolUses: Map<string, number>,
   toolTranslation: CodexToolTranslation,
   options: CodexStreamOptions,
-): Promise<Array<{ id: string; name: string; content: string }>> {
+  outputState: StreamOutputState,
+): Promise<{
+  results: Array<{ id: string; name: string; content: string }>;
+  items: Array<{ item: Record<string, unknown>; outputIndex: number }>;
+}> {
   const results: Array<{ id: string; name: string; content: string }> = [];
+  const items: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
   for (const toolCall of nativeToolCalls) {
     const name = toolCall.name || "web_search";
     const nativeTool = toolTranslation.mappings.get(name);
@@ -587,17 +603,40 @@ async function runNativeToolCalls(
       nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
     const maxUses =
       webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
+    if (webSearchDefinition !== undefined) {
+      // Surface the search the proxy is about to run as a visible
+      // web_search_call item, matching the native ChatGPT search card.
+      const query =
+        typeof input === "object" && input !== null
+          ? String((input as { query?: unknown }).query ?? "")
+          : "";
+      const { itemId, outputIndex } = openWebSearchCallItem(res, outputState, query);
+      const outcome = await runCodexExaSearchDetailed(input, webSearchDefinition, options);
+      nativeToolUses.set(name, priorUses + 1);
+      completeWebSearchCallItem(res, itemId, outputIndex, query, outcome);
+      items.push({
+        item: webSearchCallItem(
+          itemId,
+          outcome.errorCode === undefined ? "completed" : "failed",
+          query,
+          outcome,
+        ),
+        outputIndex,
+      });
+      results.push({ id: toolCall.id, name, content: outcome.text });
+      continue;
+    }
     const content = await runNativeWebSearchCall({
       name,
       priorUses,
       maxUses,
-      isWebSearch: webSearchDefinition !== undefined,
+      isWebSearch: false,
       recordUse: () => nativeToolUses.set(name, priorUses + 1),
-      runSearch: () => runCodexExaSearch(input, webSearchDefinition!, options),
+      runSearch: async () => "Unsupported native server tool.",
     });
     results.push({ id: toolCall.id, name, content });
   }
-  return results;
+  return { results, items };
 }
 
 function completeOpenOutputItems(res: ServerResponse, outputState: StreamOutputState): void {
@@ -650,6 +689,7 @@ function completeStreamResponse(
   modelDefinition: ModelDefinition,
   toolTranslation: CodexToolTranslation,
   finishReason?: string | null,
+  nativeSearchItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [],
 ): StreamProxyResult {
   completeOpenOutputItems(res, outputState);
   let outputIndex = outputState.nextOutputIndex;
@@ -678,6 +718,31 @@ function completeStreamResponse(
   // stops" bug where a truncated turn looked like a finished turn.
   const isLengthTruncated = finishReason === "length";
   const terminalEvent = isLengthTruncated ? "response.incomplete" : "response.completed";
+  // Reassemble the full output list in output_index order: reasoning, text,
+  // any visible web_search_call items the proxy surfaced, then client tool
+  // calls. The search items were already emitted as live events; this places
+  // them in the completed response's output list in their original order.
+  const outputItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
+  if (outputState.reasoningItemId !== undefined) {
+    outputItems.push({
+      item: reasoningOutputItem(outputState.reasoningItemId),
+      outputIndex: outputState.reasoningOutputIndex ?? 0,
+    });
+  }
+  if (outputState.textItemId !== undefined) {
+    outputItems.push({
+      item: messageOutputItem(outputState.text, outputState.textItemId),
+      outputIndex: outputState.textOutputIndex ?? 0,
+    });
+  }
+  outputItems.push(...nativeSearchItems);
+  for (const toolCall of toolCalls) {
+    outputItems.push({
+      item: responseToolCallOutputItem(toolCall, toolTranslation),
+      outputIndex: Number.MAX_SAFE_INTEGER,
+    });
+  }
+  outputItems.sort((a, b) => a.outputIndex - b.outputIndex);
   writeResponsesSse(res, terminalEvent, {
     type: terminalEvent,
     response: {
@@ -686,17 +751,7 @@ function completeStreamResponse(
       created_at: Math.floor(Date.now() / 1000),
       status: isLengthTruncated ? "incomplete" : "completed",
       model: body.model ?? options.modelId,
-      output: [
-        ...(outputState.reasoningItemId !== undefined
-          ? [reasoningOutputItem(outputState.reasoningItemId)]
-          : []),
-        ...(outputState.textItemId !== undefined
-          ? [messageOutputItem(outputState.text, outputState.textItemId)]
-          : []),
-        ...[...toolCalls.values()].map((toolCall) =>
-          responseToolCallOutputItem(toolCall, toolTranslation),
-        ),
-      ],
+      output: outputItems.map((entry) => entry.item),
       usage: toResponsesUsage(usage),
       ...(isLengthTruncated ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     },
