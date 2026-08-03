@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ModelDefinition } from "@togetherlink/models";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { TOGETHER_BASE_URL } from "./together-core.js";
 import { backoffMs, parseRetryAfter, sleep } from "./together-retry.js";
 import { persistRequestDiagnostic } from "./request-diagnostics.js";
@@ -43,6 +43,22 @@ const MAX_RETRIES = 3;
 const DEFAULT_STREAM_RETRIES = 1;
 const DEFAULT_RESPONSE_HEADER_RETRIES = 0;
 const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 120_000;
+
+function hasEnvironmentProxy(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"].some((key) =>
+    Boolean(environment[key]?.trim()),
+  );
+}
+
+function environmentProxyOptions(environment: NodeJS.ProcessEnv = process.env) {
+  const httpProxy = environment.http_proxy?.trim() || environment.HTTP_PROXY?.trim();
+  const httpsProxy = environment.https_proxy?.trim() || environment.HTTPS_PROXY?.trim();
+  return {
+    ...(httpProxy ? { httpProxy } : {}),
+    ...(httpsProxy ? { httpsProxy } : {}),
+    noProxy: environment.no_proxy ?? environment.NO_PROXY ?? "",
+  };
+}
 
 export type TogetherResponseDiagnostics = {
   clientRequestId: string;
@@ -250,7 +266,14 @@ async function fetchTogetherResponse(
     // isolation under Bun, whose fetch currently ignores Undici dispatchers.
     const dispatcher = process.versions.bun
       ? undefined
-      : new Agent({ connections: 1, keepAliveTimeout: 1, keepAliveMaxTimeout: 1 });
+      : hasEnvironmentProxy()
+        ? new EnvHttpProxyAgent({
+            ...environmentProxyOptions(),
+            connections: 1,
+            keepAliveTimeout: 1,
+            keepAliveMaxTimeout: 1,
+          })
+        : new Agent({ connections: 1, keepAliveTimeout: 1, keepAliveMaxTimeout: 1 });
     const requestInit = {
       method: "POST",
       headers: {
