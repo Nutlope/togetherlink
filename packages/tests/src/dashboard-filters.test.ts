@@ -13,4 +13,18 @@ describe("dashboard filters", () => {
       events[1],
     ]);
   });
+
+  test("excludes hidden installs from every dashboard aggregation", () => {
+    const events = [
+      { id: "riccardo", installId: "riccardo-install", receivedAt: 200 },
+      { id: "other", installId: "other-install", receivedAt: 300 },
+    ];
+
+    expect(
+      filterDashboardEvents(events, {
+        since: 100,
+        excludedInstallIds: new Set(["riccardo-install"]),
+      }),
+    ).toEqual([events[1]]);
+  });
 });

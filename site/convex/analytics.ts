@@ -104,16 +104,27 @@ export const getDashboardSummary = query({
       v.union(v.literal("24h"), v.literal("7d"), v.literal("30d"), v.literal("lifetime")),
     ),
     installId: v.optional(v.string()),
+    excludedInstallId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const range = args.range ?? "30d";
-    const selectedInstallId = args.installId?.trim() || undefined;
+    const excludedInstallId = args.excludedInstallId?.trim() || undefined;
+    const hiddenInstallIds = excludedInstallId ? new Set<string>([excludedInstallId]) : undefined;
+    const requestedInstallId = args.installId?.trim() || undefined;
+    const selectedInstallId =
+      requestedInstallId && !hiddenInstallIds?.has(requestedInstallId)
+        ? requestedInstallId
+        : undefined;
     const rangeDurationMs =
       range === "24h" ? 24 * HOUR_MS : range === "7d" ? 7 * DAY_MS : 30 * DAY_MS;
     const since = range === "lifetime" ? Number.NEGATIVE_INFINITY : Date.now() - rangeDurationMs;
 
     const allEvents = await ctx.db.query("telemetryEvents").withIndex("by_receivedAt").collect();
-    const events = filterDashboardEvents(allEvents, { since, installId: selectedInstallId });
+    const events = filterDashboardEvents(allEvents, {
+      since,
+      installId: selectedInstallId,
+      excludedInstallIds: hiddenInstallIds,
+    });
 
     const nicknameRows = await ctx.db.query("installNicknames").collect();
     const nicknames = new Map(nicknameRows.map((row) => [row.installId, row.nickname]));
@@ -122,6 +133,7 @@ export const getDashboardSummary = query({
       { installId: string; nickname?: string; lastSeenAt: number }
     >();
     for (const event of allEvents) {
+      if (hiddenInstallIds?.has(event.installId)) continue;
       const existing = installFilterOptionsById.get(event.installId);
       if (!existing || event.receivedAt > existing.lastSeenAt) {
         installFilterOptionsById.set(event.installId, {

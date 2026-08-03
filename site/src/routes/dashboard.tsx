@@ -16,7 +16,7 @@ type InstallFilterOption = DashboardData["installFilterOptions"][number];
 type MapMetric = "installs" | "sessions" | "tokens" | "cost";
 type LeaderboardMetric = "tokens" | "sessions";
 type DashboardRange = "24h" | "7d" | "30d" | "lifetime";
-type DashboardFilters = { range: DashboardRange; installId?: string };
+type DashboardFilters = { range: DashboardRange; installId?: string; hideAdmin?: boolean };
 
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
@@ -53,8 +53,16 @@ async function fetchSummary(filters: DashboardFilters) {
   if (!url) {
     return null;
   }
+  const { hideAdmin, ...queryFilters } = filters;
+  const adminInstallId = process.env.DASHBOARD_ADMIN_INSTALL_ID?.trim();
+  if (hideAdmin && !adminInstallId) {
+    throw new Error("DASHBOARD_ADMIN_INSTALL_ID is not configured");
+  }
   const client = new ConvexHttpClient(url);
-  return client.query(api.analytics.getDashboardSummary, filters);
+  return client.query(api.analytics.getDashboardSummary, {
+    ...queryFilters,
+    ...(hideAdmin && adminInstallId ? { excludedInstallId: adminInstallId } : {}),
+  });
 }
 
 function normalizeDashboardData(value: unknown): DashboardSummary {
@@ -167,11 +175,13 @@ function DashboardRoute() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [selectedInstallId, setSelectedInstallId] = useState("all");
   const [range, setRange] = useState<DashboardRange>("30d");
+  const [hideAdmin, setHideAdmin] = useState(false);
   const latestRequestRef = useRef(0);
 
   const loadData = async (
     requestedRange: DashboardRange,
     requestedInstallId: string,
+    shouldHideAdmin: boolean,
     isFirstLoad: boolean,
   ) => {
     const requestId = ++latestRequestRef.current;
@@ -184,6 +194,7 @@ function DashboardRoute() {
       const filters: DashboardFilters = {
         range: requestedRange,
         ...(requestedInstallId === "all" ? {} : { installId: requestedInstallId }),
+        ...(shouldHideAdmin ? { hideAdmin: true } : {}),
       };
       const result = normalizeDashboardData(await getDashboardData({ data: filters }));
       if (requestId !== latestRequestRef.current) return;
@@ -203,13 +214,13 @@ function DashboardRoute() {
 
   useEffect(() => {
     if (!isAuthed) return;
-    void loadData(range, selectedInstallId, data === null);
+    void loadData(range, selectedInstallId, hideAdmin, data === null);
     const interval = setInterval(
-      () => void loadData(range, selectedInstallId, false),
+      () => void loadData(range, selectedInstallId, hideAdmin, false),
       REFRESH_INTERVAL_MS,
     );
     return () => clearInterval(interval);
-  }, [isAuthed, range, selectedInstallId]);
+  }, [isAuthed, range, selectedInstallId, hideAdmin]);
 
   if (!isAuthed) {
     return (
@@ -337,7 +348,7 @@ function DashboardRoute() {
               range={dataRange}
               onNicknameSave={async (installId, nickname) => {
                 await saveInstallNickname({ data: { installId, nickname } });
-                await loadData(range, selectedInstallId, false);
+                await loadData(range, selectedInstallId, hideAdmin, false);
               }}
             />
 
@@ -442,26 +453,39 @@ function DashboardRoute() {
         </>
       )}
 
-      <DashboardRangeFilter range={range} onRangeChange={setRange} refreshing={refreshing} />
+      <DashboardFilterBar
+        range={range}
+        onRangeChange={setRange}
+        hideAdmin={hideAdmin}
+        onHideAdminChange={(nextValue) => {
+          if (nextValue) setSelectedInstallId("all");
+          setHideAdmin(nextValue);
+        }}
+        refreshing={refreshing}
+      />
     </div>
   );
 }
 
-function DashboardRangeFilter({
+function DashboardFilterBar({
   range,
   onRangeChange,
+  hideAdmin,
+  onHideAdminChange,
   refreshing,
 }: {
   range: DashboardRange;
   onRangeChange: (range: DashboardRange) => void;
+  hideAdmin: boolean;
+  onHideAdminChange: (hideAdmin: boolean) => void;
   refreshing: boolean;
 }) {
   return (
     <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-40 w-[calc(100%-2rem)] max-w-max -translate-x-1/2">
       <div
-        className="flex items-center gap-1 rounded-xl bg-white/90 p-1.5 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_4px_12px_rgba(0,0,0,0.08),0_16px_40px_rgba(0,0,0,0.14)] backdrop-blur-xl"
+        className="flex flex-wrap items-center justify-center gap-1 rounded-xl bg-white/90 p-1.5 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_4px_12px_rgba(0,0,0,0.08),0_16px_40px_rgba(0,0,0,0.14)] backdrop-blur-xl"
         role="group"
-        aria-label="Dashboard time range"
+        aria-label="Dashboard filters"
         aria-busy={refreshing}
       >
         <span className="hidden pl-2 pr-1 text-xs font-medium text-muted sm:inline">View</span>
@@ -483,6 +507,19 @@ function DashboardRangeFilter({
             </button>
           );
         })}
+        <span className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={() => onHideAdminChange(!hideAdmin)}
+          aria-pressed={hideAdmin}
+          className={`min-h-10 whitespace-nowrap rounded-md px-3 text-xs font-medium transition-[background-color,color,box-shadow,scale] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96] sm:px-4 ${
+            hideAdmin
+              ? "bg-ink text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
+              : "text-muted hover:bg-code hover:text-ink"
+          }`}
+        >
+          {hideAdmin ? "Riccardo hidden" : "Hide Riccardo"}
+        </button>
       </div>
     </div>
   );
