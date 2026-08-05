@@ -183,6 +183,29 @@ describe("Claude proxy compatibility API", () => {
     expect(env.ENABLE_TOOL_SEARCH).toBe("false");
   });
 
+  test("enforces Claude's simple system prompt default while preserving overrides", () => {
+    vi.stubEnv("CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT", "");
+
+    const defaultEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(defaultEnv.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).toBe("1");
+
+    vi.stubEnv("CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT", "0");
+    const overriddenEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(overriddenEnv.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).toBe("0");
+  });
+
   test("keeps detached Claude background sessions registered after the launcher exits", () => {
     expect(claudeRunsInBackground(["--bg", "do work"])).toBe(true);
     expect(claudeRunsInBackground(["--background", "do work"])).toBe(true);
