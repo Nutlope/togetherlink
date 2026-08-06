@@ -43,6 +43,16 @@ describe("runCommand", () => {
     expect(result.args.join("")).not.toContain("FINAL_TOKEN");
   });
 
+  test("disables production telemetry for repository-run harness commands", async () => {
+    const result = await runCommand(context, "telemetry-disabled", process.execPath, [
+      "-e",
+      "process.stdout.write(process.env.TOGETHERLINK_TELEMETRY_DISABLED ?? '')",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("1");
+  });
+
   test("whoami prints the anonymous install id", async () => {
     const home = await mkdtemp(path.join(tmpDir, "home-"));
     const result = await runCommand(

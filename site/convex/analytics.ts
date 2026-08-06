@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { summarizeLifecycleActivity } from "./dashboardActivity";
 import { filterDashboardEvents } from "./dashboardFilters";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -105,11 +106,16 @@ export const getDashboardSummary = query({
     ),
     installId: v.optional(v.string()),
     excludedInstallId: v.optional(v.string()),
+    excludedInstallIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const range = args.range ?? "30d";
     const excludedInstallId = args.excludedInstallId?.trim() || undefined;
-    const hiddenInstallIds = excludedInstallId ? new Set<string>([excludedInstallId]) : undefined;
+    const hiddenInstallIds = new Set(
+      [excludedInstallId, ...(args.excludedInstallIds ?? [])]
+        .map((installId) => installId?.trim())
+        .filter((installId): installId is string => Boolean(installId)),
+    );
     const requestedInstallId = args.installId?.trim() || undefined;
     const selectedInstallId =
       requestedInstallId && !hiddenInstallIds?.has(requestedInstallId)
@@ -120,11 +126,29 @@ export const getDashboardSummary = query({
     const since = range === "lifetime" ? Number.NEGATIVE_INFINITY : Date.now() - rangeDurationMs;
 
     const allEvents = await ctx.db.query("telemetryEvents").withIndex("by_receivedAt").collect();
+    const allScopedEvents = filterDashboardEvents(allEvents, {
+      since: Number.NEGATIVE_INFINITY,
+      installId: selectedInstallId,
+      excludedInstallIds: hiddenInstallIds,
+    });
     const events = filterDashboardEvents(allEvents, {
       since,
       installId: selectedInstallId,
       excludedInstallIds: hiddenInstallIds,
     });
+    const lifecycle = summarizeLifecycleActivity(events, {
+      bucketKey: (timestampMs) => bucketKey(timestampMs, range),
+    });
+    const now = Date.now();
+    const lifetimeLifecycle = summarizeLifecycleActivity(allScopedEvents);
+    const audience = {
+      dau: summarizeLifecycleActivity(allScopedEvents, { since: now - DAY_MS }).activeInstalls,
+      wau: summarizeLifecycleActivity(allScopedEvents, { since: now - 7 * DAY_MS }).activeInstalls,
+      mau: summarizeLifecycleActivity(allScopedEvents, { since: now - 30 * DAY_MS }).activeInstalls,
+      lifetimeActiveInstalls: lifetimeLifecycle.activeInstalls,
+      lifetimeSessions: lifetimeLifecycle.sessions,
+      lifetimeRepeatInstalls: lifetimeLifecycle.repeatInstalls,
+    };
 
     const nicknameRows = await ctx.db.query("installNicknames").collect();
     const nicknames = new Map(nicknameRows.map((row) => [row.installId, row.nickname]));
@@ -145,9 +169,6 @@ export const getDashboardSummary = query({
     }
 
     const installsByDay = new Map<string, Set<string>>();
-    const activeInstallsByDay = new Map<string, Set<string>>();
-    const sessionsStartedByDay = new Map<string, number>();
-    const sessionsEndedByDay = new Map<string, number>();
     const tokensByAgent = new Map<
       string,
       { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }
@@ -163,21 +184,21 @@ export const getDashboardSummary = query({
     const sessions = new Map<string, SessionSummary>();
     const installDaily = new Map<string, InstallDailySummary>();
     const installIds = new Set<string>();
-    const activeInstallIds = new Set<string>();
     const countries = new Set<string>();
     const usage = emptyUsage();
     const countryActivity = new Map<
       string,
       UsageTotals & {
-        installCompletions: number;
+        installCompletionIds: Set<string>;
         uniqueInstallIds: Set<string>;
         activeInstallIds: Set<string>;
         sessionsStarted: number;
         sessionsEnded: number;
       }
     >();
-    let installCompletions = 0;
-    let sessionsStarted = 0;
+    const installCompletionIds = new Set<string>();
+    const countedStartedSessionIds = new Set<string>();
+    const countedEndedSessionIds = new Set<string>();
     let failedSessions = 0;
     let totalEndedSessions = 0;
 
@@ -189,7 +210,7 @@ export const getDashboardSummary = query({
 
       const country = countryActivity.get(countryCode) ?? {
         ...emptyUsage(),
-        installCompletions: 0,
+        installCompletionIds: new Set<string>(),
         uniqueInstallIds: new Set<string>(),
         activeInstallIds: new Set<string>(),
         sessionsStarted: 0,
@@ -234,31 +255,31 @@ export const getDashboardSummary = query({
       if (event.eventType === "install_completed") {
         if (!installsByDay.has(day)) installsByDay.set(day, new Set());
         installsByDay.get(day)?.add(event.installId);
-        installCompletions += 1;
-        country.installCompletions += 1;
+        installCompletionIds.add(event.installId);
+        country.installCompletionIds.add(event.installId);
       }
 
-      if (
-        event.eventType === "cli_started" ||
-        event.eventType === "session_started" ||
-        event.eventType === "session_ended"
-      ) {
-        if (!activeInstallsByDay.has(day)) activeInstallsByDay.set(day, new Set());
-        activeInstallsByDay.get(day)?.add(event.installId);
-        activeInstallIds.add(event.installId);
+      if (event.eventType === "session_started" || event.eventType === "session_ended") {
         country.activeInstallIds.add(event.installId);
       }
 
-      if (event.eventType === "session_started") {
-        sessionsStartedByDay.set(day, (sessionsStartedByDay.get(day) ?? 0) + 1);
-        sessionsStarted += 1;
+      if (
+        event.eventType === "session_started" &&
+        event.sessionId &&
+        !countedStartedSessionIds.has(event.sessionId)
+      ) {
+        countedStartedSessionIds.add(event.sessionId);
         country.sessionsStarted += 1;
         install.sessionStarts += 1;
         daily.sessionsStarted += 1;
       }
 
-      if (event.eventType === "session_ended") {
-        sessionsEndedByDay.set(day, (sessionsEndedByDay.get(day) ?? 0) + 1);
+      if (
+        event.eventType === "session_ended" &&
+        event.sessionId &&
+        !countedEndedSessionIds.has(event.sessionId)
+      ) {
+        countedEndedSessionIds.add(event.sessionId);
         totalEndedSessions += 1;
         install.sessionEnds += 1;
         daily.sessionsEnded += 1;
@@ -377,17 +398,23 @@ export const getDashboardSummary = query({
         (a, b) => b.lastSeenAt - a.lastSeenAt,
       ),
       overview: {
-        installCompletions,
+        installCompletions: installCompletionIds.size,
         uniqueInstalls: installIds.size,
-        activeInstalls: activeInstallIds.size,
-        sessionsStarted,
+        activeInstalls: lifecycle.activeInstalls,
+        sessionsStarted: lifecycle.sessions,
+        sessions: lifecycle.sessions,
+        repeatInstalls: lifecycle.repeatInstalls,
+        trackedSessions: lifecycle.trackedSessions,
+        untrackedSessions: lifecycle.untrackedSessions,
         countries: countries.size,
         usage,
       },
+      audience,
+      harnessUsage: lifecycle.harnessUsage,
       countryLifetime: Array.from(countryActivity.entries())
         .map(([countryCode, country]) => ({
           countryCode,
-          installCompletions: country.installCompletions,
+          installCompletions: country.installCompletionIds.size,
           uniqueInstalls: country.uniqueInstallIds.size,
           activeInstalls: country.activeInstallIds.size,
           sessionsStarted: country.sessionsStarted,
@@ -399,9 +426,9 @@ export const getDashboardSummary = query({
         }))
         .sort((a, b) => b.installCompletions - a.installCompletions),
       installsPerDay: toSortedDayCounts(installsByDay),
-      activeInstallsPerDay: toSortedDayCounts(activeInstallsByDay),
-      sessionsStartedPerDay: toSortedDayCounts(sessionsStartedByDay),
-      sessionsEndedPerDay: toSortedDayCounts(sessionsEndedByDay),
+      activeInstallsPerDay: lifecycle.activeInstallsByBucket,
+      sessionsStartedPerDay: lifecycle.sessionsByBucket,
+      sessionsEndedPerDay: lifecycle.endedSessionsByBucket,
       tokenUsageByAgent: Array.from(tokensByAgent.entries())
         .map(([agent, totals]) => ({
           agent,
@@ -425,6 +452,7 @@ export const getDashboardSummary = query({
       installSummaries: Array.from(installs.values())
         .map(({ agents, versions, ...install }) => ({
           ...install,
+          sessionStarts: lifecycle.sessionsByInstall.get(install.installId)?.size ?? 0,
           agents: Array.from(agents).sort(),
           versions: Array.from(versions).sort(),
         }))

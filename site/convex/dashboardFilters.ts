@@ -9,3 +9,14 @@ export function filterDashboardEvents<T extends { installId: string; receivedAt:
       !filters.excludedInstallIds?.has(event.installId),
   );
 }
+
+export function parseInstallIdList(...values: Array<string | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => value?.split(/[\s,]+/) ?? [])
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+}
