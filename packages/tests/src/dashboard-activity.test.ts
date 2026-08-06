@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { summarizeLifecycleActivity } from "../../../site/convex/dashboardActivity.js";
+import {
+  groupActiveInstallsByLatestCountry,
+  summarizeLifecycleActivity,
+} from "../../../site/convex/dashboardActivity.js";
 
 describe("dashboard lifecycle activity", () => {
   test("deduplicates sessions and separates tracked from lifecycle-only harnesses", () => {
@@ -106,5 +109,47 @@ describe("dashboard lifecycle activity", () => {
       sessions: 1,
       repeatInstalls: 0,
     });
+  });
+
+  test("assigns every active install to exactly one latest session country", () => {
+    const countries = groupActiveInstallsByLatestCountry([
+      {
+        installId: "install-a",
+        sessionId: "session-1",
+        eventType: "session_started",
+        countryCode: "US",
+        receivedAt: 100,
+      },
+      {
+        installId: "install-a",
+        sessionId: "session-1",
+        eventType: "session_ended",
+        countryCode: "CA",
+        receivedAt: 200,
+      },
+      {
+        installId: "install-b",
+        eventType: "cli_started",
+        countryCode: "GB",
+        receivedAt: 300,
+      },
+      {
+        installId: "install-c",
+        sessionId: "session-2",
+        eventType: "session_started",
+        countryCode: "US",
+        receivedAt: 400,
+      },
+    ]);
+
+    expect(
+      Array.from(countries.entries()).map(([countryCode, installIds]) => [
+        countryCode,
+        Array.from(installIds),
+      ]),
+    ).toEqual([
+      ["CA", ["install-a"]],
+      ["US", ["install-c"]],
+    ]);
   });
 });

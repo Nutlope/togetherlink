@@ -3,6 +3,7 @@ export type DashboardLifecycleEvent = {
   sessionId?: string;
   eventType: string;
   agent?: string;
+  countryCode?: string;
   receivedAt: number;
   promptTokens?: number;
   cachedTokens?: number;
@@ -10,6 +11,37 @@ export type DashboardLifecycleEvent = {
   costUsd?: number;
   usageByModel?: Array<unknown>;
 };
+
+/**
+ * Assigns each install with real session lifecycle activity to one country:
+ * the country on its latest lifecycle event in the selected range. This keeps
+ * geographic install totals mutually exclusive, so the country values add up
+ * to the same active-install total shown elsewhere on the dashboard.
+ */
+export function groupActiveInstallsByLatestCountry(events: DashboardLifecycleEvent[]) {
+  const latestCountryByInstall = new Map<string, { countryCode: string; receivedAt: number }>();
+
+  for (const event of events) {
+    if (
+      !event.sessionId ||
+      (event.eventType !== "session_started" && event.eventType !== "session_ended")
+    ) {
+      continue;
+    }
+
+    const countryCode = event.countryCode?.toUpperCase() ?? "UNKNOWN";
+    const existing = latestCountryByInstall.get(event.installId);
+    if (!existing || event.receivedAt >= existing.receivedAt) {
+      latestCountryByInstall.set(event.installId, { countryCode, receivedAt: event.receivedAt });
+    }
+  }
+
+  const installsByCountry = new Map<string, Set<string>>();
+  for (const [installId, { countryCode }] of latestCountryByInstall) {
+    addToSetMap(installsByCountry, countryCode, installId);
+  }
+  return installsByCountry;
+}
 
 type LifecycleSession = {
   sessionId: string;

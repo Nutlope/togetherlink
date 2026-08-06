@@ -1,6 +1,9 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { summarizeLifecycleActivity } from "./dashboardActivity";
+import {
+  groupActiveInstallsByLatestCountry,
+  summarizeLifecycleActivity,
+} from "./dashboardActivity";
 import { filterDashboardEvents } from "./dashboardFilters";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -184,7 +187,6 @@ export const getDashboardSummary = query({
     const sessions = new Map<string, SessionSummary>();
     const installDaily = new Map<string, InstallDailySummary>();
     const installIds = new Set<string>();
-    const countries = new Set<string>();
     const usage = emptyUsage();
     const countryActivity = new Map<
       string,
@@ -206,7 +208,6 @@ export const getDashboardSummary = query({
       const day = bucketKey(event.receivedAt, range);
       const countryCode = event.countryCode.toUpperCase();
       installIds.add(event.installId);
-      if (isCountryCode(countryCode)) countries.add(countryCode);
 
       const country = countryActivity.get(countryCode) ?? {
         ...emptyUsage(),
@@ -257,10 +258,6 @@ export const getDashboardSummary = query({
         installsByDay.get(day)?.add(event.installId);
         installCompletionIds.add(event.installId);
         country.installCompletionIds.add(event.installId);
-      }
-
-      if (event.eventType === "session_started" || event.eventType === "session_ended") {
-        country.activeInstallIds.add(event.installId);
       }
 
       if (
@@ -386,6 +383,30 @@ export const getDashboardSummary = query({
       }
     }
 
+    // Country install counts must use the same mutually exclusive population
+    // as overview.activeInstalls. Assigning an install to every country where
+    // it emitted an event makes the map impossible to reconcile with the
+    // headline total when a user travels or uses a VPN.
+    const activeInstallsByCountry = groupActiveInstallsByLatestCountry(events);
+    for (const country of countryActivity.values()) {
+      country.activeInstallIds.clear();
+    }
+    for (const [countryCode, activeInstallIds] of activeInstallsByCountry) {
+      const country = countryActivity.get(countryCode) ?? {
+        ...emptyUsage(),
+        installCompletionIds: new Set<string>(),
+        uniqueInstallIds: new Set<string>(),
+        activeInstallIds: new Set<string>(),
+        sessionsStarted: 0,
+        sessionsEnded: 0,
+      };
+      country.activeInstallIds = activeInstallIds;
+      countryActivity.set(countryCode, country);
+    }
+    const activeCountryCount = Array.from(activeInstallsByCountry.keys()).filter(
+      isCountryCode,
+    ).length;
+
     const toSortedDayCounts = (map: Map<string, Set<string> | number>) =>
       Array.from(map.entries())
         .map(([day, value]) => ({ day, count: value instanceof Set ? value.size : value }))
@@ -406,7 +427,7 @@ export const getDashboardSummary = query({
         repeatInstalls: lifecycle.repeatInstalls,
         trackedSessions: lifecycle.trackedSessions,
         untrackedSessions: lifecycle.untrackedSessions,
-        countries: countries.size,
+        countries: activeCountryCount,
         usage,
       },
       audience,
@@ -424,7 +445,9 @@ export const getDashboardSummary = query({
           completionTokens: country.completionTokens,
           costUsd: country.costUsd,
         }))
-        .sort((a, b) => b.installCompletions - a.installCompletions),
+        .sort(
+          (a, b) => b.activeInstalls - a.activeInstalls || b.sessionsStarted - a.sessionsStarted,
+        ),
       installsPerDay: toSortedDayCounts(installsByDay),
       activeInstallsPerDay: lifecycle.activeInstallsByBucket,
       sessionsStartedPerDay: lifecycle.sessionsByBucket,

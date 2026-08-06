@@ -353,7 +353,7 @@ function DashboardRoute() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <DailyActiveUsersChart
               rows={data.activeInstallsPerDay}
-              activeUsers={data.overview.activeInstalls}
+              activeInstalls={data.overview.activeInstalls}
               range={dataRange}
             />
 
@@ -361,6 +361,12 @@ function DashboardRoute() {
               countries={data.countryLifetime}
               countryCount={data.overview.countries}
               range={dataRange}
+              totals={{
+                installs: data.overview.activeInstalls,
+                sessions: data.overview.sessions,
+                tokens: data.overview.usage.promptTokens + data.overview.usage.completionTokens,
+                cost: data.overview.usage.costUsd,
+              }}
             />
 
             <UserLeaderboard
@@ -421,6 +427,7 @@ function DashboardRoute() {
 
             <ActivitySummary
               range={dataRange}
+              activeInstalls={data.overview.activeInstalls}
               installsCompleted={data.overview.installCompletions}
               telemetryInstalls={data.overview.uniqueInstalls}
               sessionsEnded={sumCountRows(data.sessionsEndedPerDay)}
@@ -773,17 +780,17 @@ function UserLeaderboard({
 
 function DailyActiveUsersChart({
   rows,
-  activeUsers,
+  activeInstalls,
   range,
 }: {
   rows: DailyActiveUsers[];
-  activeUsers: number;
+  activeInstalls: number;
   range: DashboardRange;
 }) {
   const series = fillActivitySeries(rows, range);
   const latest = series.at(-1)?.count ?? 0;
   const peak = Math.max(0, ...series.map((row) => row.count));
-  const stickiness = activeUsers > 0 ? latest / activeUsers : 0;
+  const stickiness = activeInstalls > 0 ? latest / activeInstalls : 0;
   const chartWidth = 720;
   const chartTop = 12;
   const chartBottom = 168;
@@ -823,7 +830,7 @@ function DailyActiveUsersChart({
           label={range === "24h" ? "Current hour" : "Today so far"}
           value={formatNumber(latest)}
         />
-        <DauMetric label={`${rangeLabel(range)} active`} value={formatNumber(activeUsers)} />
+        <DauMetric label={`${rangeLabel(range)} active`} value={formatNumber(activeInstalls)} />
         <DauMetric label="Latest / range" value={`${(stickiness * 100).toFixed(1)}%`} />
         <DauMetric label={`${rangeLabel(range)} peak`} value={formatNumber(peak)} />
       </div>
@@ -832,16 +839,16 @@ function DailyActiveUsersChart({
         <div className="rounded-lg bg-code px-3 pb-2 pt-3">
           <div className="flex items-baseline justify-between gap-3">
             <span className="text-xs text-faint">{formatNumber(chartMax)}</span>
-            <span className="text-xs text-faint">users</span>
+            <span className="text-xs text-faint">installs</span>
           </div>
           <svg
             viewBox={`0 0 ${chartWidth} 180`}
             preserveAspectRatio="none"
             role="img"
-            aria-label={`Active users ${rangeDescription(range)}, from ${series[0]?.count ?? 0} to ${latest}`}
+            aria-label={`Active installs ${rangeDescription(range)}, from ${series[0]?.count ?? 0} to ${latest}`}
             className="h-44 w-full overflow-visible"
           >
-            <title>Active users {rangeDescription(range)}</title>
+            <title>Active installs {rangeDescription(range)}</title>
             {[chartTop, chartTop + chartHeight / 2, chartBottom].map((y) => (
               <line
                 key={y}
@@ -904,22 +911,28 @@ function WorldUsageMap({
   countries,
   countryCount,
   range,
+  totals,
 }: {
   countries: CountryLifetime[];
   countryCount: number;
   range: DashboardRange;
+  totals: Record<MapMetric, number>;
 }) {
   const [metric, setMetric] = useState<MapMetric>("installs");
   const values = countries.map((country) => mapMetricValue(country, metric));
+  const metricTotal = totals[metric];
   const maxValue = Math.max(1, ...values);
   const mapData = countries
-    .filter((country) => WORLD_MAP_COUNTRY_CODES.has(country.countryCode))
+    .filter(
+      (country) =>
+        WORLD_MAP_COUNTRY_CODES.has(country.countryCode) && mapMetricValue(country, metric) > 0,
+    )
     .map((country) => ({
       country: country.countryCode.toLowerCase() as ISOCode,
       value: mapMetricValue(country, metric),
     }));
   const topCountries = [...countries]
-    .filter((country) => country.countryCode !== "UNKNOWN")
+    .filter((country) => country.countryCode !== "UNKNOWN" && mapMetricValue(country, metric) > 0)
     .sort((a, b) => mapMetricValue(b, metric) - mapMetricValue(a, metric))
     .slice(0, 8);
 
@@ -929,9 +942,9 @@ function WorldUsageMap({
         <div>
           <h2 className="text-sm font-medium text-ink">Global adoption and usage</h2>
           <p className="mt-1 text-xs text-muted">
-            Activity {rangeDescription(range)} across {countryCount} countr
-            {countryCount === 1 ? "y" : "ies"}. Country is resolved when each telemetry event
-            reaches Vercel.
+            Session-active installs {rangeDescription(range)} across {countryCount} countr
+            {countryCount === 1 ? "y" : "ies"}. Active installs are assigned once to their latest
+            session country; sessions and usage remain attributed to their telemetry event.
           </p>
         </div>
         <div className="flex flex-wrap gap-1 rounded-md bg-code p-1">
@@ -944,7 +957,7 @@ function WorldUsageMap({
                 metric === option ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"
               }`}
             >
-              {option}
+              {mapMetricLabel(option)}
             </button>
           ))}
         </div>
@@ -954,11 +967,13 @@ function WorldUsageMap({
         <div className="relative min-h-[360px] bg-[#fbfcfd] p-4">
           <div className="absolute left-4 top-4 z-10 rounded-md border border-line bg-white/95 px-3 py-2 shadow-sm">
             <div className="text-xs text-muted">{rangeLabel(range)} view</div>
-            <div className="mt-0.5 font-mono text-sm font-medium capitalize text-ink">{metric}</div>
+            <div className="mt-0.5 font-mono text-sm font-medium text-ink">
+              {formatMapMetric(metricTotal, metric)} {mapMetricLabel(metric)} total
+            </div>
           </div>
           <div className="dashboard-world-map flex min-h-[330px] items-center justify-center pt-8">
             <WorldMap
-              title={`World map colored by ${rangeLabel(range)} ${metric}`}
+              title={`World map colored by ${rangeLabel(range)} ${mapMetricLabel(metric)}`}
               data={mapData}
               size="responsive"
               color="#1d4ed8"
@@ -978,7 +993,7 @@ function WorldUsageMap({
                 `${context.countryName}: ${formatMapMetric(
                   typeof context.countryValue === "number" ? context.countryValue : 0,
                   metric,
-                )}`
+                )} ${mapMetricLabel(metric)}`
               }
             />
           </div>
@@ -1000,7 +1015,9 @@ function WorldUsageMap({
             <h3 className="text-xs font-medium uppercase tracking-wide text-faint">
               Top countries
             </h3>
-            <span className="text-xs capitalize text-muted">{metric}</span>
+            <span className="text-xs text-muted">
+              Top {topCountries.length} of {countryCount}
+            </span>
           </div>
           <div className="flex flex-col">
             {topCountries.map((country, index) => (
@@ -1020,6 +1037,10 @@ function WorldUsageMap({
             {topCountries.length === 0 && (
               <div className="py-4 text-sm text-faint">No data yet</div>
             )}
+          </div>
+          <div className="mt-3 border-t border-line pt-3 text-xs text-muted">
+            Global {mapMetricLabel(metric)} total: {formatMapMetric(metricTotal, metric)}. The list
+            above shows only the highest-usage countries.
           </div>
         </div>
       </div>
@@ -1386,18 +1407,21 @@ function RefreshStatus({
 
 function ActivitySummary({
   range,
+  activeInstalls,
   installsCompleted,
   telemetryInstalls,
   sessionsEnded,
 }: {
   range: DashboardRange;
+  activeInstalls: number;
   installsCompleted: number;
   telemetryInstalls: number;
   sessionsEnded: number;
 }) {
   const metrics = [
-    { label: "Confirmed installer IDs", value: installsCompleted },
-    { label: "Telemetry identities", value: telemetryInstalls },
+    { label: "Active install IDs", value: activeInstalls },
+    { label: "All telemetry IDs", value: telemetryInstalls },
+    { label: "Install-completion IDs", value: installsCompleted },
     { label: "Sessions ended", value: sessionsEnded },
   ];
 
@@ -1406,7 +1430,7 @@ function ActivitySummary({
       className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong"
       aria-label="Activity totals"
     >
-      <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
         {metrics.map((metric) => (
           <div key={metric.label} className="px-4 py-3">
             <div className="text-xs font-medium text-muted">{metric.label}</div>
@@ -1419,6 +1443,11 @@ function ActivitySummary({
           </div>
         ))}
       </div>
+      <p className="border-t border-line bg-code px-4 py-2.5 text-xs text-muted">
+        Active install IDs are the adoption measure used by the headline and map. All telemetry IDs
+        also include CLI-only events; install-completion IDs only cover successful installer
+        callbacks.
+      </p>
     </section>
   );
 }
@@ -1589,7 +1618,7 @@ function formatCost(costUsd: number): string {
 function mapMetricValue(country: CountryLifetime, metric: MapMetric): number {
   switch (metric) {
     case "installs":
-      return country.installCompletions;
+      return country.activeInstalls;
     case "sessions":
       return country.sessionsStarted;
     case "tokens":
@@ -1597,6 +1626,10 @@ function mapMetricValue(country: CountryLifetime, metric: MapMetric): number {
     case "cost":
       return country.costUsd;
   }
+}
+
+function mapMetricLabel(metric: MapMetric): string {
+  return metric === "installs" ? "active installs" : metric;
 }
 
 function formatMapMetric(value: number, metric: MapMetric): string {
