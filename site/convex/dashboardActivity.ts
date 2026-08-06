@@ -13,12 +13,11 @@ export type DashboardLifecycleEvent = {
 };
 
 /**
- * Assigns each install with real session lifecycle activity to one country:
- * the country on its latest lifecycle event in the selected range. This keeps
- * geographic install totals mutually exclusive, so the country values add up
- * to the same active-install total shown elsewhere on the dashboard.
+ * Assigns each qualified user to one country: the country on their latest
+ * lifecycle event in the selected range. The caller must pass only events for
+ * likely users, keeping geographic totals mutually exclusive and reconcilable.
  */
-export function groupActiveInstallsByLatestCountry(events: DashboardLifecycleEvent[]) {
+export function groupUniqueUsersByLatestCountry(events: DashboardLifecycleEvent[]) {
   const latestCountryByInstall = new Map<string, { countryCode: string; receivedAt: number }>();
 
   for (const event of events) {
@@ -54,6 +53,8 @@ type LifecycleSession = {
 
 export type HarnessUsageSummary = {
   agent: string;
+  uniqueUsers: number;
+  returningUsers: number;
   activeInstalls: number;
   sessions: number;
   repeatInstalls: number;
@@ -124,6 +125,7 @@ export function summarizeLifecycleActivity(
   const activeInstallsByBucket = new Map<string, Set<string>>();
   const sessionsByBucket = new Map<string, Set<string>>();
   const endedSessionsByBucket = new Map<string, Set<string>>();
+  const trackedInstallIds = new Set<string>();
   let trackedSessions = 0;
 
   for (const session of sessions.values()) {
@@ -131,7 +133,10 @@ export function summarizeLifecycleActivity(
     const agentSessions = sessionsByAgent.get(session.agent) ?? [];
     agentSessions.push(session);
     sessionsByAgent.set(session.agent, agentSessions);
-    if (session.usageTracked) trackedSessions += 1;
+    if (session.usageTracked) {
+      trackedSessions += 1;
+      trackedInstallIds.add(session.installId);
+    }
 
     if (options.bucketKey) {
       const startBucket = options.bucketKey(session.firstSeenAt);
@@ -153,6 +158,10 @@ export function summarizeLifecycleActivity(
       }
       return {
         agent,
+        uniqueUsers: agentSessionsByInstall.size,
+        returningUsers: Array.from(agentSessionsByInstall.values()).filter(
+          (sessionIds) => sessionIds.size > 1,
+        ).length,
         activeInstalls: agentSessionsByInstall.size,
         sessions: agentSessions.length,
         repeatInstalls: Array.from(agentSessionsByInstall.values()).filter(
@@ -169,7 +178,18 @@ export function summarizeLifecycleActivity(
       .map(([day, values]) => ({ day, count: values.size }))
       .sort((a, b) => a.day.localeCompare(b.day));
 
+  const likelyUserIds = new Set(
+    Array.from(sessionsByInstall.entries())
+      .filter(([installId, sessionIds]) => sessionIds.size > 1 || trackedInstallIds.has(installId))
+      .map(([installId]) => installId),
+  );
+
   return {
+    uniqueUsers: sessionsByInstall.size,
+    returningUsers: Array.from(sessionsByInstall.values()).filter(
+      (sessionIds) => sessionIds.size > 1,
+    ).length,
+    trackedUsers: trackedInstallIds.size,
     activeInstalls: sessionsByInstall.size,
     sessions: sessions.size,
     repeatInstalls: Array.from(sessionsByInstall.values()).filter(
@@ -177,9 +197,13 @@ export function summarizeLifecycleActivity(
     ).length,
     trackedSessions,
     untrackedSessions: sessions.size - trackedSessions,
+    likelyUsers: likelyUserIds.size,
+    likelyUserIds,
+    trackedInstallIds,
     sessionsByInstall,
     harnessUsage,
     activeInstallsByBucket: toSortedCounts(activeInstallsByBucket),
+    uniqueUsersByBucket: toSortedCounts(activeInstallsByBucket),
     sessionsByBucket: toSortedCounts(sessionsByBucket),
     endedSessionsByBucket: toSortedCounts(endedSessionsByBucket),
   };

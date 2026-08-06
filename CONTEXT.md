@@ -78,6 +78,15 @@ mis-rendered as Anthropic).
 
 ## Cross-cutting
 
+**Telemetry identity** — an anonymous UUID stored in a Togetherlink home directory. It identifies
+one local telemetry state, not a person; temporary homes and reinstalls can create many telemetry
+identities for the same person. _Avoid:_ user, unique user, install count.
+
+**Likely user** — a telemetry identity with either at least two distinct sessions or at least one
+usage-tracked session. This is the dashboard's conservative proxy for a real user and includes
+returning spawned-harness users even when their Together API cost is not visible. _Avoid:_ active
+install, raw install, verified person.
+
 **CostTracker** (`cost.ts`, shared) — proxy-side token + dollar tracking using
 the selected model's rates. Self-calibrating token estimator. Lives at the
 shared seam (not under any harness tree).

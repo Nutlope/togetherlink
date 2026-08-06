@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  groupActiveInstallsByLatestCountry,
+  groupUniqueUsersByLatestCountry,
   summarizeLifecycleActivity,
 } from "../../../site/convex/dashboardActivity.js";
 
@@ -71,6 +71,8 @@ describe("dashboard lifecycle activity", () => {
     expect(summary.harnessUsage).toEqual([
       {
         agent: "claude",
+        uniqueUsers: 1,
+        returningUsers: 0,
         activeInstalls: 1,
         sessions: 1,
         repeatInstalls: 0,
@@ -79,6 +81,8 @@ describe("dashboard lifecycle activity", () => {
       },
       {
         agent: "pi",
+        uniqueUsers: 1,
+        returningUsers: 0,
         activeInstalls: 1,
         sessions: 1,
         repeatInstalls: 0,
@@ -111,8 +115,48 @@ describe("dashboard lifecycle activity", () => {
     });
   });
 
+  test("qualifies likely users through repeat activity or tracked proxy usage", () => {
+    const summary = summarizeLifecycleActivity([
+      {
+        installId: "repeat-direct-user",
+        sessionId: "direct-1",
+        eventType: "session_started",
+        agent: "opencode",
+        receivedAt: 100,
+      },
+      {
+        installId: "repeat-direct-user",
+        sessionId: "direct-2",
+        eventType: "session_started",
+        agent: "opencode",
+        receivedAt: 200,
+      },
+      {
+        installId: "tracked-user",
+        sessionId: "tracked-1",
+        eventType: "session_ended",
+        agent: "claude",
+        receivedAt: 300,
+        costUsd: 0.25,
+      },
+      {
+        installId: "one-off-untracked",
+        sessionId: "one-off-1",
+        eventType: "session_started",
+        agent: "grok",
+        receivedAt: 400,
+      },
+    ]);
+
+    expect(summary.likelyUsers).toBe(2);
+    expect(Array.from(summary.likelyUserIds).sort()).toEqual([
+      "repeat-direct-user",
+      "tracked-user",
+    ]);
+  });
+
   test("assigns every active install to exactly one latest session country", () => {
-    const countries = groupActiveInstallsByLatestCountry([
+    const countries = groupUniqueUsersByLatestCountry([
       {
         installId: "install-a",
         sessionId: "session-1",

@@ -1,9 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import {
-  groupActiveInstallsByLatestCountry,
-  summarizeLifecycleActivity,
-} from "./dashboardActivity";
+import { groupUniqueUsersByLatestCountry, summarizeLifecycleActivity } from "./dashboardActivity";
 import { filterDashboardEvents } from "./dashboardFilters";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,6 +38,7 @@ type InstallSummary = UsageTotals & {
   lastSeenAt: number;
   os: string;
   countryCode: string;
+  latestVersion?: string;
   agents: Set<string>;
   versions: Set<string>;
 };
@@ -129,25 +127,51 @@ export const getDashboardSummary = query({
     const since = range === "lifetime" ? Number.NEGATIVE_INFINITY : Date.now() - rangeDurationMs;
 
     const allEvents = await ctx.db.query("telemetryEvents").withIndex("by_receivedAt").collect();
-    const allScopedEvents = filterDashboardEvents(allEvents, {
+    const candidateAllScopedEvents = filterDashboardEvents(allEvents, {
       since: Number.NEGATIVE_INFINITY,
       installId: selectedInstallId,
       excludedInstallIds: hiddenInstallIds,
     });
+    const qualification = summarizeLifecycleActivity(candidateAllScopedEvents);
+    const likelyUserIds = qualification.likelyUserIds;
+    const allScopedEvents = candidateAllScopedEvents.filter((event) =>
+      likelyUserIds.has(event.installId),
+    );
     const events = filterDashboardEvents(allEvents, {
       since,
       installId: selectedInstallId,
       excludedInstallIds: hiddenInstallIds,
-    });
+    }).filter((event) => likelyUserIds.has(event.installId));
     const lifecycle = summarizeLifecycleActivity(events, {
       bucketKey: (timestampMs) => bucketKey(timestampMs, range),
     });
     const now = Date.now();
     const lifetimeLifecycle = summarizeLifecycleActivity(allScopedEvents);
+    const lifetimeSessionCosts = new Map<string, { installId: string; costUsd: number }>();
+    for (const event of allScopedEvents) {
+      if (event.eventType !== "session_ended" || !event.sessionId) continue;
+      lifetimeSessionCosts.set(event.sessionId, {
+        installId: event.installId,
+        costUsd: event.costUsd ?? 0,
+      });
+    }
+    const lifetimeCostByUser = new Map<string, number>();
+    for (const session of lifetimeSessionCosts.values()) {
+      lifetimeCostByUser.set(
+        session.installId,
+        (lifetimeCostByUser.get(session.installId) ?? 0) + session.costUsd,
+      );
+    }
     const audience = {
       dau: summarizeLifecycleActivity(allScopedEvents, { since: now - DAY_MS }).activeInstalls,
       wau: summarizeLifecycleActivity(allScopedEvents, { since: now - 7 * DAY_MS }).activeInstalls,
       mau: summarizeLifecycleActivity(allScopedEvents, { since: now - 30 * DAY_MS }).activeInstalls,
+      lifetimeUniqueUsers: lifetimeLifecycle.uniqueUsers,
+      lifetimeReturningUsers: lifetimeLifecycle.returningUsers,
+      lifetimeTrackedUsers: lifetimeLifecycle.trackedUsers,
+      lifetimeUsersOverOneDollar: Array.from(lifetimeCostByUser.values()).filter(
+        (costUsd) => costUsd > 1,
+      ).length,
       lifetimeActiveInstalls: lifetimeLifecycle.activeInstalls,
       lifetimeSessions: lifetimeLifecycle.sessions,
       lifetimeRepeatInstalls: lifetimeLifecycle.repeatInstalls,
@@ -160,7 +184,7 @@ export const getDashboardSummary = query({
       { installId: string; nickname?: string; lastSeenAt: number }
     >();
     for (const event of allEvents) {
-      if (hiddenInstallIds?.has(event.installId)) continue;
+      if (hiddenInstallIds.has(event.installId) || !likelyUserIds.has(event.installId)) continue;
       const existing = installFilterOptionsById.get(event.installId);
       if (!existing || event.receivedAt > existing.lastSeenAt) {
         installFilterOptionsById.set(event.installId, {
@@ -180,9 +204,6 @@ export const getDashboardSummary = query({
       string,
       { promptTokens: number; cachedTokens: number; completionTokens: number; costUsd: number }
     >();
-    const osCounts = new Map<string, number>();
-    const countryCounts = new Map<string, number>();
-    const versionCounts = new Map<string, number>();
     const installs = new Map<string, InstallSummary>();
     const sessions = new Map<string, SessionSummary>();
     const installDaily = new Map<string, InstallDailySummary>();
@@ -231,6 +252,7 @@ export const getDashboardSummary = query({
         lastSeenAt: event.receivedAt,
         os: event.os,
         countryCode: event.countryCode,
+        latestVersion: event.cliVersion,
         agents: new Set<string>(),
         versions: new Set<string>(),
       };
@@ -240,7 +262,10 @@ export const getDashboardSummary = query({
       install.os = event.os;
       install.countryCode = event.countryCode;
       if (event.agent) install.agents.add(normalizeAgent(event.agent));
-      if (event.cliVersion) install.versions.add(event.cliVersion);
+      if (event.cliVersion) {
+        install.latestVersion = event.cliVersion;
+        install.versions.add(event.cliVersion);
+      }
       installs.set(event.installId, install);
 
       const dailyKey = `${event.installId}:${day}`;
@@ -376,18 +401,13 @@ export const getDashboardSummary = query({
       }
 
       countryActivity.set(countryCode, country);
-      osCounts.set(event.os, (osCounts.get(event.os) ?? 0) + 1);
-      countryCounts.set(event.countryCode, (countryCounts.get(event.countryCode) ?? 0) + 1);
-      if (event.cliVersion) {
-        versionCounts.set(event.cliVersion, (versionCounts.get(event.cliVersion) ?? 0) + 1);
-      }
     }
 
     // Country install counts must use the same mutually exclusive population
     // as overview.activeInstalls. Assigning an install to every country where
     // it emitted an event makes the map impossible to reconcile with the
     // headline total when a user travels or uses a VPN.
-    const activeInstallsByCountry = groupActiveInstallsByLatestCountry(events);
+    const activeInstallsByCountry = groupUniqueUsersByLatestCountry(events);
     for (const country of countryActivity.values()) {
       country.activeInstallIds.clear();
     }
@@ -411,6 +431,26 @@ export const getDashboardSummary = query({
       Array.from(map.entries())
         .map(([day, value]) => ({ day, count: value instanceof Set ? value.size : value }))
         .sort((a, b) => (a.day < b.day ? -1 : 1));
+    const userSummaries = Array.from(installs.values())
+      .map(({ agents, versions, ...install }) => ({
+        ...install,
+        sessionStarts: lifecycle.sessionsByInstall.get(install.installId)?.size ?? 0,
+        agents: Array.from(agents).sort(),
+        versions: Array.from(versions).sort(),
+      }))
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+    const countUsersBy = (
+      valueFor: (user: (typeof userSummaries)[number]) => string | undefined,
+    ) => {
+      const counts = new Map<string, number>();
+      for (const user of userSummaries) {
+        const value = valueFor(user);
+        if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+      return Array.from(counts.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    };
 
     return {
       range,
@@ -419,6 +459,10 @@ export const getDashboardSummary = query({
         (a, b) => b.lastSeenAt - a.lastSeenAt,
       ),
       overview: {
+        uniqueUsers: lifecycle.uniqueUsers,
+        returningUsers: lifecycle.returningUsers,
+        trackedUsers: lifecycle.trackedUsers,
+        usersOverOneDollar: userSummaries.filter((user) => user.costUsd > 1).length,
         installCompletions: installCompletionIds.size,
         uniqueInstalls: installIds.size,
         activeInstalls: lifecycle.activeInstalls,
@@ -437,6 +481,7 @@ export const getDashboardSummary = query({
           countryCode,
           installCompletions: country.installCompletionIds.size,
           uniqueInstalls: country.uniqueInstallIds.size,
+          uniqueUsers: country.activeInstallIds.size,
           activeInstalls: country.activeInstallIds.size,
           sessionsStarted: country.sessionsStarted,
           sessionsEnded: country.sessionsEnded,
@@ -450,6 +495,7 @@ export const getDashboardSummary = query({
         ),
       installsPerDay: toSortedDayCounts(installsByDay),
       activeInstallsPerDay: lifecycle.activeInstallsByBucket,
+      uniqueUsersPerDay: lifecycle.uniqueUsersByBucket,
       sessionsStartedPerDay: lifecycle.sessionsByBucket,
       sessionsEndedPerDay: lifecycle.endedSessionsByBucket,
       tokenUsageByAgent: Array.from(tokensByAgent.entries())
@@ -464,22 +510,18 @@ export const getDashboardSummary = query({
           ...totals,
         }))
         .sort((a, b) => b.costUsd - a.costUsd),
-      osDistribution: Array.from(osCounts.entries()).map(([os, count]) => ({ os, count })),
-      countryDistribution: Array.from(countryCounts.entries())
-        .map(([countryCode, count]) => ({ countryCode, count }))
-        .sort((a, b) => b.count - a.count),
-      versionDistribution: Array.from(versionCounts.entries()).map(([version, count]) => ({
-        version,
+      osDistribution: countUsersBy((user) => user.os).map(({ label: os, count }) => ({
+        os,
         count,
       })),
-      installSummaries: Array.from(installs.values())
-        .map(({ agents, versions, ...install }) => ({
-          ...install,
-          sessionStarts: lifecycle.sessionsByInstall.get(install.installId)?.size ?? 0,
-          agents: Array.from(agents).sort(),
-          versions: Array.from(versions).sort(),
-        }))
-        .sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+      countryDistribution: countUsersBy((user) => user.countryCode.toUpperCase()).map(
+        ({ label: countryCode, count }) => ({ countryCode, count }),
+      ),
+      versionDistribution: countUsersBy((user) => user.latestVersion).map(
+        ({ label: version, count }) => ({ version, count }),
+      ),
+      userSummaries,
+      installSummaries: userSummaries,
       installDaily: Array.from(installDaily.values()).sort((a, b) =>
         a.installId === b.installId ? (a.day < b.day ? -1 : 1) : a.installId < b.installId ? -1 : 1,
       ),
