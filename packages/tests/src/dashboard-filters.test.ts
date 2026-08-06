@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { filterDashboardEvents } from "../../../site/convex/dashboardFilters.js";
+import {
+  filterDashboardEvents,
+  parseInstallIdList,
+} from "../../../site/convex/dashboardFilters.js";
 
 describe("dashboard filters", () => {
   test("combines the date range and selected install across dashboard events", () => {
@@ -11,6 +14,29 @@ describe("dashboard filters", () => {
 
     expect(filterDashboardEvents(events, { since: 100, installId: "install-a" })).toEqual([
       events[1],
+    ]);
+  });
+
+  test("excludes hidden installs from every dashboard aggregation", () => {
+    const events = [
+      { id: "riccardo", installId: "riccardo-install", receivedAt: 200 },
+      { id: "other", installId: "other-install", receivedAt: 300 },
+    ];
+
+    expect(
+      filterDashboardEvents(events, {
+        since: 100,
+        excludedInstallIds: new Set(["riccardo-install"]),
+      }),
+    ).toEqual([events[1]]);
+  });
+
+  test("parses legacy and multi-install internal exclusion settings", () => {
+    expect(parseInstallIdList("admin-install", "test-a,test-b\ntest-c", "test-a")).toEqual([
+      "admin-install",
+      "test-a",
+      "test-b",
+      "test-c",
     ]);
   });
 });

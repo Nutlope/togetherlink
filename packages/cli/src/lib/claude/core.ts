@@ -82,6 +82,13 @@ export function buildClaudeEnv({
   if (!env.ENABLE_TOOL_SEARCH?.trim()) {
     env.ENABLE_TOOL_SEARCH = "true";
   }
+  // Modern Claude Code installs already select the concise system prompt for
+  // TogetherLink's gateway models. Enforce that current default so a future
+  // gateway-detection regression cannot silently restore the much larger
+  // prompt, while preserving an explicit user override such as "0".
+  if (!env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT?.trim()) {
+    env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT = "1";
+  }
   if (env.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined) {
     env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS);
   }

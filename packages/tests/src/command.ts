@@ -26,6 +26,9 @@ export async function runCommand(
       ...process.env,
       ...isolatedEnv,
       ...options.env,
+      // Repository-run harnesses frequently use isolated temporary homes.
+      // Never let those homes become production analytics identities.
+      TOGETHERLINK_TELEMETRY_DISABLED: "1",
       TOGETHERLINK_DEBUG: "1",
       CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
       DISABLE_FEEDBACK_COMMAND: "1",

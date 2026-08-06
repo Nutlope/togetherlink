@@ -5,18 +5,20 @@ import { ConvexHttpClient } from "convex/browser";
 import { useEffect, useRef, useState } from "react";
 import WorldMap, { regions, type ISOCode } from "react-svg-worldmap";
 import { api } from "../../convex/_generated/api";
+import { parseInstallIdList } from "../../convex/dashboardFilters";
 
 type DashboardSummary = Awaited<ReturnType<typeof fetchSummary>>;
 type DashboardData = NonNullable<DashboardSummary>;
-type InstallSummary = DashboardData["installSummaries"][number];
+type InstallSummary = DashboardData["userSummaries"][number];
 type RecentSession = DashboardData["recentSessions"][number];
 type CountryLifetime = DashboardData["countryLifetime"][number];
-type DailyActiveUsers = DashboardData["activeInstallsPerDay"][number];
+type DailyActiveUsers = DashboardData["uniqueUsersPerDay"][number];
 type InstallFilterOption = DashboardData["installFilterOptions"][number];
-type MapMetric = "installs" | "sessions" | "tokens" | "cost";
+type Audience = DashboardData["audience"];
+type MapMetric = "users" | "sessions" | "tokens" | "cost";
 type LeaderboardMetric = "tokens" | "sessions";
 type DashboardRange = "24h" | "7d" | "30d" | "lifetime";
-type DashboardFilters = { range: DashboardRange; installId?: string };
+type DashboardFilters = { range: DashboardRange; installId?: string; hideInternal?: boolean };
 
 const WORLD_MAP_COUNTRY_CODES = new Set(regions.map((region) => region.code.toUpperCase()));
 const REFRESH_INTERVAL_MS = 15_000;
@@ -53,8 +55,23 @@ async function fetchSummary(filters: DashboardFilters) {
   if (!url) {
     return null;
   }
+  const { hideInternal, ...queryFilters } = filters;
+  const internalInstallIds = configuredInternalInstallIds();
+  if (hideInternal && internalInstallIds.length === 0) {
+    throw new Error("Internal user IDs are not configured");
+  }
   const client = new ConvexHttpClient(url);
-  return client.query(api.analytics.getDashboardSummary, filters);
+  return client.query(api.analytics.getDashboardSummary, {
+    ...queryFilters,
+    ...(hideInternal ? { excludedInstallIds: internalInstallIds } : {}),
+  });
+}
+
+function configuredInternalInstallIds(): string[] {
+  return parseInstallIdList(
+    process.env.DASHBOARD_ADMIN_INSTALL_ID,
+    process.env.DASHBOARD_INTERNAL_INSTALL_IDS,
+  );
 }
 
 function normalizeDashboardData(value: unknown): DashboardSummary {
@@ -65,6 +82,7 @@ function normalizeDashboardData(value: unknown): DashboardSummary {
     (data.installSummaries ?? []).filter(
       (install) => install.sessionStarts > 0 || install.sessionEnds > 0,
     ).length;
+  const uniqueUsers = data.overview?.uniqueUsers ?? activeInstalls;
   return {
     range: data.range ?? "30d",
     selectedInstallId: data.selectedInstallId ?? "all",
@@ -76,16 +94,38 @@ function normalizeDashboardData(value: unknown): DashboardSummary {
         lastSeenAt: install.lastSeenAt,
       })),
     overview: {
+      uniqueUsers,
+      returningUsers: data.overview?.returningUsers ?? data.overview?.repeatInstalls ?? 0,
+      trackedUsers: data.overview?.trackedUsers ?? 0,
+      usersOverOneDollar: data.overview?.usersOverOneDollar ?? 0,
       installCompletions: data.overview?.installCompletions ?? 0,
       uniqueInstalls: data.overview?.uniqueInstalls ?? (data.installSummaries ?? []).length,
       activeInstalls,
       sessionsStarted: data.overview?.sessionsStarted ?? 0,
+      sessions: data.overview?.sessions ?? data.overview?.sessionsStarted ?? 0,
+      repeatInstalls: data.overview?.repeatInstalls ?? 0,
+      trackedSessions: data.overview?.trackedSessions ?? 0,
+      untrackedSessions: data.overview?.untrackedSessions ?? 0,
       countries: data.overview?.countries ?? 0,
       usage: data.overview?.usage ?? EMPTY_USAGE,
     },
+    audience: data.audience ?? {
+      dau: 0,
+      wau: 0,
+      mau: 0,
+      lifetimeUniqueUsers: uniqueUsers,
+      lifetimeReturningUsers: 0,
+      lifetimeTrackedUsers: 0,
+      lifetimeUsersOverOneDollar: 0,
+      lifetimeActiveInstalls: activeInstalls,
+      lifetimeSessions: data.overview?.sessionsStarted ?? 0,
+      lifetimeRepeatInstalls: 0,
+    },
+    harnessUsage: data.harnessUsage ?? [],
     countryLifetime: data.countryLifetime ?? [],
     installsPerDay: data.installsPerDay ?? [],
     activeInstallsPerDay: data.activeInstallsPerDay ?? [],
+    uniqueUsersPerDay: data.uniqueUsersPerDay ?? data.activeInstallsPerDay ?? [],
     sessionsStartedPerDay: data.sessionsStartedPerDay ?? [],
     sessionsEndedPerDay: data.sessionsEndedPerDay ?? [],
     tokenUsageByAgent: data.tokenUsageByAgent ?? [],
@@ -93,7 +133,8 @@ function normalizeDashboardData(value: unknown): DashboardSummary {
     osDistribution: data.osDistribution ?? [],
     countryDistribution: data.countryDistribution ?? [],
     versionDistribution: data.versionDistribution ?? [],
-    installSummaries: data.installSummaries ?? [],
+    userSummaries: data.userSummaries ?? data.installSummaries ?? [],
+    installSummaries: data.installSummaries ?? data.userSummaries ?? [],
     installDaily: data.installDaily ?? [],
     recentSessions: data.recentSessions ?? [],
     failedSessionRate: data.failedSessionRate ?? 0,
@@ -103,7 +144,10 @@ function normalizeDashboardData(value: unknown): DashboardSummary {
 
 const checkDashboardAuth = createServerFn({ method: "GET" }).handler(async () => {
   const session = await dashboardSession();
-  return { authed: Boolean(session.data.authed) };
+  return {
+    authed: Boolean(session.data.authed),
+    hasInternalExclusions: configuredInternalInstallIds().length > 0,
+  };
 });
 
 const loginToDashboard = createServerFn({ method: "POST" })
@@ -154,7 +198,7 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 function DashboardRoute() {
-  const { authed } = Route.useLoaderData();
+  const { authed, hasInternalExclusions } = Route.useLoaderData();
   const [isAuthed, setIsAuthed] = useState(authed);
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [password, setPassword] = useState("");
@@ -167,11 +211,13 @@ function DashboardRoute() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [selectedInstallId, setSelectedInstallId] = useState("all");
   const [range, setRange] = useState<DashboardRange>("30d");
+  const [hideInternal, setHideInternal] = useState(hasInternalExclusions);
   const latestRequestRef = useRef(0);
 
   const loadData = async (
     requestedRange: DashboardRange,
     requestedInstallId: string,
+    shouldHideInternal: boolean,
     isFirstLoad: boolean,
   ) => {
     const requestId = ++latestRequestRef.current;
@@ -184,6 +230,7 @@ function DashboardRoute() {
       const filters: DashboardFilters = {
         range: requestedRange,
         ...(requestedInstallId === "all" ? {} : { installId: requestedInstallId }),
+        ...(shouldHideInternal ? { hideInternal: true } : {}),
       };
       const result = normalizeDashboardData(await getDashboardData({ data: filters }));
       if (requestId !== latestRequestRef.current) return;
@@ -203,13 +250,13 @@ function DashboardRoute() {
 
   useEffect(() => {
     if (!isAuthed) return;
-    void loadData(range, selectedInstallId, data === null);
+    void loadData(range, selectedInstallId, hideInternal, data === null);
     const interval = setInterval(
-      () => void loadData(range, selectedInstallId, false),
+      () => void loadData(range, selectedInstallId, hideInternal, false),
       REFRESH_INTERVAL_MS,
     );
     return () => clearInterval(interval);
-  }, [isAuthed, range, selectedInstallId]);
+  }, [isAuthed, range, selectedInstallId, hideInternal]);
 
   if (!isAuthed) {
     return (
@@ -251,7 +298,7 @@ function DashboardRoute() {
   const dataInstallId = data?.selectedInstallId ?? "all";
   const selectedInstall =
     data && dataInstallId !== "all"
-      ? data.installSummaries.find((install) => install.installId === dataInstallId)
+      ? data.userSummaries.find((install) => install.installId === dataInstallId)
       : null;
   const selectedInstallOption =
     dataInstallId === "all"
@@ -271,8 +318,9 @@ function DashboardRoute() {
       <div className="mb-6 rounded-md border border-line-strong bg-code px-4 py-3 text-sm text-muted">
         Session lifecycle covers Claude, Codex, ChatGPT Desktop, Grok Build, OpenCode, and Pi Code
         when launched through togetherlink. Token and cost totals are available for the proxied
-        Claude, Codex, and ChatGPT paths only. Anonymous users are stable install IDs, not
-        identified people.
+        Claude, Codex, and ChatGPT paths only. A likely unique user has either multiple distinct
+        sessions or at least one usage-tracked session; raw one-off telemetry identities are
+        excluded.
       </div>
 
       {loading && !data && <p className="text-sm text-muted">Loading…</p>}
@@ -282,37 +330,42 @@ function DashboardRoute() {
         <>
           <section className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <OverviewMetric
-              label="Install completions"
-              value={formatNumber(data.overview.installCompletions)}
+              label="Unique users"
+              value={formatNumber(data.overview.uniqueUsers)}
               period={rangeDescription(dataRange)}
+              secondary="Conservative likely-user estimate"
             />
             <OverviewMetric
-              label="Active installs"
-              value={formatNumber(data.overview.activeInstalls)}
+              label="Sessions"
+              value={formatNumber(data.overview.sessions)}
               period={rangeDescription(dataRange)}
-              secondary={`${formatNumber(data.overview.uniqueInstalls)} seen`}
+              secondary="Distinct lifecycle session IDs"
             />
             <OverviewMetric
-              label="Sessions started"
-              value={formatNumber(data.overview.sessionsStarted)}
+              label="Returning users"
+              value={formatNumber(data.overview.returningUsers)}
               period={rangeDescription(dataRange)}
+              secondary={`${formatPercentage(data.overview.returningUsers, data.overview.uniqueUsers)} of unique users`}
             />
             <OverviewMetric
-              label="Token usage"
-              value={formatCompactTokens(totalTokens(data.overview.usage))}
+              label="Tracked users"
+              value={formatNumber(data.overview.trackedUsers)}
               period={rangeDescription(dataRange)}
+              secondary={`${formatNumber(data.overview.usersOverOneDollar)} generated over $1`}
             />
             <OverviewMetric
-              label="Total cost"
+              label="Estimated proxy cost"
               value={formatCost(data.overview.usage.costUsd)}
               period={rangeDescription(dataRange)}
             />
           </section>
 
+          <AudienceSummary audience={data.audience} />
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <DailyActiveUsersChart
-              rows={data.activeInstallsPerDay}
-              activeUsers={data.overview.activeInstalls}
+              rows={data.uniqueUsersPerDay}
+              uniqueUsers={data.overview.uniqueUsers}
               range={dataRange}
             />
 
@@ -320,30 +373,36 @@ function DashboardRoute() {
               countries={data.countryLifetime}
               countryCount={data.overview.countries}
               range={dataRange}
+              totals={{
+                users: data.overview.uniqueUsers,
+                sessions: data.overview.sessions,
+                tokens: data.overview.usage.promptTokens + data.overview.usage.completionTokens,
+                cost: data.overview.usage.costUsd,
+              }}
             />
 
             <UserLeaderboard
-              installs={data.installSummaries}
+              installs={data.userSummaries}
               selectedInstallId={selectedInstallId}
               onSelectInstall={setSelectedInstallId}
               range={dataRange}
             />
 
             <InstallPicker
-              installs={data.installSummaries}
+              installs={data.userSummaries}
               installOptions={data.installFilterOptions}
               selectedInstallId={selectedInstallId}
               onSelectedInstallIdChange={setSelectedInstallId}
               range={dataRange}
               onNicknameSave={async (installId, nickname) => {
                 await saveInstallNickname({ data: { installId, nickname } });
-                await loadData(range, selectedInstallId, false);
+                await loadData(range, selectedInstallId, hideInternal, false);
               }}
             />
 
             {selectedInstall && (
               <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
-                <FocusMetric label="Selected install" value={installDisplayName(selectedInstall)} />
+                <FocusMetric label="Selected user" value={installDisplayName(selectedInstall)} />
                 <FocusMetric label="Sessions ended" value={String(selectedInstall.sessionEnds)} />
                 <FocusMetric
                   label={`${rangeLabel(dataRange)} cost`}
@@ -380,9 +439,21 @@ function DashboardRoute() {
 
             <ActivitySummary
               range={dataRange}
-              installsCompleted={sumCountRows(data.installsPerDay)}
-              sessionsStarted={sumCountRows(data.sessionsStartedPerDay)}
-              sessionsEnded={sumCountRows(data.sessionsEndedPerDay)}
+              uniqueUsers={data.overview.uniqueUsers}
+              returningUsers={data.overview.returningUsers}
+              trackedUsers={data.overview.trackedUsers}
+              usersOverOneDollar={data.overview.usersOverOneDollar}
+            />
+
+            <BarCard
+              title="CLI usage by harness"
+              className="md:col-span-2"
+              items={data.harnessUsage.map((row) => ({
+                label: row.agent,
+                value: row.uniqueUsers,
+                detail: `${formatNumber(row.returningUsers)} returning · ${formatNumber(row.sessions)} sessions · ${formatNumber(row.trackedSessions)} cost tracked`,
+                valueLabel: `${formatNumber(row.uniqueUsers)} users`,
+              }))}
             />
 
             <BarCard
@@ -408,7 +479,7 @@ function DashboardRoute() {
             />
 
             <BarCard
-              title="OS distribution"
+              title="Users by OS"
               items={data.osDistribution.map((r) => ({
                 label: r.os,
                 value: r.count,
@@ -417,7 +488,7 @@ function DashboardRoute() {
             />
 
             <BarCard
-              title="CLI version adoption"
+              title="Users by latest CLI version"
               className="md:col-span-2"
               items={data.versionDistribution.map((r) => ({
                 label: r.version,
@@ -442,26 +513,42 @@ function DashboardRoute() {
         </>
       )}
 
-      <DashboardRangeFilter range={range} onRangeChange={setRange} refreshing={refreshing} />
+      <DashboardFilterBar
+        range={range}
+        onRangeChange={setRange}
+        hideInternal={hideInternal}
+        canHideInternal={hasInternalExclusions}
+        onHideInternalChange={(nextValue) => {
+          if (nextValue) setSelectedInstallId("all");
+          setHideInternal(nextValue);
+        }}
+        refreshing={refreshing}
+      />
     </div>
   );
 }
 
-function DashboardRangeFilter({
+function DashboardFilterBar({
   range,
   onRangeChange,
+  hideInternal,
+  canHideInternal,
+  onHideInternalChange,
   refreshing,
 }: {
   range: DashboardRange;
   onRangeChange: (range: DashboardRange) => void;
+  hideInternal: boolean;
+  canHideInternal: boolean;
+  onHideInternalChange: (hideInternal: boolean) => void;
   refreshing: boolean;
 }) {
   return (
     <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-40 w-[calc(100%-2rem)] max-w-max -translate-x-1/2">
       <div
-        className="flex items-center gap-1 rounded-xl bg-white/90 p-1.5 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_4px_12px_rgba(0,0,0,0.08),0_16px_40px_rgba(0,0,0,0.14)] backdrop-blur-xl"
+        className="flex flex-wrap items-center justify-center gap-1 rounded-xl bg-white/90 p-1.5 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_4px_12px_rgba(0,0,0,0.08),0_16px_40px_rgba(0,0,0,0.14)] backdrop-blur-xl"
         role="group"
-        aria-label="Dashboard time range"
+        aria-label="Dashboard filters"
         aria-busy={refreshing}
       >
         <span className="hidden pl-2 pr-1 text-xs font-medium text-muted sm:inline">View</span>
@@ -483,6 +570,21 @@ function DashboardRangeFilter({
             </button>
           );
         })}
+        <span className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={() => onHideInternalChange(!hideInternal)}
+          aria-pressed={hideInternal}
+          disabled={!canHideInternal}
+          title={canHideInternal ? undefined : "Configure internal user IDs to enable this filter"}
+          className={`min-h-10 whitespace-nowrap rounded-md px-3 text-xs font-medium transition-[background-color,color,box-shadow,scale] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96] sm:px-4 ${
+            hideInternal
+              ? "bg-ink text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
+              : "text-muted hover:bg-code hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-muted"
+          }`}
+        >
+          {hideInternal ? "Internal hidden" : "Hide internal"}
+        </button>
       </div>
     </div>
   );
@@ -524,6 +626,46 @@ function OverviewMetric({
   );
 }
 
+function AudienceSummary({ audience }: { audience: Audience }) {
+  const metrics = [
+    { label: "DAU", value: audience.dau, detail: "last 24 hours" },
+    { label: "WAU", value: audience.wau, detail: "last 7 days" },
+    { label: "MAU", value: audience.mau, detail: "last 30 days" },
+    { label: "Lifetime users", value: audience.lifetimeUniqueUsers, detail: "likely users" },
+    {
+      label: "Returning users",
+      value: audience.lifetimeReturningUsers,
+      detail: "2+ sessions",
+    },
+    {
+      label: "Users over $1",
+      value: audience.lifetimeUsersOverOneDollar,
+      detail: "tracked proxy cost",
+    },
+  ];
+
+  return (
+    <section
+      className="mb-4 overflow-hidden rounded-lg border border-line-strong bg-white"
+      aria-label="Active audience"
+    >
+      <div className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
+        {metrics.map((metric) => (
+          <div key={metric.label} className="px-4 py-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-faint">
+              {metric.label}
+            </div>
+            <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">
+              {formatNumber(metric.value)}
+            </div>
+            <div className="mt-0.5 text-xs text-muted">{metric.detail}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function UserLeaderboard({
   installs,
   selectedInstallId,
@@ -556,7 +698,7 @@ function UserLeaderboard({
         <div>
           <h2 className="text-sm font-medium text-ink">Top 10 users</h2>
           <p className="mt-1 text-xs text-muted">
-            Anonymous installs ranked by activity {rangeDescription(range)}.
+            Likely unique users ranked by activity {rangeDescription(range)}.
           </p>
         </div>
         <div className="flex rounded-md bg-code p-1" role="group" aria-label="Leaderboard metric">
@@ -652,17 +794,17 @@ function UserLeaderboard({
 
 function DailyActiveUsersChart({
   rows,
-  activeUsers,
+  uniqueUsers,
   range,
 }: {
   rows: DailyActiveUsers[];
-  activeUsers: number;
+  uniqueUsers: number;
   range: DashboardRange;
 }) {
   const series = fillActivitySeries(rows, range);
   const latest = series.at(-1)?.count ?? 0;
   const peak = Math.max(0, ...series.map((row) => row.count));
-  const stickiness = activeUsers > 0 ? latest / activeUsers : 0;
+  const stickiness = uniqueUsers > 0 ? latest / uniqueUsers : 0;
   const chartWidth = 720;
   const chartTop = 12;
   const chartBottom = 168;
@@ -686,10 +828,10 @@ function DailyActiveUsersChart({
     <section className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-4">
         <div>
-          <h2 className="text-sm font-medium text-ink">Active users over time</h2>
+          <h2 className="text-sm font-medium text-ink">Daily active users</h2>
           <p className="mt-1 max-w-2xl text-xs text-muted">
-            Unique anonymous installs that launch the CLI or report session activity in each UTC{" "}
-            {rangeBucketLabel(range)}.
+            Likely unique users with session activity in each UTC {rangeBucketLabel(range)}. Raw
+            one-off identities and CLI launches without a session are not counted.
           </p>
         </div>
         <span className="rounded-full bg-code px-2.5 py-1 font-mono text-xs text-muted">
@@ -702,7 +844,7 @@ function DailyActiveUsersChart({
           label={range === "24h" ? "Current hour" : "Today so far"}
           value={formatNumber(latest)}
         />
-        <DauMetric label={`${rangeLabel(range)} active`} value={formatNumber(activeUsers)} />
+        <DauMetric label={`${rangeLabel(range)} users`} value={formatNumber(uniqueUsers)} />
         <DauMetric label="Latest / range" value={`${(stickiness * 100).toFixed(1)}%`} />
         <DauMetric label={`${rangeLabel(range)} peak`} value={formatNumber(peak)} />
       </div>
@@ -762,7 +904,7 @@ function DailyActiveUsersChart({
           </div>
         </div>
         <p className="mt-2 text-xs text-muted">
-          Latest / range compares the current {rangeBucketLabel(range)} with unique active installs{" "}
+          Latest / range compares the current {rangeBucketLabel(range)} with unique users{" "}
           {rangeDescription(range)}. The latest value is partial.
         </p>
       </div>
@@ -783,22 +925,28 @@ function WorldUsageMap({
   countries,
   countryCount,
   range,
+  totals,
 }: {
   countries: CountryLifetime[];
   countryCount: number;
   range: DashboardRange;
+  totals: Record<MapMetric, number>;
 }) {
-  const [metric, setMetric] = useState<MapMetric>("installs");
+  const [metric, setMetric] = useState<MapMetric>("users");
   const values = countries.map((country) => mapMetricValue(country, metric));
+  const metricTotal = totals[metric];
   const maxValue = Math.max(1, ...values);
   const mapData = countries
-    .filter((country) => WORLD_MAP_COUNTRY_CODES.has(country.countryCode))
+    .filter(
+      (country) =>
+        WORLD_MAP_COUNTRY_CODES.has(country.countryCode) && mapMetricValue(country, metric) > 0,
+    )
     .map((country) => ({
       country: country.countryCode.toLowerCase() as ISOCode,
       value: mapMetricValue(country, metric),
     }));
   const topCountries = [...countries]
-    .filter((country) => country.countryCode !== "UNKNOWN")
+    .filter((country) => country.countryCode !== "UNKNOWN" && mapMetricValue(country, metric) > 0)
     .sort((a, b) => mapMetricValue(b, metric) - mapMetricValue(a, metric))
     .slice(0, 8);
 
@@ -808,13 +956,13 @@ function WorldUsageMap({
         <div>
           <h2 className="text-sm font-medium text-ink">Global adoption and usage</h2>
           <p className="mt-1 text-xs text-muted">
-            Activity {rangeDescription(range)} across {countryCount} countr
-            {countryCount === 1 ? "y" : "ies"}. Country is resolved when each telemetry event
-            reaches Vercel.
+            Likely unique users {rangeDescription(range)} across {countryCount} countr
+            {countryCount === 1 ? "y" : "ies"}. Each user appears once under their latest session
+            country; sessions and usage remain attributed to their telemetry event.
           </p>
         </div>
         <div className="flex flex-wrap gap-1 rounded-md bg-code p-1">
-          {(["installs", "sessions", "tokens", "cost"] as const).map((option) => (
+          {(["users", "sessions", "tokens", "cost"] as const).map((option) => (
             <button
               key={option}
               type="button"
@@ -823,7 +971,7 @@ function WorldUsageMap({
                 metric === option ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"
               }`}
             >
-              {option}
+              {mapMetricLabel(option)}
             </button>
           ))}
         </div>
@@ -833,11 +981,13 @@ function WorldUsageMap({
         <div className="relative min-h-[360px] bg-[#fbfcfd] p-4">
           <div className="absolute left-4 top-4 z-10 rounded-md border border-line bg-white/95 px-3 py-2 shadow-sm">
             <div className="text-xs text-muted">{rangeLabel(range)} view</div>
-            <div className="mt-0.5 font-mono text-sm font-medium capitalize text-ink">{metric}</div>
+            <div className="mt-0.5 font-mono text-sm font-medium text-ink">
+              {formatMapMetric(metricTotal, metric)} {mapMetricLabel(metric)} total
+            </div>
           </div>
           <div className="dashboard-world-map flex min-h-[330px] items-center justify-center pt-8">
             <WorldMap
-              title={`World map colored by ${rangeLabel(range)} ${metric}`}
+              title={`World map colored by ${rangeLabel(range)} ${mapMetricLabel(metric)}`}
               data={mapData}
               size="responsive"
               color="#1d4ed8"
@@ -857,7 +1007,7 @@ function WorldUsageMap({
                 `${context.countryName}: ${formatMapMetric(
                   typeof context.countryValue === "number" ? context.countryValue : 0,
                   metric,
-                )}`
+                )} ${mapMetricLabel(metric)}`
               }
             />
           </div>
@@ -879,7 +1029,9 @@ function WorldUsageMap({
             <h3 className="text-xs font-medium uppercase tracking-wide text-faint">
               Top countries
             </h3>
-            <span className="text-xs capitalize text-muted">{metric}</span>
+            <span className="text-xs text-muted">
+              Top {topCountries.length} of {countryCount}
+            </span>
           </div>
           <div className="flex flex-col">
             {topCountries.map((country, index) => (
@@ -899,6 +1051,10 @@ function WorldUsageMap({
             {topCountries.length === 0 && (
               <div className="py-4 text-sm text-faint">No data yet</div>
             )}
+          </div>
+          <div className="mt-3 border-t border-line pt-3 text-xs text-muted">
+            Global {mapMetricLabel(metric)} total: {formatMapMetric(metricTotal, metric)}. The list
+            above shows only the highest-usage countries.
           </div>
         </div>
       </div>
@@ -927,10 +1083,10 @@ function InstallPicker({
     <section className="md:col-span-2 rounded-lg border border-line-strong p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-medium text-ink">People / installs</h2>
+          <h2 className="text-sm font-medium text-ink">Unique users</h2>
           <p className="mt-1 text-xs text-muted">
-            {installs.length} anonymous install{installs.length === 1 ? "" : "s"} seen{" "}
-            {rangeDescription(range)}.
+            {installs.length} likely user{installs.length === 1 ? "" : "s"} seen{" "}
+            {rangeDescription(range)}. One-off untracked identities are excluded.
           </p>
         </div>
         <select
@@ -938,7 +1094,7 @@ function InstallPicker({
           onChange={(event) => onSelectedInstallIdChange(event.target.value)}
           className="min-w-56 rounded-md border border-line-strong bg-white px-3 py-2 font-mono text-sm text-ink outline-none focus:border-ink"
         >
-          <option value="all">All installs</option>
+          <option value="all">All users</option>
           {installOptions.map((install) => (
             <option key={install.installId} value={install.installId}>
               {installDisplayName(install)} · last seen {formatDateTime(install.lastSeenAt)}
@@ -951,7 +1107,7 @@ function InstallPicker({
         <table className="w-full min-w-[680px] border-separate border-spacing-0 text-left text-sm">
           <thead>
             <tr className="text-xs uppercase text-faint">
-              <th className="border-b border-line py-2 font-medium">Person / install</th>
+              <th className="border-b border-line py-2 font-medium">User</th>
               <th className="border-b border-line py-2 font-medium">Last seen</th>
               <th className="border-b border-line py-2 font-medium">Sessions</th>
               <th className="border-b border-line py-2 font-medium">Cost</th>
@@ -1105,7 +1261,7 @@ function EditInstallNameDialog({
         <div>
           <h3 className="text-base font-semibold text-ink">Edit person name</h3>
           <p className="mt-1 text-sm text-muted">
-            Add a recognizable name for this anonymous install.
+            Add a recognizable name for this anonymous user.
           </p>
         </div>
 
@@ -1121,9 +1277,9 @@ function EditInstallNameDialog({
         </label>
 
         <div className="mt-2 font-mono text-xs text-faint" title={install.installId}>
-          Install {shortInstallId(install.installId)}
+          User ID {shortInstallId(install.installId)}
         </div>
-        <p className="mt-1 text-xs text-muted">Leave the name blank to show the install ID.</p>
+        <p className="mt-1 text-xs text-muted">Leave the name blank to show the anonymous ID.</p>
         {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
 
         <div className="mt-6 flex justify-end gap-2">
@@ -1178,7 +1334,7 @@ function RecentSessionsTable({ title, sessions }: { title: string; sessions: Rec
           <thead>
             <tr className="text-xs uppercase text-faint">
               <th className="border-b border-line py-2 font-medium">When</th>
-              <th className="border-b border-line py-2 font-medium">Install</th>
+              <th className="border-b border-line py-2 font-medium">User</th>
               <th className="border-b border-line py-2 font-medium">Agent</th>
               <th className="border-b border-line py-2 font-medium">Model</th>
               <th className="border-b border-line py-2 font-medium">Duration</th>
@@ -1265,19 +1421,22 @@ function RefreshStatus({
 
 function ActivitySummary({
   range,
-  installsCompleted,
-  sessionsStarted,
-  sessionsEnded,
+  uniqueUsers,
+  returningUsers,
+  trackedUsers,
+  usersOverOneDollar,
 }: {
   range: DashboardRange;
-  installsCompleted: number;
-  sessionsStarted: number;
-  sessionsEnded: number;
+  uniqueUsers: number;
+  returningUsers: number;
+  trackedUsers: number;
+  usersOverOneDollar: number;
 }) {
   const metrics = [
-    { label: "Installs completed", value: installsCompleted },
-    { label: "Sessions started", value: sessionsStarted },
-    { label: "Sessions ended", value: sessionsEnded },
+    { label: "Unique users", value: uniqueUsers },
+    { label: "Returning users", value: returningUsers },
+    { label: "Tracked users", value: trackedUsers },
+    { label: "Users over $1", value: usersOverOneDollar },
   ];
 
   return (
@@ -1285,7 +1444,7 @@ function ActivitySummary({
       className="md:col-span-2 overflow-hidden rounded-lg border border-line-strong"
       aria-label="Activity totals"
     >
-      <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
         {metrics.map((metric) => (
           <div key={metric.label} className="px-4 py-3">
             <div className="text-xs font-medium text-muted">{metric.label}</div>
@@ -1298,6 +1457,10 @@ function ActivitySummary({
           </div>
         ))}
       </div>
+      <p className="border-t border-line bg-code px-4 py-2.5 text-xs text-muted">
+        Unique users require either multiple distinct sessions or one usage-tracked session.
+        Returning direct-harness users count even when their Together API cost bypasses our proxy.
+      </p>
     </section>
   );
 }
@@ -1364,6 +1527,11 @@ function formatTokens(n: number): string {
 
 function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
+}
+
+function formatPercentage(numerator: number, denominator: number): string {
+  if (denominator <= 0) return "0.0%";
+  return `${((numerator / denominator) * 100).toFixed(1)}%`;
 }
 
 function sumCountRows(rows: Array<{ count: number }>): number {
@@ -1462,8 +1630,8 @@ function formatCost(costUsd: number): string {
 
 function mapMetricValue(country: CountryLifetime, metric: MapMetric): number {
   switch (metric) {
-    case "installs":
-      return country.installCompletions;
+    case "users":
+      return country.uniqueUsers;
     case "sessions":
       return country.sessionsStarted;
     case "tokens":
@@ -1471,6 +1639,10 @@ function mapMetricValue(country: CountryLifetime, metric: MapMetric): number {
     case "cost":
       return country.costUsd;
   }
+}
+
+function mapMetricLabel(metric: MapMetric): string {
+  return metric;
 }
 
 function formatMapMetric(value: number, metric: MapMetric): string {

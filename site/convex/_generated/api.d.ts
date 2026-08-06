@@ -9,6 +9,7 @@
  */
 
 import type * as analytics from "../analytics.js";
+import type * as dashboardActivity from "../dashboardActivity.js";
 import type * as dashboardFilters from "../dashboardFilters.js";
 import type * as telemetry from "../telemetry.js";
 
@@ -20,6 +21,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
+  dashboardActivity: typeof dashboardActivity;
   dashboardFilters: typeof dashboardFilters;
   telemetry: typeof telemetry;
 }>;
