@@ -206,7 +206,14 @@ describe("Codex Responses WebSocket", () => {
       "fetch",
       vi.fn(async () =>
         sseResponse([
-          { choices: [{ index: 0, delta: { content: "together hi" } }] },
+          {
+            choices: [
+              {
+                index: 0,
+                delta: { reasoning_content: "thinking", content: "together hi" },
+              },
+            ],
+          },
           {
             choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
             usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
@@ -233,6 +240,7 @@ describe("Codex Responses WebSocket", () => {
         const nativeEvents = await collectTurn(ws, {
           type: "response.create",
           model: "gpt-5.2-codex",
+          store: false,
           previous_response_id: togetherResponseId,
           input: [{ type: "message", role: "user", content: "switch models" }],
         });
@@ -241,7 +249,17 @@ describe("Codex Responses WebSocket", () => {
         const turn = await upstream.receivedTurn;
         expect(turn.type).toBe("response.create");
         expect(turn.model).toBe("gpt-5.2-codex");
+        expect(turn.store).toBe(false);
         expect(turn.previous_response_id).toBeUndefined();
+        const reasoning = (turn.input as Array<Record<string, unknown>>).find(
+          (item) => item.type === "reasoning",
+        );
+        expect(reasoning).toEqual({
+          type: "reasoning",
+          status: "completed",
+          summary: [],
+          content: [],
+        });
       } finally {
         await close();
       }

@@ -118,7 +118,7 @@ async function openCodexApp(): Promise<boolean> {
   return false;
 }
 
-async function isCodexAppRunning(): Promise<boolean> {
+export async function isCodexAppRunning(): Promise<boolean> {
   if (process.platform === "darwin") {
     return Boolean(await runningMacosAppName());
   }

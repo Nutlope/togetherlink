@@ -7,6 +7,7 @@ import { consumeSseLines } from "../sse.js";
 import { findModelById } from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "./proxy.js";
 import { relayNativeCodexWebsocket } from "./native-websocket-relay.js";
+import { sanitizeNativeResponsesReplay } from "./native-replay.js";
 
 /**
  * Codex/ChatGPT Desktop's Responses-over-WebSocket transport has no Together
@@ -85,10 +86,11 @@ export function handleCodexResponsesWebsocket(
     // keeps its native transport, auth headers, and incremental turns.
     if (isNativeRelayTurn(body, options)) {
       const relay = ensureNativeRelay();
+      const nativeBody = sanitizeNativeResponsesReplay(body);
       lastRequest = undefined;
       lastResponseId = undefined;
       lastResponseOutput = [];
-      relay.send({ ...body, type: "response.create" });
+      relay.send({ ...nativeBody, type: "response.create" });
       return;
     }
 

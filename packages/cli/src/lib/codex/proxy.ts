@@ -17,6 +17,7 @@ import {
   writeTogetherCompactionSse,
 } from "./compaction.js";
 import { forwardNativeCodexRequest, readDecodedCodexRequest } from "./native-router.js";
+import { sanitizeNativeResponsesReplay } from "./native-replay.js";
 import {
   invalidMemoryTraces,
   summarizeTogetherMemories,
@@ -171,21 +172,14 @@ export async function handleCodexProxyRequest(
   const { body } = request;
   const requestedTogetherModel = body.model ? findModelById(body.model) : undefined;
   if (options.nativeBaseUrl && body.model && !requestedTogetherModel) {
-    const nativeBody = { ...body } as ResponsesRequest & { previous_response_id?: unknown };
-    if (body.input !== undefined) {
-      nativeBody.input = normalizeNativeCompactionInput(body.input);
+    const nativeBody = sanitizeNativeResponsesReplay({ ...body }) as ResponsesRequest &
+      Record<string, unknown> & { previous_response_id?: unknown };
+    if (nativeBody.input !== undefined) {
+      nativeBody.input = normalizeNativeCompactionInput(nativeBody.input);
     }
     if (path !== "/v1/responses/compact") {
       delete nativeBody.previous_response_id;
     }
-    // The client sends `store: false` for Together turns (Together has no
-    // server-side response storage). Forwarding it on a native turn makes the
-    // ChatGPT backend refuse to resolve any item ids in the replayed input —
-    // including the `rs_*` reasoning markers this proxy minted on earlier
-    // Together turns — with "Item with id 'rs_…' not found". Dropping the flag
-    // restores the native default (store: true) so mid-thread model switches
-    // keep working.
-    delete (nativeBody as { store?: unknown }).store;
     await forwardNativeCodexRequest(req, res, {
       baseUrl: options.nativeBaseUrl,
       path,

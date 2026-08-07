@@ -5,6 +5,7 @@ import { GLM_5_2 } from "@togetherlink/models";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 import {
   DEFAULT_CODEX_NATIVE_BASE_URL,
+  defaultCodexRequestLimits,
   nativeCodexBaseUrl,
   readDecodedCodexRequest,
 } from "../../cli/src/lib/codex/native-router.js";
@@ -65,7 +66,7 @@ describe("Codex additive native/Together router", () => {
     expect(upstream[0]?.body.previous_response_id).toBeUndefined();
   });
 
-  test("strips store:false so Together-minted item ids in replayed input resolve upstream", async () => {
+  test("preserves store:false while stripping replay-unsafe Together reasoning ids", async () => {
     const upstream: Array<Record<string, unknown>> = [];
     const response = await requestProxy(
       {
@@ -79,6 +80,7 @@ describe("Codex additive native/Together router", () => {
             type: "reasoning",
             summary: [],
             content: [],
+            encrypted_content: null,
           },
           { type: "message", role: "user", content: "continue" },
         ],
@@ -91,7 +93,15 @@ describe("Codex additive native/Together router", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(upstream[0]?.store).toBeUndefined();
+    expect(upstream[0]?.store).toBe(false);
+    expect(upstream[0]?.input).toEqual([
+      {
+        type: "reasoning",
+        summary: [],
+        content: [],
+      },
+      { type: "message", role: "user", content: "continue" },
+    ]);
   });
 
   test("preserves native endpoint query strings", async () => {
@@ -211,8 +221,37 @@ describe("Codex additive native/Together router", () => {
 
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual({
-      error: { type: "request_too_large", message: "Codex request body is too large." },
+      error: {
+        type: "request_too_large",
+        message: expect.stringMatching(
+          /^Codex request body is too large \(\d+ bytes > 128 byte limit\)\.$/,
+        ),
+      },
     });
+  });
+
+  test("honors TOGETHERLINK_CODEX_MAX_*_REQUEST_BYTES env overrides", async () => {
+    process.env.TOGETHERLINK_CODEX_MAX_ENCODED_REQUEST_BYTES = "128";
+    process.env.TOGETHERLINK_CODEX_MAX_DECODED_REQUEST_BYTES = "512";
+    try {
+      const response = await requestDecodedBody(
+        Buffer.from(JSON.stringify({ input: "x".repeat(256) })),
+        { "content-type": "application/json" },
+        // Deliberately generous explicit limits: the env override must win.
+        { maxEncodedBytes: 1_024, maxDecodedBytes: 1_024 },
+      );
+      expect(response.status).toBe(204);
+
+      const rejected = await requestDecodedBody(
+        Buffer.from(JSON.stringify({ input: "x".repeat(256) })),
+        { "content-type": "application/json" },
+        defaultCodexRequestLimits(),
+      );
+      expect(rejected.status).toBe(413);
+    } finally {
+      delete process.env.TOGETHERLINK_CODEX_MAX_ENCODED_REQUEST_BYTES;
+      delete process.env.TOGETHERLINK_CODEX_MAX_DECODED_REQUEST_BYTES;
+    }
   });
 
   test.each(compressionCases)(
@@ -229,7 +268,12 @@ describe("Codex additive native/Together router", () => {
 
       expect(response.status).toBe(413);
       expect(await response.json()).toEqual({
-        error: { type: "request_too_large", message: "Decoded Codex request body is too large." },
+        error: {
+          type: "request_too_large",
+          message: expect.stringMatching(
+            /^Decoded Codex request body is too large \((\d+ bytes >|exceeds) 256 byte limit\)\.$/,
+          ),
+        },
       });
     },
   );
@@ -303,21 +347,23 @@ describe("Codex additive native/Together router", () => {
   test("sanitizes foreign plaintext reasoning before native replay without losing native or TogetherLink state", async () => {
     let upstreamBody: Record<string, unknown> | undefined;
     const ownedSummary = `tlc1:${Buffer.from("Continue from TogetherLink checkpoint.").toString("base64")}`;
+    const nativeEncryptedContent = validNativeReasoningEncryptedContent();
     const response = await requestProxy(
       {
         model: "gpt-5.6-sol",
+        store: false,
         input: [
           {
             type: "reasoning",
             id: "foreign-reasoning",
             summary: [{ type: "summary_text", text: "Readable summary remains." }],
-            encrypted_content: "This is plaintext reasoning from another provider.",
+            encrypted_content: "claude-signature",
           },
           {
             type: "reasoning",
             id: "native-reasoning",
             summary: [],
-            encrypted_content: "gAAAAABkZmtM7cT9w_XY_zThisIsAnOpaqueBlobWithNoWhitespace",
+            encrypted_content: nativeEncryptedContent,
           },
           { type: "compaction", encrypted_content: ownedSummary },
         ],
@@ -333,13 +379,14 @@ describe("Codex additive native/Together router", () => {
     const sent = upstreamBody?.input as Array<Record<string, unknown>>;
     expect(sent[0]).toMatchObject({
       type: "reasoning",
-      id: "foreign-reasoning",
       summary: [{ type: "summary_text", text: "Readable summary remains." }],
     });
+    expect(sent[0]).not.toHaveProperty("id");
     expect(sent[0]).not.toHaveProperty("encrypted_content");
-    expect(sent[1]?.encrypted_content).toBe(
-      "gAAAAABkZmtM7cT9w_XY_zThisIsAnOpaqueBlobWithNoWhitespace",
-    );
+    expect(sent[1]).toMatchObject({
+      id: "native-reasoning",
+      encrypted_content: nativeEncryptedContent,
+    });
     expect(sent[2]).toMatchObject({ type: "message", role: "user" });
     expect(JSON.stringify(sent[2])).toContain("Continue from TogetherLink checkpoint.");
   });
@@ -426,6 +473,15 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { "content-type": "application/json" },
   });
+}
+
+function validNativeReasoningEncryptedContent(): string {
+  const payload = Buffer.alloc(1 + 8 + 16 + 16 + 32);
+  payload[0] = 0x80;
+  for (let index = 9; index < payload.length; index += 1) {
+    payload[index] = index;
+  }
+  return payload.toString("base64url");
 }
 
 async function requestDecodedBody(

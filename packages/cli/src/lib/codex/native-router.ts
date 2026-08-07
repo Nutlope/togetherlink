@@ -3,13 +3,36 @@ import { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } f
 import type { ResponsesRequest } from "./wire-types.js";
 
 export const DEFAULT_CODEX_NATIVE_BASE_URL = "https://chatgpt.com/backend-api/codex";
-const DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES = 64 * 1024 * 1024;
-const DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES = 64 * 1024 * 1024;
+// Generous bounds: the proxy fully buffers, decodes, parses, and re-serializes
+// every body (routing + translation + token estimation), so a finite cap is
+// the OOM/decompression-bomb guard for the long-lived daemon. Real desktop
+// sessions with many images can exceed 64 MiB, hence 256 MiB defaults.
+const DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES = 256 * 1024 * 1024;
+const DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES = 256 * 1024 * 1024;
 
 export type CodexRequestLimits = {
   maxEncodedBytes: number;
   maxDecodedBytes: number;
 };
+
+function envByteLimit(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function defaultCodexRequestLimits(): CodexRequestLimits {
+  return {
+    maxEncodedBytes: envByteLimit(
+      "TOGETHERLINK_CODEX_MAX_ENCODED_REQUEST_BYTES",
+      DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES,
+    ),
+    maxDecodedBytes: envByteLimit(
+      "TOGETHERLINK_CODEX_MAX_DECODED_REQUEST_BYTES",
+      DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES,
+    ),
+  };
+}
 
 export class CodexRequestError extends Error {
   readonly status: number;
@@ -72,10 +95,7 @@ export type DecodedCodexRequest = {
  */
 export async function readDecodedCodexRequest(
   req: IncomingMessage,
-  limits: CodexRequestLimits = {
-    maxEncodedBytes: DEFAULT_CODEX_MAX_ENCODED_REQUEST_BYTES,
-    maxDecodedBytes: DEFAULT_CODEX_MAX_DECODED_REQUEST_BYTES,
-  },
+  limits: CodexRequestLimits = defaultCodexRequestLimits(),
 ): Promise<DecodedCodexRequest> {
   const chunks: Buffer[] = [];
   let encodedBytes = 0;
@@ -83,7 +103,10 @@ export async function readDecodedCodexRequest(
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     encodedBytes += bytes.length;
     if (encodedBytes > limits.maxEncodedBytes) {
-      throw new CodexRequestError(413, "Codex request body is too large.");
+      throw new CodexRequestError(
+        413,
+        `Codex request body is too large (${encodedBytes} bytes > ${limits.maxEncodedBytes} byte limit).`,
+      );
     }
     chunks.push(bytes);
   }
@@ -241,7 +264,10 @@ function decodeBody(
       throw error;
     }
     if (isZlibOutputLimitError(error)) {
-      throw new CodexRequestError(413, "Decoded Codex request body is too large.");
+      throw new CodexRequestError(
+        413,
+        `Decoded Codex request body is too large (exceeds ${maxDecodedBytes} byte limit).`,
+      );
     }
     throw new CodexRequestError(400, "Codex request body compression is invalid.");
   }
@@ -265,7 +291,10 @@ function zstdDecompress(value: Buffer, maxOutputLength: number): Buffer {
 
 function assertDecodedBodySize(value: Buffer, maxDecodedBytes: number): void {
   if (value.length > maxDecodedBytes) {
-    throw new CodexRequestError(413, "Decoded Codex request body is too large.");
+    throw new CodexRequestError(
+      413,
+      `Decoded Codex request body is too large (${value.length} bytes > ${maxDecodedBytes} byte limit).`,
+    );
   }
 }
 

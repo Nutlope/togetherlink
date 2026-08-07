@@ -36,7 +36,9 @@ import {
   type CodexAppLaunchReason,
   launchCodexApp,
   codexAppLaunchMessage,
+  isCodexAppRunning,
 } from "./codex-app/process.js";
+import { repairCodexSessionHistory } from "./codex-app/session-repair.js";
 import { writeMergedCodexAppCatalog, mergedCodexAppCatalogJson } from "./codex-app/catalog.js";
 import { DEFAULT_CODEX_NATIVE_BASE_URL, nativeCodexBaseUrl } from "./codex/native-router.js";
 import type { CodexModelCatalog } from "./codex/catalog.js";
@@ -243,6 +245,11 @@ export function buildCodexAppConfig(
 }
 
 async function restoreCodexApp(home: string): Promise<HarnessResult> {
+  if (await isCodexAppRunning()) {
+    throw new Error(
+      "Quit ChatGPT App before restoring TogetherLink so affected task history can be backed up and repaired safely.",
+    );
+  }
   const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
   const raw = await readTextIfExists(manifestPath);
   if (!raw) {
@@ -250,6 +257,7 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   }
 
   const manifest = JSON.parse(raw) as BackupManifest;
+  const repair = await repairCodexSessionHistory(home);
   for (const entry of manifest.files) {
     if (entry.existed) {
       if (!entry.backupPath) {
@@ -288,6 +296,9 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
     message: [
       "ChatGPT App restored to your previous profile.",
       `Backup date: ${manifest.createdAt}`,
+      repair.itemsRepaired > 0
+        ? `Repaired ${repair.itemsRepaired} replay-unsafe reasoning item(s) across ${repair.filesRepaired} task file(s); originals were backed up.`
+        : "No replay-unsafe reasoning history needed repair.",
       codexAppLaunchMessage(launch),
     ].join("\n"),
   };
