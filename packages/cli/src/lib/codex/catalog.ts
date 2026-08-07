@@ -1,4 +1,4 @@
-import { type ModelDefinition, type ModelReasoningEffort } from "@togetherlink/models";
+import { KIMI_K3, type ModelDefinition, type ModelReasoningEffort } from "@togetherlink/models";
 import { CODEX_SUPPORTED_MODELS } from "./defaults.js";
 
 const CODEX_BASE_INSTRUCTIONS =
@@ -89,7 +89,13 @@ function toCodexModelCatalogEntry(
     additional_speed_tiers: [],
     service_tiers: [],
     default_service_tier: null,
-    availability_nux: null,
+    availability_nux:
+      model.id === KIMI_K3.id
+        ? {
+            message:
+              "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
+          }
+        : null,
     upgrade: null,
     base_instructions: CODEX_BASE_INSTRUCTIONS,
     model_messages: CODEX_MODEL_MESSAGES,

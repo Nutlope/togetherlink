@@ -62,6 +62,15 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.effective_context_window_percent).toBe(95);
     expect(first?.comp_hash).toBeNull();
     expect(first?.use_responses_lite).toBe(false);
+    expect(first?.availability_nux).toEqual({
+      message:
+        "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
+    });
+    expect(
+      catalog.models
+        ?.filter((model: Record<string, unknown>) => model.slug !== DEFAULT_MODEL.id)
+        .every((model: Record<string, unknown>) => model.availability_nux === null),
+    ).toBe(true);
   });
 
   test("serves the model catalog with and without the /v1 prefix", async () => {

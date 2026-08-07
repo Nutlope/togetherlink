@@ -268,5 +268,11 @@ describe("Codex App alpha config", () => {
     expect(
       catalog.models.find((model) => model.slug === DEFAULT_MODEL.id)?.priority,
     ).toBeGreaterThan(2);
+    expect(
+      catalog.models.find((model) => model.slug === DEFAULT_MODEL.id)?.availability_nux,
+    ).toEqual({
+      message:
+        "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
+    });
   });
 });
