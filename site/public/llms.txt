@@ -111,9 +111,21 @@ togetherlink chatgpt --model <model>     # use a specific model
 
 Backups of your original config live under `~/.togetherlink/backup/codex-app/`.
 
-## Models
+## Available Models
 
 togetherlink routes to a curated set of Together AI models. The default for every coding harness is Kimi K3.
+
+Serverless prices below are in USD per 1 million tokens and come from Together's authenticated `/v1/models` catalog, checked August 7, 2026. Cached input is billed at the lower rate when Together's automatic prompt cache matches a prefix; otherwise the standard input rate applies. Together may change these prices, so check the live catalog for billing-critical decisions.
+
+| Model | Together API id | Input | Output | Cached input |
+| --- | --- | ---: | ---: | ---: |
+| Kimi K3 (default) | `moonshotai/Kimi-K3` | $3.00 | $15.00 | $0.30 |
+| GLM 5.2 | `zai-org/GLM-5.2` | $1.40 | $4.40 | $0.26 |
+| Kimi K2.7 Code | `moonshotai/Kimi-K2.7-Code` | $0.95 | $4.00 | $0.19 |
+| Kimi K2.6 | `moonshotai/Kimi-K2.6` | $1.20 | $4.50 | $0.20 |
+| MiniMax M3 | `MiniMaxAI/MiniMax-M3` | $0.30 | $1.20 | $0.06 |
+| Qwen 3.7 Max | `Qwen/Qwen3.7-Max` | $1.25 | $3.75 | $0.125 |
+| DeepSeek V4 Pro | `deepseek-ai/DeepSeek-V4-Pro` | $1.74 | $3.48 | $0.20 |
 
 ### Selecting a model (flag order matters)
 
@@ -127,7 +139,7 @@ togetherlink --main together-kimi-k2-7-code claude -p "task"   # Claude matches 
 
 Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (Kimi K3), not the model you asked for. Always use the long form with the flag first.
 
-Selectable models (Together API id):
+Capabilities:
 
 - `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
 - `zai-org/GLM-5.2` — GLM 5.2. Text-only, 256K context, reasoning.
