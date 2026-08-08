@@ -206,6 +206,29 @@ describe("Claude proxy compatibility API", () => {
     expect(overriddenEnv.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).toBe("0");
   });
 
+  test("enables Claude cross-session messaging while preserving an inherited value", () => {
+    vi.stubEnv("CLAUDE_CODE_HARBOR_KITE", undefined);
+
+    const defaultEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(defaultEnv.CLAUDE_CODE_HARBOR_KITE).toBe("1");
+
+    vi.stubEnv("CLAUDE_CODE_HARBOR_KITE", "inherited");
+    const inheritedEnv = buildClaudeEnv({
+      apiKey: "test-together-key",
+      modelId: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+      modelName: GLM_5_2.name,
+      proxyUrl: "http://127.0.0.1:7878/session/test",
+      authToken: "local-token",
+    });
+    expect(inheritedEnv.CLAUDE_CODE_HARBOR_KITE).toBe("inherited");
+  });
+
   test("keeps detached Claude background sessions registered after the launcher exits", () => {
     expect(claudeRunsInBackground(["--bg", "do work"])).toBe(true);
     expect(claudeRunsInBackground(["--background", "do work"])).toBe(true);
