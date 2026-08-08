@@ -89,6 +89,12 @@ export function buildClaudeEnv({
   if (!env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT?.trim()) {
     env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT = "1";
   }
+  // Claude Code 2.1.224+ gates same-machine cross-session messaging behind an
+  // account rollout. Its process-local override enables the peer inbox socket
+  // for TogetherLink sessions before that rollout reaches the current account.
+  if (env.CLAUDE_CODE_HARBOR_KITE === undefined) {
+    env.CLAUDE_CODE_HARBOR_KITE = "1";
+  }
   if (env.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined) {
     env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS);
   }

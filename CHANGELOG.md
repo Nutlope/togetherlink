@@ -3,7 +3,7 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
-## 0.7.7 - 2026-08-01
+## 0.7.8 - 2026-08-09
 
 ### Added
 
@@ -30,6 +30,22 @@ version 0.6.5; earlier release history remains available in Git.
 
 - Added deterministic coverage for compaction v1/v2, memories, native route pass-through, response
   item normalization, transport validation, context metadata, and error propagation.
+
+## 0.7.7 - 2026-08-08
+
+### Changed
+
+- Enabled Claude Code same-machine cross-session messaging by default for TogetherLink-launched
+  sessions on supported Claude Code versions.
+- Enforced Claude Code's concise system prompt for Together gateway models while preserving an
+  explicit user override.
+- Expanded the dashboard with audience, geography, session lifecycle, harness usage, and likely
+  unique-user metrics, including admin traffic exclusion.
+
+### Tests
+
+- Added launcher regression coverage for the cross-session messaging override and inherited
+  environment values.
 
 ## 0.7.6 - 2026-08-01
 
