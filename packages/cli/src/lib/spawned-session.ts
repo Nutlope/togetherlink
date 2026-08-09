@@ -7,7 +7,7 @@ import {
   telemetryDisabledByEnvironment,
 } from "./telemetry.js";
 
-export type SpawnedSessionAgent = "grok" | "opencode" | "pi";
+export type SpawnedSessionAgent = "grok" | "omp" | "opencode" | "pi";
 
 export type SpawnedSessionResult = {
   status: number | null;

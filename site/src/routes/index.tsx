@@ -8,7 +8,7 @@ const githubUrl = "https://github.com/Nutlope/togetherlink";
 const siteUrl = "https://togetherlink.vercel.app/";
 const pageTitle = "Use Together AI Models in Claude Code, Codex & ChatGPT";
 const pageDescription =
-  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, and the ChatGPT desktop app with togetherlink.";
+  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, Oh My Pi, and the ChatGPT desktop app with togetherlink.";
 const togetherReferralUrl =
   "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
@@ -65,6 +65,22 @@ const features = [
     accent: undefined,
   },
   {
+    title: "Oh My Pi",
+    command: "tomp",
+    tag: "100% supported",
+    tagTone: "live",
+    body: (
+      <>
+        Oh My Pi launches with a temporary Together model catalog while keeping normal OMP session
+        persistence and the configured OMP coding experience.
+      </>
+    ),
+    supportLabel: "Support",
+    supportValue: "100%",
+    icon: <OmpMark />,
+    accent: undefined,
+  },
+  {
     title: "Pi Code",
     command: "tpi",
     tag: "100% supported",
@@ -101,12 +117,13 @@ const heroTools = [
   { name: "ChatGPT App", command: "chatgpt", icon: <ChatGPTHeroMark /> },
   { name: "OpenCode", command: "topencode", icon: <OpenCodeMark /> },
   { name: "Codex CLI", command: "tcodex", icon: <CodexMark /> },
+  { name: "Oh My Pi", command: "tomp", icon: <OmpMark /> },
   { name: "Pi Code", command: "tpi", icon: <PiMark /> },
   { name: "Grok Build", command: "tgrok", icon: <GrokMark /> },
 ];
 
 const heroProof: ProofItem[] = [
-  { value: "6", label: "integrations" },
+  { value: "7", label: "integrations" },
   { value: "1", label: "install command" },
   { value: "GitHub", label: "see the code", href: githubUrl, icon: <GitHubMark /> },
 ];
@@ -118,6 +135,7 @@ const heroToolPositions = [
   "sm:absolute sm:left-[5%] sm:bottom-[7%]",
   "sm:absolute sm:left-1/2 sm:bottom-[7%] sm:-translate-x-1/2",
   "sm:absolute sm:right-[5%] sm:bottom-[7%]",
+  "sm:absolute sm:left-[2%] sm:top-1/2 sm:-translate-y-1/2",
 ];
 
 const codexAppCommands = [
@@ -178,7 +196,7 @@ export const Route = createFileRoute("/")({
       {
         property: "og:image:alt",
         content:
-          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code",
+          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, and Oh My Pi",
       },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: pageTitle },
@@ -187,7 +205,7 @@ export const Route = createFileRoute("/")({
       {
         name: "twitter:image:alt",
         content:
-          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code",
+          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, and Oh My Pi",
       },
     ],
     links: [{ rel: "canonical", href: siteUrl }],
@@ -534,18 +552,19 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, <code>tgrok</code>, and <code>tpi</code>.
+          <code>tcodex</code>, <code>tgrok</code>, <code>tomp</code>, and <code>tpi</code>.
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>, <code>tgrok</code>,
-          or <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink chatgpt</code>{" "}
-          (alpha), and restore it with <code>togetherlink chatgpt --restore</code>. On first launch
-          it asks once for your Together API key - press Enter to skip and add it later.
+          <code>tomp</code>, or <code>tpi</code>. For the ChatGPT desktop app run{" "}
+          <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
+          <code>togetherlink chatgpt --restore</code>. On first launch it asks once for your
+          Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change
           your mind? Just stop using it - no agent config was saved, so your subscriptions and your
-          OpenCode/Claude Code/Codex CLI/Grok Build/Pi Code config are untouched.
+          OpenCode/Claude Code/Codex CLI/Grok Build/Oh My Pi/Pi Code config are untouched.
         </Step>
       </section>
 
@@ -792,6 +811,17 @@ function PiMark() {
       />
       <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
     </svg>
+  );
+}
+
+function OmpMark() {
+  return (
+    <span
+      className="inline-flex size-[26px] -translate-y-px items-center justify-center font-mono text-[25px] leading-none font-semibold"
+      aria-hidden="true"
+    >
+      ⌥
+    </span>
   );
 }
 

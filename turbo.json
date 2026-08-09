@@ -151,6 +151,25 @@
         "$TURBO_ROOT$/packages/models/src/**"
       ],
       "outputs": []
+    },
+    "test:gauntlet:omp": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "src/Omp.test.ts",
+        "src/harnesses/omp.ts",
+        "src/assert.ts",
+        "src/command.ts",
+        "src/context.ts",
+        "src/json-lines.ts",
+        "src/paths.ts",
+        "src/types.ts",
+        "$TURBO_ROOT$/packages/cli/src/**",
+        "$TURBO_ROOT$/packages/models/src/**"
+      ],
+      "outputs": []
     }
   }
 }

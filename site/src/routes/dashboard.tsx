@@ -316,11 +316,11 @@ function DashboardRoute() {
       </header>
 
       <div className="mb-6 rounded-md border border-line-strong bg-code px-4 py-3 text-sm text-muted">
-        Session lifecycle covers Claude, Codex, ChatGPT Desktop, Grok Build, OpenCode, and Pi Code
-        when launched through togetherlink. Token and cost totals are available for the proxied
-        Claude, Codex, and ChatGPT paths only. A likely unique user has either multiple distinct
-        sessions or at least one usage-tracked session; raw one-off telemetry identities are
-        excluded.
+        Session lifecycle covers Claude, Codex, ChatGPT Desktop, Grok Build, Oh My Pi, OpenCode, and
+        Pi Code when launched through togetherlink. Token and cost totals are available for the
+        proxied Claude, Codex, and ChatGPT paths only. A likely unique user has either multiple
+        distinct sessions or at least one usage-tracked session; raw one-off telemetry identities
+        are excluded.
       </div>
 
       {loading && !data && <p className="text-sm text-muted">Loading…</p>}

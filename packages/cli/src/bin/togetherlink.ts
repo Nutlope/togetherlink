@@ -116,6 +116,7 @@ async function runInteractiveLauncher(): Promise<void> {
       { value: "grok", label: "Grok Build", hint: "tgrok" },
       { value: "claude", label: "Claude Code", hint: "tclaude" },
       { value: "pi", label: "Pi Code", hint: "tpi" },
+      { value: "omp", label: "Oh My Pi", hint: "tomp" },
       { value: "opencode", label: "OpenCode", hint: "topencode" },
       { value: "chatgpt", label: "ChatGPT Desktop", hint: "chatgpt" },
       { value: "configure", label: "Configure", hint: "API keys and detected tools" },
@@ -269,6 +270,7 @@ async function main() {
     (invocation.command === "claude" ||
       invocation.command === "codex" ||
       invocation.command === "grok" ||
+      invocation.command === "omp" ||
       invocation.command === "opencode" ||
       invocation.command === "pi") &&
     invocation.command !== undefined

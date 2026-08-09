@@ -92,4 +92,12 @@ describe("harness invocation parsing", () => {
     expect(invocation.command).toBe("grok");
     expect(invocation.flags.passthrough).toEqual(["--output-format", "streaming-json", "-p", "hi"]);
   });
+
+  test("recognizes omp and forwards its native flags", () => {
+    const parsed = parseArgs(["omp", "--", "--mode", "json", "-p", "hi"]);
+    const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
+
+    expect(invocation.command).toBe("omp");
+    expect(invocation.flags.passthrough).toEqual(["--mode", "json", "-p", "hi"]);
+  });
 });

@@ -2,7 +2,7 @@
 
 [![Live Agent Gauntlet](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml/badge.svg?branch=main)](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml)
 
-![TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code](site/public/togetherlink-cover.png)
+![TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, and Oh My Pi](site/public/togetherlink-cover.png)
 
 Use [Together AI](https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app) models from local coding-agent CLIs.
 
@@ -12,7 +12,7 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, `tomp`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | sh
@@ -31,6 +31,7 @@ togetherlink codex        # alias: tcodex
 togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (alias: codex-app)
 togetherlink claude       # alias: tclaude
 togetherlink grok         # alias: tgrok
+togetherlink omp          # alias: tomp
 togetherlink pi           # alias: tpi
 togetherlink opencode     # alias: topencode
 ```
@@ -65,6 +66,7 @@ togetherlink chatgpt [--model <model>] [--restore]  (alpha, alias: codex-app)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
 togetherlink grok [...]        (alias: tgrok)
+togetherlink omp [...]         (alias: tomp)
 togetherlink pi [...]          (alias: tpi)
 togetherlink opencode [...]    (alias: topencode)
 ```

@@ -6,7 +6,7 @@
 # Installs the togetherlink CLI as a Bun-target JS bundle at
 # ~/.togetherlink/bin/togetherlink.js, with a `togetherlink` wrapper script on
 # PATH that runs it with `bun`. Installs Bun for the user if `bun` isn't on
-# PATH. Also installs `tclaude`, `topencode`, `tcodex`, `tgrok`, and `tpi` convenience wrappers.
+# PATH. Also installs `tclaude`, `topencode`, `tcodex`, `tgrok`, `tomp`, and `tpi` convenience wrappers.
 #
 # After install, the CLI prompts once for a Together API key on first use
 # (Enter skips — the key is optional). The CLI self-updates in the background.
@@ -65,7 +65,7 @@ exec bun "$BIN_DIR/togetherlink.js" "\$@"
 EOF
 chmod +x "$BIN_DIR/togetherlink"
 
-# Short aliases: tclaude / topencode / tcodex / tgrok / tpi
+# Short aliases: tclaude / topencode / tcodex / tgrok / tomp / tpi
 cat > "$BIN_DIR/tclaude" <<EOF
 #!/usr/bin/env sh
 exec bun "$BIN_DIR/togetherlink.js" claude "\$@"
@@ -90,17 +90,23 @@ exec bun "$BIN_DIR/togetherlink.js" grok "\$@"
 EOF
 chmod +x "$BIN_DIR/tgrok"
 
+cat > "$BIN_DIR/tomp" <<EOF
+#!/usr/bin/env sh
+exec bun "$BIN_DIR/togetherlink.js" omp "\$@"
+EOF
+chmod +x "$BIN_DIR/tomp"
+
 cat > "$BIN_DIR/tpi" <<EOF
 #!/usr/bin/env sh
 exec bun "$BIN_DIR/togetherlink.js" pi "\$@"
 EOF
 chmod +x "$BIN_DIR/tpi"
 
-ok "Wrappers installed: togetherlink, tclaude, topencode, tcodex, tgrok, tpi → $BIN_DIR"
+ok "Wrappers installed: togetherlink, tclaude, topencode, tcodex, tgrok, tomp, tpi → $BIN_DIR"
 
 # Remove old togetherlink-owned wrappers that used the upstream agent names.
 # Current installs must never shadow `claude`, `codex`, or `opencode`; users
-# should get the real CLIs unless they explicitly run tclaude/tcodex/topencode/tgrok/tpi.
+# should get the real CLIs unless they explicitly run tclaude/tcodex/topencode/tgrok/tomp/tpi.
 remove_legacy_shadow_wrapper() {
   name="$1"
   path="$BIN_DIR/$name"
@@ -110,7 +116,7 @@ remove_legacy_shadow_wrapper() {
   if [ -L "$path" ]; then
     target="$(readlink "$path" 2>/dev/null || true)"
     case "$target" in
-      "$BIN_DIR/tclaude"|"$BIN_DIR/tcodex"|"$BIN_DIR/topencode"|"$BIN_DIR/tgrok"|"$BIN_DIR/tpi"|"$BIN_DIR/togetherlink"|"$BIN_DIR/togetherlink.js")
+      "$BIN_DIR/tclaude"|"$BIN_DIR/tcodex"|"$BIN_DIR/topencode"|"$BIN_DIR/tgrok"|"$BIN_DIR/tomp"|"$BIN_DIR/tpi"|"$BIN_DIR/togetherlink"|"$BIN_DIR/togetherlink.js")
         rm -f "$path"
         ok "Removed old togetherlink shadow command: $path"
         ;;
@@ -184,6 +190,7 @@ if LINK_DIR="$(find_writable_path_dir)"; then
   install_link topencode "$BIN_DIR/topencode"
   install_link tcodex "$BIN_DIR/tcodex"
   install_link tgrok "$BIN_DIR/tgrok"
+  install_link tomp "$BIN_DIR/tomp"
   install_link tpi "$BIN_DIR/tpi"
   if [ "$links_changed" -gt 0 ]; then
     ok "Linked $links_changed command(s) into current PATH → $LINK_DIR"

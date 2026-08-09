@@ -5,6 +5,7 @@ import { claudeScenarios } from "./harnesses/claude.js";
 import { codexScenarios } from "./harnesses/codex.js";
 import { grokScenarios } from "./harnesses/grok.js";
 import { opencodeScenarios } from "./harnesses/opencode.js";
+import { ompScenarios } from "./harnesses/omp.js";
 import { piScenarios } from "./harnesses/pi.js";
 import type { Scenario, TestContext } from "./types.js";
 
@@ -43,6 +44,10 @@ function smokeScenarios(): Scenario[] {
     ...pickScenarios(opencodeScenarios(), [
       "opencode: basic streaming headless response",
       "opencode: bash tool call",
+    ]),
+    ...pickScenarios(ompScenarios(), [
+      "omp: basic streaming json response with cost",
+      "omp: bash tool call with cost",
     ]),
     ...pickScenarios(piScenarios(), [
       "pi: basic streaming json response with cost",
