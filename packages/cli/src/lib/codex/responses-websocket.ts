@@ -65,6 +65,19 @@ export function handleCodexResponsesWebsocket(
       );
       return;
     }
+    const continuesTogetherResponse =
+      lastRequest !== undefined &&
+      typeof rawBody.previous_response_id === "string" &&
+      rawBody.previous_response_id === lastResponseId;
+    if (isNativeRelayTurn(rawBody, options) && !continuesTogetherResponse) {
+      const relay = ensureNativeRelay();
+      const nativeBody = sanitizeNativeResponsesReplay(rawBody);
+      lastRequest = undefined;
+      lastResponseId = undefined;
+      lastResponseOutput = [];
+      relay.send({ ...nativeBody, type: "response.create" });
+      return;
+    }
     const body = expandIncrementalRequest(rawBody, lastRequest, lastResponseId, lastResponseOutput);
     if (body === undefined) {
       sendPreviousResponseNotFound(ws);

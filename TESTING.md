@@ -343,7 +343,7 @@ try {
     clientInfo: {
       name: "togetherlink-debug",
       title: "Togetherlink Debug",
-      version: "0.7.7",
+      version: "0.7.8",
     },
     capabilities: {
       experimentalApi: true,

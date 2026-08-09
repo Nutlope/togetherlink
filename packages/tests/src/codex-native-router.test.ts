@@ -185,6 +185,25 @@ describe("Codex additive native/Together router", () => {
     expect(response.headers.get("x-request-id")).toBe("request-123");
   });
 
+  test("ends a native response cleanly when its upstream body fails after headers", async () => {
+    const response = await requestProxy(
+      { model: "gpt-5.6-sol", input: "hello" },
+      { authorization: "Bearer chatgpt-oauth" },
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"partial":true}'));
+              queueMicrotask(() => controller.error(new Error("upstream body broke")));
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   test.runIf(typeof zlib.zstdCompressSync === "function")(
     "decodes zstd desktop requests before native forwarding",
     async () => {

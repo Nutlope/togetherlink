@@ -64,6 +64,8 @@ export type ModelDefinition = {
   tool_call: boolean;
   /** Optional Codex history-compaction threshold from provider-specific model metadata. */
   codexAutoCompactTokenLimit?: number;
+  /** Optional first-run message shown when Codex makes this model newly available. */
+  codexAvailabilityNuxMessage?: string;
   modalities: ModelModalities;
 };
 
@@ -93,6 +95,8 @@ export const KIMI_K3: ModelDefinition = {
   temperature: true,
   tool_call: true,
   codexAutoCompactTokenLimit: 900_000,
+  codexAvailabilityNuxMessage:
+    "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
   modalities: { input: ["text", "image"], output: ["text"] },
 };
 

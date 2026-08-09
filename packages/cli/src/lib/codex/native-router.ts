@@ -1,5 +1,6 @@
 import * as zlib from "node:zlib";
 import { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
+import { NATIVE_CODEX_FORWARD_HEADERS } from "./native-headers.js";
 import type { ResponsesRequest } from "./wire-types.js";
 
 export const DEFAULT_CODEX_NATIVE_BASE_URL = "https://chatgpt.com/backend-api/codex";
@@ -43,30 +44,6 @@ export class CodexRequestError extends Error {
     this.status = status;
   }
 }
-
-const FORWARD_REQUEST_HEADERS = new Set([
-  "authorization",
-  "chatgpt-account-id",
-  "openai-beta",
-  "originator",
-  "session_id",
-  "session-id",
-  "thread-id",
-  "version",
-  "x-client-request-id",
-  "x-codex-beta-features",
-  "x-codex-image-turn-id",
-  "x-codex-installation-id",
-  "x-codex-parent-thread-id",
-  "x-codex-turn-metadata",
-  "x-codex-turn-state",
-  "x-codex-window-id",
-  "x-oai-attestation",
-  "x-openai-internal-codex-responses-lite",
-  "x-openai-memgen-request",
-  "x-openai-subagent",
-  "x-responsesapi-include-timing-metrics",
-]);
 
 const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   "connection",
@@ -205,7 +182,7 @@ function nativeRequestHeaders(
     "Content-Length": String(contentLength),
     "Accept-Encoding": "identity",
   };
-  for (const name of FORWARD_REQUEST_HEADERS) {
+  for (const name of NATIVE_CODEX_FORWARD_HEADERS) {
     const value = incoming[name];
     if (value !== undefined) {
       headers[name] = Array.isArray(value) ? value.join(", ") : value;

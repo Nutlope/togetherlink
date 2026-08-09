@@ -44,6 +44,24 @@ function anthropicError(status: number, type: string, message: string): Together
 }
 
 describe("daemon error rendering (#2 — error contract at the seam)", () => {
+  test("ends an already-started streaming response without writing a second header block", () => {
+    let endCount = 0;
+    const res = {
+      headersSent: true,
+      writableEnded: false,
+      writeHead: () => {
+        throw new Error("must not write headers twice");
+      },
+      end: () => {
+        endCount += 1;
+      },
+    } as unknown as ServerResponse;
+
+    renderDaemonError(res, new Error("upstream stream failed"), "codex-app");
+
+    expect(endCount).toBe(1);
+  });
+
   test("Claude agent + Anthropic error → Anthropic error shape", () => {
     const m = mockRes();
     renderDaemonError(m.res, anthropicError(429, "rate_limit_error", "slow down"), "claude");

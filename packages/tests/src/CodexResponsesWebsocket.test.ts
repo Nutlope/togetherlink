@@ -139,6 +139,50 @@ describe("Codex Responses WebSocket", () => {
     }
   });
 
+  test("preserves native prewarm and previous_response_id continuations on one websocket", async () => {
+    const upstream = await startFakeNativeUpstream();
+    try {
+      const { ws, close } = await openWebsocket({
+        nativeBaseUrl: upstream.httpBaseUrl,
+        upgradeHeaders: {},
+      });
+      try {
+        const prewarmEvents = await collectTurn(ws, {
+          type: "response.create",
+          model: "gpt-5.2-codex",
+          input: [{ type: "message", role: "user", content: "hello" }],
+          generate: false,
+        });
+        const prewarmId = responseId(prewarmEvents);
+
+        const responseEvents = await collectTurn(ws, {
+          type: "response.create",
+          model: "gpt-5.2-codex",
+          previous_response_id: prewarmId,
+          input: [],
+        });
+        const response = responseId(responseEvents);
+
+        const continuationEvents = await collectTurn(ws, {
+          type: "response.create",
+          model: "gpt-5.2-codex",
+          previous_response_id: response,
+          input: [{ type: "function_call_output", call_id: "call_1", output: "done" }],
+        });
+
+        expect(continuationEvents.at(-1)?.type).toBe("response.completed");
+        expect(upstream.turns).toHaveLength(3);
+        expect(upstream.turns[0]).toMatchObject({ generate: false });
+        expect(upstream.turns[1]).toMatchObject({ previous_response_id: prewarmId });
+        expect(upstream.turns[2]).toMatchObject({ previous_response_id: response });
+      } finally {
+        await close();
+      }
+    } finally {
+      await upstream.close();
+    }
+  });
+
   test("forces the responses_websockets beta flag when the client upgrade lacks it", async () => {
     const upstream = await startFakeNativeUpstream();
     try {
@@ -149,6 +193,39 @@ describe("Codex Responses WebSocket", () => {
       await close();
       const headers = await upstream.receivedHeaders;
       expect(headers["openai-beta"]).toBe("responses_websockets=2026-02-06");
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  test("closes the downstream safely when the native upstream disappears abnormally", async () => {
+    const upstream = await startFakeNativeUpstream({ terminateAfterMessage: true });
+    try {
+      const { ws, close } = await openWebsocket({ nativeBaseUrl: upstream.httpBaseUrl });
+      try {
+        const closed = new Promise<number>((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error("downstream websocket stayed open after upstream termination")),
+            1_000,
+          );
+          ws.once("close", (code) => {
+            clearTimeout(timeout);
+            resolve(code);
+          });
+          ws.once("error", reject);
+        });
+        ws.send(
+          JSON.stringify({
+            type: "response.create",
+            model: "gpt-5.2-codex",
+            input: [{ type: "message", role: "user", content: "hello" }],
+          }),
+        );
+
+        expect(await closed).toBe(1006);
+      } finally {
+        await close();
+      }
     } finally {
       await upstream.close();
     }
@@ -285,11 +362,14 @@ type FakeNativeUpstream = {
   httpBaseUrl: string;
   receivedTurn: Promise<Record<string, unknown>>;
   receivedHeaders: Promise<http.IncomingHttpHeaders>;
+  turns: Array<Record<string, unknown>>;
   close: () => Promise<void>;
 };
 
 /** Minimal stand-in for wss://chatgpt.com/backend-api/codex/responses. */
-async function startFakeNativeUpstream(): Promise<FakeNativeUpstream> {
+async function startFakeNativeUpstream(
+  options: { terminateAfterMessage?: boolean } = {},
+): Promise<FakeNativeUpstream> {
   const wss = new WebSocketServer({ noServer: true });
   const server = http.createServer((_req, res) => {
     res.writeHead(404);
@@ -303,12 +383,18 @@ async function startFakeNativeUpstream(): Promise<FakeNativeUpstream> {
   const receivedHeaders = new Promise<http.IncomingHttpHeaders>((resolve) => {
     resolveHeaders = resolve;
   });
+  const turns: Array<Record<string, unknown>> = [];
   server.on("upgrade", (req, socket, head) => {
     resolveHeaders(req.headers);
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.on("message", (raw) => {
         const turn = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        turns.push(turn);
         resolveTurn(turn);
+        if (options.terminateAfterMessage) {
+          ws.terminate();
+          return;
+        }
         const model = typeof turn.model === "string" ? turn.model : "unknown";
         ws.send(
           JSON.stringify({
@@ -337,6 +423,7 @@ async function startFakeNativeUpstream(): Promise<FakeNativeUpstream> {
     httpBaseUrl: `http://127.0.0.1:${port}/backend-api/codex`,
     receivedTurn,
     receivedHeaders,
+    turns,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

@@ -23,13 +23,18 @@ version 0.6.5; earlier release history remains available in Git.
 
 - Preserved Together context-length and HTTP error codes in Responses errors instead of hiding
   them behind generic proxy failures.
-- Rejected unsupported WebSocket and non-SSE Responses transports immediately so ChatGPT Desktop
-  can fall back cleanly instead of failing later in a turn.
+- Added native and Together-backed Responses-over-WebSocket support for ChatGPT Desktop, including
+  incremental continuations, the `/responses` compatibility alias, and safe abnormal-close handling.
+- Kept default Together output budgets inside each model's remaining context window, including a
+  safety margin for request-estimation error.
+- Ended partially-started native responses cleanly when the upstream body fails after headers have
+  already been sent.
 
 ### Tests
 
-- Added deterministic coverage for compaction v1/v2, memories, native route pass-through, response
-  item normalization, transport validation, context metadata, and error propagation.
+- Added deterministic coverage for compaction v1/v2, memories, native route pass-through,
+  Responses-over-WebSocket routing and continuation, response item normalization, transport
+  validation, context budgeting, and error propagation.
 
 ## 0.7.7 - 2026-08-08
 

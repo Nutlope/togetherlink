@@ -32,18 +32,15 @@ import { toResponsesResponse } from "./translate-response.js";
 import { callTogetherWithNativeTools } from "./together-call.js";
 import { recordUsage } from "./usage.js";
 import { streamResponseFromTogether } from "./stream.js";
+import {
+  CODEX_COMPACTION_PATH,
+  CODEX_MEMORIES_PATH,
+  isCodexNativeOnlyPath,
+  isCodexResponsesPath,
+  normalizeCodexPath,
+} from "./routes.js";
 import type { ResponsesRequest, ResponsesTool } from "./wire-types.js";
 import type { TogetherClientOptions } from "../together-client.js";
-
-const CODEX_V1_ALIAS_PATHS = new Set([
-  "/models",
-  "/responses",
-  "/responses/compact",
-  "/alpha/search",
-  "/images/generations",
-  "/images/edits",
-  "/memories/trace_summarize",
-]);
 
 export type CodexProxyOptions = {
   apiKey: string;
@@ -68,7 +65,7 @@ export async function handleCodexProxyRequest(
   options: CodexProxyOptions,
 ): Promise<void> {
   const requestedPath = requestPath(req);
-  const path = CODEX_V1_ALIAS_PATHS.has(requestedPath) ? `/v1${requestedPath}` : requestedPath;
+  const path = normalizeCodexPath(requestedPath);
   const perf = createProxyPerfTracer(
     "codex.proxy",
     {
@@ -90,10 +87,9 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  const nativeOnlyPath =
-    path === "/v1/images/generations" || path === "/v1/images/edits" || path === "/v1/alpha/search";
-  const memoriesPath = path === "/v1/memories/trace_summarize";
-  const responsesPath = path === "/v1/responses" || path === "/v1/responses/compact";
+  const nativeOnlyPath = isCodexNativeOnlyPath(path);
+  const memoriesPath = path === CODEX_MEMORIES_PATH;
+  const responsesPath = isCodexResponsesPath(path);
   if (
     req.method === "POST" &&
     (nativeOnlyPath || memoriesPath || responsesPath) &&
@@ -177,7 +173,7 @@ export async function handleCodexProxyRequest(
     if (nativeBody.input !== undefined) {
       nativeBody.input = normalizeNativeCompactionInput(nativeBody.input);
     }
-    if (path !== "/v1/responses/compact") {
+    if (path !== CODEX_COMPACTION_PATH) {
       delete nativeBody.previous_response_id;
     }
     await forwardNativeCodexRequest(req, res, {
@@ -189,7 +185,11 @@ export async function handleCodexProxyRequest(
     perf.end({ status: res.statusCode, native: true, model: body.model });
     return;
   }
+  options.costTracker?.noteRequestBytes(request.rawBytes);
   options.costTracker?.beginRequest();
+  const estimatedInputTokens =
+    options.costTracker?.tokenEstimator.estimate(request.rawBytes) ??
+    Math.max(1, Math.ceil(request.rawBytes / 4));
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     if (upstreamAbort.signal.aborted) {
@@ -214,12 +214,13 @@ export async function handleCodexProxyRequest(
       Boolean(body.stream),
       toolTranslation,
       requestModel,
+      estimatedInputTokens,
     );
     return { nativeToolCount, toolTranslation, requestModel, translatedPayload };
   });
   const { nativeToolCount, toolTranslation, requestModel, translatedPayload } = translated;
 
-  const compactV1 = path === "/v1/responses/compact";
+  const compactV1 = path === CODEX_COMPACTION_PATH;
   const compactV2 = isTogetherCompactionV2(body);
   if (compactV1 || compactV2) {
     const compactBody: ResponsesRequest = { ...body, tools: [] };
@@ -234,6 +235,7 @@ export async function handleCodexProxyRequest(
         false,
         { tools: [], mappings: new Map(), nativeTools: [] },
         requestModel,
+        estimatedInputTokens,
       ),
       requestModel.definition,
     );

@@ -58,6 +58,23 @@ describe("Codex max output forwarding", () => {
     expect(payload.max_tokens).toBe(32_000);
   });
 
+  test("reserves enough context for input before Codex reaches its compaction threshold", () => {
+    const request: ResponsesRequest = {
+      input: [{ type: "message", role: "user", content: "long conversation" }],
+    };
+
+    const payload = toChatPayload(
+      request,
+      options,
+      false,
+      EMPTY_CODEX_TOOL_TRANSLATION,
+      resolveModel(),
+      75_000,
+    );
+
+    expect(payload.max_tokens).toBe(24_488);
+  });
+
   test("passes an explicit client max_output_tokens through unchanged", () => {
     const request: ResponsesRequest = {
       max_output_tokens: 1_234,

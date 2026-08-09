@@ -50,6 +50,16 @@ describe("daemon Responses WebSocket routing", () => {
     }
   });
 
+  test("accepts the compatibility WebSocket upgrade alias at /responses", async () => {
+    const token = await registerCodexAppSessionWithFakeKey(daemon);
+    try {
+      const response = await requestWebSocketUpgrade(daemon.url, `/session/${token}/responses`);
+      expect(response).toMatch(/^HTTP\/1\.1 101 Switching Protocols\r\n/i);
+    } finally {
+      await deleteSession(daemon, token);
+    }
+  });
+
   test("reuses a prewarmed Codex socket without running duplicate upstream inference", async () => {
     const upstreamRequests: Array<Record<string, unknown>> = [];
     const upstream = http.createServer(async (req, res) => {

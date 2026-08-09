@@ -18,6 +18,7 @@ import {
 } from "../codex/proxy.js";
 import { handleCodexResponsesWebsocket } from "../codex/responses-websocket.js";
 import { CodexRequestError } from "../codex/native-router.js";
+import { isCodexResponsesWebsocketPath } from "../codex/routes.js";
 import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { readAppRegistration } from "./app-registration.js";
@@ -561,7 +562,7 @@ async function handleDaemonUpgrade(
   // matches, so re-reading it now gives the path with /session/<token>
   // stripped — same trick handleDaemonRequest's downstream handlers rely on.
   const innerPath = sessionRoute ? requestPath(req) : undefined;
-  if (innerPath !== "/v1/responses") {
+  if (!innerPath || !isCodexResponsesWebsocketPath(innerPath)) {
     socket.on("error", () => {});
     socket.end(REJECT_UPGRADE);
     return;

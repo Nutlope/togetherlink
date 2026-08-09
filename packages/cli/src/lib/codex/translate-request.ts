@@ -33,6 +33,7 @@ const CODEX_IDENTITY_PROMPT =
 
 const CODEX_MEMORY_MODEL_ENV = "TOGETHERLINK_CODEX_MEMORY_MODEL";
 const CODEX_MEMORY_REQUESTED_MODELS = new Set(["gpt-5.4-mini"]);
+const CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 
 export const EMPTY_CODEX_TOOL_TRANSLATION: CodexToolTranslation = {
   tools: [],
@@ -65,6 +66,7 @@ export function toChatPayload(
   stream: boolean,
   toolTranslation: CodexToolTranslation,
   requestModel: ResolvedCodexRequestModel,
+  estimatedInputTokens = 0,
 ): Record<string, unknown> {
   const messages = toChatMessages(body, options, toolTranslation, requestModel);
   const translatedReasoningEffort = codexReasoningEffort(body.reasoning, requestModel.definition);
@@ -75,7 +77,9 @@ export function toChatPayload(
   return {
     model: requestModel.targetModelId,
     messages: messagesWithNativePrompt,
-    max_tokens: body.max_output_tokens ?? requestModel.definition.limit.output,
+    max_tokens:
+      body.max_output_tokens ??
+      defaultMaxOutputTokens(requestModel.definition, estimatedInputTokens),
     temperature: body.temperature,
     ...(toolTranslation.tools.length > 0 ? { tools: toolTranslation.tools } : {}),
     ...(toolTranslation.tools.length > 0
@@ -87,6 +91,19 @@ export function toChatPayload(
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
   };
+}
+
+function defaultMaxOutputTokens(
+  modelDefinition: ModelDefinition,
+  estimatedInputTokens: number,
+): number {
+  if (estimatedInputTokens <= 0) {
+    return modelDefinition.limit.output;
+  }
+  const availableOutputTokens = Math.floor(
+    modelDefinition.limit.context - estimatedInputTokens - CODEX_CONTEXT_OUTPUT_SAFETY_TOKENS,
+  );
+  return Math.max(1, Math.min(modelDefinition.limit.output, availableOutputTokens));
 }
 
 export function resolveCodexRequestModel(

@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
 import type { ClientOptions } from "ws";
+import { NATIVE_CODEX_FORWARD_HEADERS } from "./native-headers.js";
 import type { CodexProxyOptions } from "./proxy.js";
 
 /**
@@ -19,34 +20,6 @@ import type { CodexProxyOptions } from "./proxy.js";
 /** Mirrors CLIProxyAPI's codexResponsesWebsocketBetaHeaderValue. */
 const RESPONSES_WEBSOCKET_BETA = "responses_websockets=2026-02-06";
 const UPSTREAM_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-
-/** Headers copied from the client's HTTP upgrade onto the upstream dial.
- * Superset of CLIProxyAPI's applyCodexWebsocketHeaders carry-over list plus
- * the native-router's HTTP forward whitelist. */
-const RELAY_UPGRADE_HEADERS = new Set([
-  "authorization",
-  "chatgpt-account-id",
-  "conversation_id",
-  "openai-beta",
-  "originator",
-  "session_id",
-  "session-id",
-  "user-agent",
-  "version",
-  "x-client-request-id",
-  "x-codex-beta-features",
-  "x-codex-image-turn-id",
-  "x-codex-installation-id",
-  "x-codex-parent-thread-id",
-  "x-codex-turn-metadata",
-  "x-codex-turn-state",
-  "x-codex-window-id",
-  "x-oai-attestation",
-  "x-openai-internal-codex-responses-lite",
-  "x-openai-memgen-request",
-  "x-openai-subagent",
-  "x-responsesapi-include-timing-metrics",
-]);
 
 export type NativeWebsocketRelay = {
   send(body: Record<string, unknown>): void;
@@ -94,7 +67,13 @@ export function relayNativeCodexWebsocket(
     closed = true;
     clearIdleTimer();
     if (downstream.readyState === downstream.OPEN) {
-      downstream.close(code, reason);
+      // Reserved codes describe a connection that disappeared without a
+      // close frame and cannot themselves be sent in a close frame.
+      if (code === 1005 || code === 1006 || code === 1015) {
+        downstream.terminate();
+      } else {
+        downstream.close(code, reason);
+      }
     }
   });
   upstream.on("error", (err: Error) => {
@@ -155,7 +134,7 @@ function buildUpstreamHeaders(
 ): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(upgradeHeaders)) {
-    if (value === undefined || !RELAY_UPGRADE_HEADERS.has(name.toLowerCase())) {
+    if (value === undefined || !NATIVE_CODEX_FORWARD_HEADERS.has(name.toLowerCase())) {
       continue;
     }
     headers[name] = Array.isArray(value) ? value.join(", ") : value;
