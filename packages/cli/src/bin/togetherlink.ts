@@ -114,6 +114,12 @@ async function runInteractiveLauncher(): Promise<void> {
     options: [
       { value: "codex", label: "Codex", hint: "tcodex" },
       { value: "grok", label: "Grok Build", hint: "tgrok" },
+      { value: "hermes", label: "Hermes Agent", hint: "thermes" },
+      {
+        value: "hermes-desktop",
+        label: "Hermes Desktop",
+        hint: "togetherlink hermes desktop",
+      },
       { value: "claude", label: "Claude Code", hint: "tclaude" },
       { value: "pi", label: "Pi Code", hint: "tpi" },
       { value: "opencode", label: "OpenCode", hint: "topencode" },
@@ -140,6 +146,10 @@ async function runInteractiveLauncher(): Promise<void> {
     if (result.payload) {
       console.log(JSON.stringify(result.payload, null, 2));
     }
+    return;
+  }
+  if (choice === "hermes-desktop") {
+    await dispatchHarnessCommand("hermes", undefined, { passthrough: ["desktop"] });
     return;
   }
 
@@ -265,14 +275,7 @@ async function main() {
   const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
 
   // First-run key setup only matters for the harness-launching commands.
-  if (
-    (invocation.command === "claude" ||
-      invocation.command === "codex" ||
-      invocation.command === "grok" ||
-      invocation.command === "opencode" ||
-      invocation.command === "pi") &&
-    invocation.command !== undefined
-  ) {
+  if (isHarnessCommand(invocation.command)) {
     if (!(await ensureConfiguredForInteractiveLaunch())) {
       throw new Error(
         "No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.",

@@ -3,7 +3,7 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
-## 0.7.8 - 2026-08-09
+## 0.7.9 - 2026-08-10
 
 ### Added
 
@@ -35,6 +35,22 @@ version 0.6.5; earlier release history remains available in Git.
 - Added deterministic coverage for compaction v1/v2, memories, native route pass-through,
   Responses-over-WebSocket routing and continuation, response item normalization, transport
   validation, context budgeting, and error propagation.
+
+## 0.7.8 - 2026-08-10
+
+### Added
+
+- Added Hermes Agent and Hermes Desktop support through the single `togetherlink hermes` command,
+  with `thermes` as the short command and `thermes desktop` for the desktop app.
+- Added a temporary, credential-isolated Together provider overlay that preserves native Hermes
+  sessions, skills, memories, plugins, preferences, and configuration without modifying them.
+- Added Hermes to the installer, CLI help, machine-readable documentation, and supported-agent
+  cards on the website.
+
+### Tests
+
+- Added deterministic coverage for terminal and desktop command routing, Together provider
+  configuration, credential isolation, preserved native state, and cleanup behavior.
 
 ## 0.7.7 - 2026-08-08
 

@@ -2,6 +2,7 @@ export const HARNESS = {
   CLAUDE: "claude",
   CODEX: "codex",
   GROK: "grok",
+  HERMES: "hermes",
   OPENCODE: "opencode",
   PI: "pi",
 } as const;
@@ -12,6 +13,7 @@ export const ALL_HARNESSES = [
   HARNESS.CLAUDE,
   HARNESS.CODEX,
   HARNESS.GROK,
+  HARNESS.HERMES,
   HARNESS.OPENCODE,
   HARNESS.PI,
 ] as const;
@@ -21,6 +23,7 @@ export const HARNESS_BIN: Record<HarnessId, string> = {
   [HARNESS.CLAUDE]: "claude",
   [HARNESS.CODEX]: "codex",
   [HARNESS.GROK]: "grok",
+  [HARNESS.HERMES]: "hermes",
   [HARNESS.OPENCODE]: "opencode",
   [HARNESS.PI]: "pi",
 };
@@ -29,6 +32,7 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   [HARNESS.CLAUDE]: "Claude Code",
   [HARNESS.CODEX]: "Codex",
   [HARNESS.GROK]: "Grok Build",
+  [HARNESS.HERMES]: "Hermes Agent",
   [HARNESS.OPENCODE]: "OpenCode",
   [HARNESS.PI]: "Pi Code",
 };
@@ -45,6 +49,10 @@ export const HARNESS_INSTALL: Record<HarnessId, { command: string; url: string }
   [HARNESS.GROK]: {
     command: "curl -fsSL https://x.ai/cli/install.sh | bash",
     url: "https://github.com/xai-org/grok-build",
+  },
+  [HARNESS.HERMES]: {
+    command: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+    url: "https://hermes-agent.nousresearch.com/docs/",
   },
   [HARNESS.OPENCODE]: {
     command: "npm install -g opencode-ai@latest",

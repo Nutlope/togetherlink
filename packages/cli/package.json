@@ -1,7 +1,7 @@
 {
   "name": "@togetherlink/cli",
-  "version": "0.7.8",
-  "description": "CLI for routing Claude Code, OpenCode, Codex, Grok Build, and Pi Code through Together AI",
+  "version": "0.7.9",
+  "description": "CLI for routing Claude Code, OpenCode, Codex, Grok Build, Hermes, and Pi Code through Together AI",
   "license": "MIT",
   "bin": {
     "togetherlink": "./dist/bin/togetherlink.js"
@@ -22,7 +22,8 @@
     "@clack/prompts": "^0.8.2",
     "@togetherlink/models": "workspace:*",
     "undici": "^6.28.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=18"
