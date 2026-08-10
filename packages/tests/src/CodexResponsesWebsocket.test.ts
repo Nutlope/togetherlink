@@ -334,7 +334,7 @@ describe("Codex Responses WebSocket", () => {
         expect(reasoning).toEqual({
           type: "reasoning",
           status: "completed",
-          summary: [],
+          summary: [{ type: "summary_text", text: "thinking" }],
           content: [],
         });
       } finally {

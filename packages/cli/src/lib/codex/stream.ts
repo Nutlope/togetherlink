@@ -651,7 +651,7 @@ function completeOpenOutputItems(res: ServerResponse, outputState: StreamOutputS
     writeResponsesSse(res, "response.output_item.done", {
       type: "response.output_item.done",
       output_index: outputState.reasoningOutputIndex,
-      item: reasoningOutputItem(outputState.reasoningItemId),
+      item: reasoningOutputItem(outputState.reasoningItemId, outputState.reasoningText),
     });
   }
 
@@ -725,7 +725,7 @@ function completeStreamResponse(
   const outputItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
   if (outputState.reasoningItemId !== undefined) {
     outputItems.push({
-      item: reasoningOutputItem(outputState.reasoningItemId),
+      item: reasoningOutputItem(outputState.reasoningItemId, outputState.reasoningText),
       outputIndex: outputState.reasoningOutputIndex ?? 0,
     });
   }

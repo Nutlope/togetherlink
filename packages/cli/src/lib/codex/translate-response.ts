@@ -46,7 +46,7 @@ function toResponsesOutput(
   const output: Record<string, unknown>[] = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
-    output.push(reasoningOutputItem());
+    output.push(reasoningOutputItem(undefined, reasoning));
   }
   if (message.content) {
     output.push(messageOutputItem(message.content));
@@ -188,17 +188,18 @@ export function completeWebSearchCallItem(
 
 export function reasoningOutputItem(
   id = `rs_${randomUUID().replaceAll("-", "")}`,
+  summaryText?: string,
 ): Record<string, unknown> {
   return {
     id,
     type: "reasoning",
     status: "completed",
-    summary: [],
-    // Native OpenAI reasoning items carry encrypted_content and no raw content.
-    // Together reasoning cannot be encrypted for OpenAI, so keeping its text in
-    // this completed item makes a later `codex resume` fail validation. Streamed
-    // reasoning deltas remain visible during the turn; persisted history keeps
-    // only this replay-safe marker.
+    // Native OpenAI reasoning items carry encrypted_content for replay. Together
+    // reasoning cannot be encrypted for OpenAI, so we keep the reasoning text in
+    // the replay-safe `summary` field (not `content` or `encrypted_content`). The
+    // native backend does not require `encrypted_content` when `summary` is
+    // present, so mid-thread model switches and `codex resume` work without 404s.
+    summary: summaryText ? [{ type: "summary_text", text: summaryText }] : [],
     content: [],
   };
 }

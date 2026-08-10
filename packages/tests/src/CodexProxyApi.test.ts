@@ -407,7 +407,12 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response.output).toEqual([
       expect.objectContaining({
         type: "reasoning",
-        summary: [],
+        summary: [
+          {
+            type: "summary_text",
+            text: "Private Together reasoning must not enter persisted history.",
+          },
+        ],
         content: [],
       }),
       expect.objectContaining({
@@ -452,10 +457,16 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(reasoningDelta?.delta).toBe("VISIBLE_WHILE_RUNNING");
     expect(asRecord(reasoningDone?.item).content).toEqual([]);
+    expect(asRecord(reasoningDone?.item).summary).toEqual([
+      { type: "summary_text", text: "VISIBLE_WHILE_RUNNING" },
+    ]);
     expect(Array.isArray(completedOutput)).toBe(true);
     expect(
       asRecord(Array.isArray(completedOutput) ? completedOutput[0] : undefined).content,
     ).toEqual([]);
+    expect(
+      asRecord(Array.isArray(completedOutput) ? completedOutput[0] : undefined).summary,
+    ).toEqual([{ type: "summary_text", text: "VISIBLE_WHILE_RUNNING" }]);
     expect(raw).toContain("PORTABLE_ANSWER");
   });
 
