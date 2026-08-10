@@ -15,7 +15,11 @@ import {
 } from "../together-stream.js";
 import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty } from "./content-format.js";
-import { codexNativeToolMaxUses, runCodexExaSearchDetailed } from "./translate-request.js";
+import {
+  codexNativeToolMaxUses,
+  rememberCodexNativeSearchResult,
+  runCodexExaSearchDetailed,
+} from "./translate-request.js";
 import {
   completeWebSearchCallItem,
   messageOutputItem,
@@ -68,6 +72,7 @@ type CodexStreamOptions = {
   modelId: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  nativeSearchResults?: Map<string, string> | undefined;
 };
 export async function streamResponseFromTogether(
   res: ServerResponse,
@@ -455,24 +460,6 @@ async function streamResponseWithNativeTools(
     nativeSearchItems.push(...nativeRun.items);
 
     if (nativeToolCalls.length !== turn.toolCalls.length) {
-      const nativeText = nativeResultMessages
-        .map(
-          (message) =>
-            `Native ${toolTranslation.mappings.get(message.name)?.sourceName ?? message.name} result:\n${message.content}`,
-        )
-        .join("\n\n");
-      if (nativeText) {
-        openTextOutputItem(res, outputState);
-        const delta = `${outputState.text ? "\n\n" : ""}${nativeText}`;
-        outputState.text += delta;
-        writeResponsesSse(res, "response.output_text.delta", {
-          type: "response.output_text.delta",
-          item_id: outputState.textItemId,
-          output_index: outputState.textOutputIndex,
-          content_index: 0,
-          delta,
-        });
-      }
       const clientToolCalls = turn.toolCalls.filter(
         (toolCall) => !nativeToolNames.has(toolCall.name),
       );
@@ -614,6 +601,7 @@ async function runNativeToolCalls(
       const outcome = await runCodexExaSearchDetailed(input, webSearchDefinition, options);
       nativeToolUses.set(name, priorUses + 1);
       completeWebSearchCallItem(res, itemId, outputIndex, query, outcome);
+      rememberCodexNativeSearchResult(options.nativeSearchResults, itemId, outcome.text);
       items.push({
         item: webSearchCallItem(
           itemId,

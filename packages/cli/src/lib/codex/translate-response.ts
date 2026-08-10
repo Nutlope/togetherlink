@@ -20,6 +20,7 @@ export function toResponsesResponse(
   body: ResponsesRequest,
   options: CodexResponseOptions,
   toolTranslation: CodexToolTranslation,
+  nativeSearchItems: Record<string, unknown>[] = [],
 ): Record<string, unknown> {
   const responseId = chatResponse.id ?? `resp_${randomUUID().replaceAll("-", "")}`;
   // When the model hit max_tokens (finish_reason "length"), the response is
@@ -33,7 +34,7 @@ export function toResponsesResponse(
     status: isLengthTruncated ? "incomplete" : "completed",
     ...(isLengthTruncated ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     model: body.model ?? options.modelId,
-    output: toResponsesOutput(chatResponse, toolTranslation),
+    output: toResponsesOutput(chatResponse, toolTranslation, nativeSearchItems),
     usage: toResponsesUsage(chatResponse.usage),
   };
 }
@@ -41,6 +42,7 @@ export function toResponsesResponse(
 function toResponsesOutput(
   chatResponse: ChatResponse,
   toolTranslation: CodexToolTranslation,
+  nativeSearchItems: Record<string, unknown>[],
 ): Record<string, unknown>[] {
   const message = chatResponse.choices?.[0]?.message ?? {};
   const output: Record<string, unknown>[] = [];
@@ -48,6 +50,7 @@ function toResponsesOutput(
   if (reasoning) {
     output.push(reasoningOutputItem(undefined, reasoning));
   }
+  output.push(...nativeSearchItems);
   if (message.content) {
     output.push(messageOutputItem(message.content));
   }
@@ -128,12 +131,14 @@ export function webSearchCallItem(
     .map((result) => result.url)
     .filter((url): url is string => typeof url === "string" && url !== "")
     .map((url) => ({ url }));
+  if (sources.length > 0) {
+    action.sources = sources;
+  }
   return {
     id,
     type: "web_search_call",
     status,
     action,
-    ...(sources.length > 0 ? { sources } : {}),
   };
 }
 

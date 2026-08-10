@@ -60,6 +60,153 @@ describe("Codex Responses WebSocket", () => {
     }
   });
 
+  test("keeps mixed native web search results out of assistant replies and restores them for continuation", async () => {
+    vi.stubEnv("EXA_API_KEY", "test-exa-key");
+    const togetherRequests: Array<Record<string, any>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        if (href.includes("api.exa.ai/search")) {
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  title: "LiveKit docs",
+                  url: "https://docs.livekit.io/agents/",
+                  text: "Search evidence available only to the model continuation.",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        const request = JSON.parse(String(init?.body)) as Record<string, any>;
+        togetherRequests.push(request);
+        if (togetherRequests.length === 1) {
+          return sseResponse([
+            {
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call_search",
+                        type: "function",
+                        function: {
+                          name: "web_search",
+                          arguments: JSON.stringify({ query: "LiveKit agents" }),
+                        },
+                      },
+                      {
+                        index: 1,
+                        id: "call_exec",
+                        type: "function",
+                        function: {
+                          name: "exec_command",
+                          arguments: JSON.stringify({ cmd: "git status --short" }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+          ]);
+        }
+        return sseResponse([
+          { choices: [{ index: 0, delta: { content: "Final answer from both tools." } }] },
+          {
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 },
+          },
+        ]);
+      }),
+    );
+
+    const { ws, close } = await openWebsocket();
+    try {
+      const firstEvents = await collectTurn(ws, {
+        type: "response.create",
+        model: GLM_5_2.id,
+        tools: [
+          { type: "web_search", name: "web_search" },
+          {
+            type: "function",
+            name: "exec_command",
+            description: "Run a command.",
+            parameters: {
+              type: "object",
+              properties: { cmd: { type: "string" } },
+              required: ["cmd"],
+            },
+          },
+        ],
+        input: [{ type: "message", role: "user", content: "Research LiveKit." }],
+      });
+
+      expect(firstEvents.some((event) => event.type === "response.web_search_call.completed")).toBe(
+        true,
+      );
+      expect(
+        firstEvents.some(
+          (event) =>
+            event.type === "response.output_text.delta" &&
+            String(event.delta).includes("Web search results for"),
+        ),
+      ).toBe(false);
+      const firstCompleted = firstEvents.find((event) => event.type === "response.completed") as {
+        response: { output: Array<Record<string, unknown>> };
+      };
+      expect(firstCompleted.response.output.map((item) => item.type)).toEqual([
+        "web_search_call",
+        "function_call",
+      ]);
+
+      const continuationEvents = await collectTurn(ws, {
+        type: "response.create",
+        model: GLM_5_2.id,
+        previous_response_id: responseId(firstEvents),
+        input: [
+          {
+            type: "function_call_output",
+            call_id: "call_exec",
+            output: "Local repository evidence.",
+          },
+        ],
+      });
+
+      expect(
+        continuationEvents.some(
+          (event) =>
+            event.type === "response.output_text.delta" &&
+            event.delta === "Final answer from both tools.",
+        ),
+      ).toBe(true);
+      expect(togetherRequests).toHaveLength(2);
+      const continuationMessages = togetherRequests[1]?.messages as Array<{
+        role: string;
+        content?: string;
+      }>;
+      expect(
+        continuationMessages.some((message) =>
+          message.content?.includes("Search evidence available only to the model continuation."),
+        ),
+      ).toBe(true);
+      expect(
+        continuationMessages.some((message) =>
+          message.content?.includes("Local repository evidence."),
+        ),
+      ).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
   test("rejects response.append with a replay-required close instead of guessing at continuation", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

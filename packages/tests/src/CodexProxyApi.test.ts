@@ -1552,6 +1552,15 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
     expect(response.output[0]).toMatchObject({
+      type: "web_search_call",
+      status: "completed",
+      action: {
+        type: "search",
+        query: "Codex docs",
+        sources: [{ url: "https://developers.openai.com/codex" }],
+      },
+    });
+    expect(response.output[1]).toMatchObject({
       type: "message",
       role: "assistant",
       content: [
@@ -1860,17 +1869,14 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(requests.some((request) => request.url.includes("api.exa.ai"))).toBe(true);
     expect(response.output).toEqual([
       {
-        id: expect.stringMatching(/^msg_/),
-        type: "message",
-        role: "assistant",
+        id: expect.stringMatching(/^wsc_/),
+        type: "web_search_call",
         status: "completed",
-        content: [
-          {
-            type: "output_text",
-            text: expect.stringContaining('Web search results for "Codex docs" via Exa'),
-            annotations: [],
-          },
-        ],
+        action: {
+          type: "search",
+          query: "Codex docs",
+          sources: [{ url: "https://developers.openai.com/codex" }],
+        },
       },
       {
         id: expect.stringMatching(/^ctc_/),
@@ -1881,6 +1887,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         input: "*** Begin Patch\n*** End Patch\n",
       },
     ]);
+    expect(JSON.stringify(response.output)).not.toContain("Web search results for");
   });
 
   test("forwards Responses input_image parts to Together vision message content", async () => {

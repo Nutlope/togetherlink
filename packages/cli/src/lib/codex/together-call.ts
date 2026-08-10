@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { type ExaSearchOutcome, webSearchQuery } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { postChatCompletion } from "../together-client.js";
 import { parseJsonOrEmpty } from "./content-format.js";
-import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
+import {
+  codexNativeToolMaxUses,
+  rememberCodexNativeSearchResult,
+  runCodexExaSearchDetailed,
+} from "./translate-request.js";
+import { webSearchCallItem } from "./translate-response.js";
 import type {
   ChatMessage,
   ChatResponse,
@@ -15,6 +21,12 @@ type CodexTogetherOptions = {
   apiKey: string;
   baseUrl: string;
   debug?: boolean | undefined;
+  nativeSearchResults?: Map<string, string> | undefined;
+};
+
+type CodexTogetherResponse = {
+  response: ChatResponse;
+  nativeSearchItems: Record<string, unknown>[];
 };
 
 export class CodexTogetherError extends Error {
@@ -74,9 +86,9 @@ export async function callTogetherWithNativeTools(
   toolTranslation: CodexToolTranslation,
   options: CodexTogetherOptions,
   signal?: AbortSignal,
-): Promise<ChatResponse> {
+): Promise<CodexTogetherResponse> {
   if (toolTranslation.nativeTools.length === 0) {
-    return callTogether(payload, options, signal);
+    return { response: await callTogether(payload, options, signal), nativeSearchItems: [] };
   }
 
   const messages = Array.isArray(payload.messages)
@@ -84,6 +96,7 @@ export async function callTogetherWithNativeTools(
     : [];
   const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
   const nativeToolUses = new Map<string, number>();
+  const nativeSearchItems: Record<string, unknown>[] = [];
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
     const json = await callTogether({ ...payload, messages }, options, signal);
@@ -92,38 +105,27 @@ export async function callTogetherWithNativeTools(
       nativeToolNames.has(toolCall.function?.name ?? ""),
     );
     if (nativeToolCalls.length === 0) {
-      return json;
+      return { response: json, nativeSearchItems };
     }
     if (nativeToolCalls.length !== toolCalls.length) {
       const message = json.choices?.[0]?.message;
       if (message) {
-        const nativeResults: string[] = [];
         for (const toolCall of nativeToolCalls) {
-          const name = toolCall.function?.name ?? "web_search";
-          const nativeTool = toolTranslation.mappings.get(name);
-          const input = parseJsonOrEmpty(toolCall.function?.arguments);
-          const priorUses = nativeToolUses.get(name) ?? 0;
-          const webSearchDefinition =
-            nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
-          const maxUses =
-            webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
-          const result = await runNativeWebSearchCall({
-            name,
-            priorUses,
-            maxUses,
-            isWebSearch: webSearchDefinition !== undefined,
-            recordUse: () => nativeToolUses.set(name, priorUses + 1),
-            runSearch: () => runCodexExaSearch(input, webSearchDefinition!, options),
-          });
-          nativeResults.push(`Native ${name} result:\n${result}`);
+          const nativeResult = await runBufferedNativeTool(
+            toolCall,
+            nativeToolUses,
+            toolTranslation,
+            options,
+          );
+          if (nativeResult.searchItem) {
+            nativeSearchItems.push(nativeResult.searchItem);
+          }
         }
         message.tool_calls = toolCalls.filter(
           (toolCall) => !nativeToolNames.has(toolCall.function?.name ?? ""),
         );
-        message.content =
-          [message.content?.trim(), ...nativeResults].filter(Boolean).join("\n\n") || null;
       }
-      return json;
+      return { response: json, nativeSearchItems };
     }
 
     const reasoning =
@@ -143,38 +145,93 @@ export async function callTogetherWithNativeTools(
     });
 
     for (const toolCall of nativeToolCalls) {
-      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
-      const name = toolCall.function?.name ?? "web_search";
-      const nativeTool = toolTranslation.mappings.get(name);
-      const input = parseJsonOrEmpty(toolCall.function?.arguments);
-      const priorUses = nativeToolUses.get(name) ?? 0;
-      const webSearchDefinition =
-        nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
-      const maxUses =
-        webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
-      const result = await runNativeWebSearchCall({
-        name,
-        priorUses,
-        maxUses,
-        isWebSearch: webSearchDefinition !== undefined,
-        recordUse: () => nativeToolUses.set(name, priorUses + 1),
-        runSearch: () => runCodexExaSearch(input, webSearchDefinition!, options),
+      const nativeResult = await runBufferedNativeTool(
+        toolCall,
+        nativeToolUses,
+        toolTranslation,
+        options,
+      );
+      if (nativeResult.searchItem) {
+        nativeSearchItems.push(nativeResult.searchItem);
+      }
+      messages.push({
+        role: "tool",
+        tool_call_id: nativeResult.toolCallId,
+        content: nativeResult.content,
       });
-      messages.push({ role: "tool", tool_call_id: id, content: result });
     }
   }
 
   return {
-    id: `chatcmpl_${randomUUID().replaceAll("-", "")}`,
-    choices: [
-      {
-        finish_reason: "stop",
-        message: {
-          content:
-            "I could not complete native web search because the model kept requesting additional search tool calls.",
+    response: {
+      id: `chatcmpl_${randomUUID().replaceAll("-", "")}`,
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content:
+              "I could not complete native web search because the model kept requesting additional search tool calls.",
+          },
         },
-      },
-    ],
+      ],
+    },
+    nativeSearchItems,
+  };
+}
+
+type NativeChatToolCall = NonNullable<
+  NonNullable<NonNullable<ChatResponse["choices"]>[number]["message"]>["tool_calls"]
+>[number];
+
+async function runBufferedNativeTool(
+  toolCall: NativeChatToolCall,
+  nativeToolUses: Map<string, number>,
+  toolTranslation: CodexToolTranslation,
+  options: CodexTogetherOptions,
+): Promise<{
+  toolCallId: string;
+  content: string;
+  searchItem?: Record<string, unknown>;
+}> {
+  const toolCallId = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+  const name = toolCall.function?.name ?? "web_search";
+  const nativeTool = toolTranslation.mappings.get(name);
+  const input = parseJsonOrEmpty(toolCall.function?.arguments);
+  const priorUses = nativeToolUses.get(name) ?? 0;
+  const webSearchDefinition = nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
+  const maxUses =
+    webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
+  let outcome: ExaSearchOutcome;
+  if (webSearchDefinition !== undefined && priorUses < maxUses) {
+    nativeToolUses.set(name, priorUses + 1);
+    outcome = await runCodexExaSearchDetailed(input, webSearchDefinition, options);
+  } else {
+    const content = await runNativeWebSearchCall({
+      name,
+      priorUses,
+      maxUses,
+      isWebSearch: webSearchDefinition !== undefined,
+      recordUse: () => nativeToolUses.set(name, priorUses + 1),
+      runSearch: async () => "Unsupported native server tool.",
+    });
+    outcome = {
+      query: webSearchQuery(input),
+      text: content,
+      results: [],
+      errorCode: "unavailable",
+    };
+  }
+  const itemId = `wsc_${randomUUID().replaceAll("-", "")}`;
+  rememberCodexNativeSearchResult(options.nativeSearchResults, itemId, outcome.text);
+  return {
+    toolCallId,
+    content: outcome.text,
+    searchItem: webSearchCallItem(
+      itemId,
+      outcome.errorCode === undefined ? "completed" : "failed",
+      outcome.query,
+      outcome,
+    ),
   };
 }
 

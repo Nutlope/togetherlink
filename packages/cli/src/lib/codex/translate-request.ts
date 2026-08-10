@@ -54,6 +54,7 @@ type CodexTranslateOptions = {
   modelName: string;
   modelDefinition: ModelDefinition;
   debug?: boolean | undefined;
+  nativeSearchResults?: Map<string, string> | undefined;
 };
 
 type DebugOptions = {
@@ -250,7 +251,10 @@ function toChatMessages(
       continue;
     }
     if (item.type === "web_search_call") {
-      messages.push({ role: "assistant", content: webSearchHistory(item) });
+      messages.push({
+        role: "assistant",
+        content: webSearchHistory(item, options.nativeSearchResults?.get(item.id ?? "")),
+      });
       continue;
     }
     if (item.type === "image_generation_call") {
@@ -747,7 +751,7 @@ function localShellArguments(action: ResponsesInputItem["action"]): string {
   });
 }
 
-function webSearchHistory(item: ResponsesInputItem): string {
+function webSearchHistory(item: ResponsesInputItem, result?: string): string {
   const action = item.action;
   const kind = typeof action?.type === "string" ? action.type : "unknown action";
   const detail =
@@ -758,7 +762,27 @@ function webSearchHistory(item: ResponsesInputItem): string {
         : typeof action?.url === "string"
           ? action.url
           : "details unavailable";
-  return `[Web search ${item.status ?? "recorded"}: ${kind} - ${detail}]`;
+  const marker = `[Web search ${item.status ?? "recorded"}: ${kind} - ${detail}]`;
+  return result ? `${marker}\n${result}` : marker;
+}
+
+const MAX_CODEX_NATIVE_SEARCH_RESULTS = 64;
+
+export function rememberCodexNativeSearchResult(
+  results: Map<string, string> | undefined,
+  itemId: string,
+  result: string,
+): void {
+  if (!results) {
+    return;
+  }
+  if (!results.has(itemId) && results.size >= MAX_CODEX_NATIVE_SEARCH_RESULTS) {
+    const oldest = results.keys().next().value;
+    if (typeof oldest === "string") {
+      results.delete(oldest);
+    }
+  }
+  results.set(itemId, result);
 }
 
 function imageGenerationHistory(

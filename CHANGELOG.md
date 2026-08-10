@@ -31,12 +31,14 @@ version 0.6.5; earlier release history remains available in Git.
   safety margin for request-estimation error.
 - Ended partially-started native responses cleanly when the upstream body fails after headers have
   already been sent.
+- Kept Exa web-search results inside structured `web_search_call` items when ChatGPT Desktop also
+  requests a client tool, instead of exposing raw search payloads as assistant replies.
 
 ### Tests
 
 - Added deterministic coverage for compaction v1/v2, memories, native route pass-through,
   Responses-over-WebSocket routing and continuation, response item normalization, transport
-  validation, context budgeting, and error propagation.
+  validation, context budgeting, error propagation, and mixed web-search/client-tool turns.
 
 ## 0.7.8 - 2026-08-10
 

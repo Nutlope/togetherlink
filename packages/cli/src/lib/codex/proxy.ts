@@ -57,6 +57,9 @@ export type CodexProxyOptions = {
   costTracker?: CostTracker | undefined;
   perfSink?: ProxyPerfSink | undefined;
   fetch?: TogetherClientOptions["fetch"];
+  /** Search evidence retained inside the proxy so client-visible
+   * `web_search_call` items never need to masquerade as assistant text. */
+  nativeSearchResults?: Map<string, string> | undefined;
 };
 
 export async function handleCodexProxyRequest(
@@ -64,6 +67,7 @@ export async function handleCodexProxyRequest(
   res: ServerResponse,
   options: CodexProxyOptions,
 ): Promise<void> {
+  options.nativeSearchResults ??= new Map<string, string>();
   const requestedPath = requestPath(req);
   const path = normalizeCodexPath(requestedPath);
   const perf = createProxyPerfTracer(
@@ -239,7 +243,7 @@ export async function handleCodexProxyRequest(
       ),
       requestModel.definition,
     );
-    const chatResponse = await perf.span("compaction_upstream_fetch", () =>
+    const { response: chatResponse } = await perf.span("compaction_upstream_fetch", () =>
       callTogetherWithNativeTools(
         compactPayload,
         { tools: [], mappings: new Map(), nativeTools: [] },
@@ -294,7 +298,7 @@ export async function handleCodexProxyRequest(
     return;
   }
 
-  const chatResponse = await perf.span(
+  const nativeToolResponse = await perf.span(
     "upstream_fetch_and_tool_loop",
     () =>
       callTogetherWithNativeTools(
@@ -305,9 +309,10 @@ export async function handleCodexProxyRequest(
       ),
     { nativeToolCount },
   );
+  const { response: chatResponse, nativeSearchItems } = nativeToolResponse;
   recordUsage(chatResponse.usage, options, requestModel.definition);
   const responseBody = perf.spanSync("response_map", () =>
-    toResponsesResponse(chatResponse, body, options, toolTranslation),
+    toResponsesResponse(chatResponse, body, options, toolTranslation, nativeSearchItems),
   );
   writeJson(res, 200, responseBody);
   perf.end({ status: res.statusCode, stream: false });

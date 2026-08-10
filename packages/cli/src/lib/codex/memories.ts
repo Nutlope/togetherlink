@@ -66,7 +66,7 @@ export async function summarizeTogetherMemories(
 ): Promise<{ output: CodexMemoryOutput[] }> {
   const output: CodexMemoryOutput[] = [];
   for (const trace of body.traces) {
-    const response = await callTogetherWithNativeTools(
+    const { response } = await callTogetherWithNativeTools(
       memoryPayload(trace, body.reasoning, targetModelId, modelDefinition),
       EMPTY_CODEX_TOOL_TRANSLATION,
       options,
