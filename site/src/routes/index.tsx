@@ -83,15 +83,33 @@ const features = [
   {
     title: "Grok Build",
     command: "tgrok",
-    tag: "Beta",
-    tagTone: "beta",
+    tag: "100% supported",
+    tagTone: "live",
     body: (
       <>
         Grok Build launches directly on Together with a local metadata-only model catalog. Your
         native Grok config, built-ins, workflows, and sessions stay available.
       </>
     ),
+    supportLabel: "Support",
+    supportValue: "100%",
     icon: <GrokMark />,
+    accent: undefined,
+  },
+  {
+    title: "Hermes",
+    command: "thermes",
+    tag: "100% supported",
+    tagTone: "live",
+    body: (
+      <>
+        Hermes and Hermes Desktop launch with a temporary standalone Together provider. Sessions,
+        skills, memories, plugins, and preferences stay available.
+      </>
+    ),
+    supportLabel: "Support",
+    supportValue: "100%",
+    icon: <HermesMark />,
     accent: undefined,
   },
 ];
@@ -384,10 +402,10 @@ function Home() {
       </section>
 
       <section className="mt-[52px] mb-[72px] grid gap-3.5 md:grid-cols-2 lg:grid-cols-6">
-        {features.map((feature, index) => (
+        {features.map((feature) => (
           <article
             key={feature.title}
-            className={`flex h-full flex-col rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)] lg:col-span-2 ${index === 3 ? "lg:col-start-2" : index === 4 ? "lg:col-start-4" : ""}`}
+            className="flex h-full flex-col rounded-[14px] border border-line-strong bg-white px-[22px] pt-6 pb-[22px] transition hover:border-faint hover:shadow-[0_1px_2px_rgba(10,10,10,.04),0_8px_24px_rgba(10,10,10,.05)] lg:col-span-2"
           >
             <div className="flex items-start justify-between gap-3.5">
               <span
@@ -534,18 +552,19 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, <code>tgrok</code>, and <code>tpi</code>.
+          <code>tcodex</code>, <code>tgrok</code>, <code>thermes</code>, and <code>tpi</code>.
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>, <code>tgrok</code>,
-          or <code>tpi</code>. For the ChatGPT desktop app run <code>togetherlink chatgpt</code>{" "}
-          (alpha), and restore it with <code>togetherlink chatgpt --restore</code>. On first launch
-          it asks once for your Together API key - press Enter to skip and add it later.
+          <code>thermes</code>, or <code>tpi</code>. Run <code>thermes desktop</code> for Hermes
+          Desktop. For the ChatGPT desktop app run <code>togetherlink chatgpt</code> (alpha), and
+          restore it with <code>togetherlink chatgpt --restore</code>. On first launch it asks once
+          for your Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change
           your mind? Just stop using it - no agent config was saved, so your subscriptions and your
-          OpenCode/Claude Code/Codex CLI/Grok Build/Pi Code config are untouched.
+          OpenCode/Claude Code/Codex CLI/Grok Build/Hermes/Pi Code config are untouched.
         </Step>
       </section>
 
@@ -632,6 +651,14 @@ function Home() {
             rel="noopener noreferrer"
           >
             Grok Build
+          </a>
+          <a
+            className="transition-colors hover:text-ink"
+            href="https://github.com/NousResearch/hermes-agent"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Hermes
           </a>
         </div>
         <p className="m-0 text-[13px]">{version}</p>
@@ -792,6 +819,17 @@ function PiMark() {
       />
       <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
     </svg>
+  );
+}
+
+function HermesMark() {
+  return (
+    <img
+      className="block size-[40px] rounded-[9px] object-cover outline outline-1 -outline-offset-1 outline-black/10"
+      src="/hermes-icon.png"
+      alt=""
+      aria-hidden="true"
+    />
   );
 }
 

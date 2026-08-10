@@ -17,9 +17,11 @@ currently enforced in the type system):
   daemon's Together client, tracks cost via a `CostTracker`, and deregisters on
   exit. The shared lifecycle lives in `runProxiedSession`
   (`packages/cli/src/lib/proxied-session.ts`).
-- **Spawned harness** — OpenCode, Pi, Grok. `run` spawns the agent binary
+- **Spawned harness** — OpenCode, Pi, Grok, Hermes. `run` spawns the agent binary
   directly; the binary talks to Together using inline config (OpenCode), a
-  temporary `models.json` (Pi), or a local metadata-only model catalog (Grok).
+  temporary `models.json` (Pi), a local metadata-only model catalog (Grok), or
+  a temporary standalone model-provider plugin inside a credential-isolated
+  home overlay (Hermes and Hermes Desktop).
   No inference proxy, no `CostTracker`, no keepalive. The shared
   `runTrackedSpawnedSession` lifecycle records anonymous session start/end
   telemetry, but token and cost totals remain unavailable because Together
@@ -29,7 +31,7 @@ currently enforced in the type system):
 integration, connector.
 
 **HarnessId** — the enum of harness identifiers (`claude`, `codex`, `grok`,
-`opencode`, `pi`). Note: the daemon also knows about `codex-app`, an agent id not in
+`hermes`, `opencode`, `pi`). Note: the daemon also knows about `codex-app`, an agent id not in
 `HarnessId` — an orphan to be reconciled.
 
 ## The daemon seam
@@ -96,7 +98,7 @@ proxied harness: model resolve → daemon → register → telemetry → banner 
 spawn → pid update → keepalive → await exit → cost print → deregister.
 
 **spawned-session** (`spawned-session.ts`) — the shared process + lifecycle
-telemetry boundary for OpenCode, Pi, and Grok. It records which harness and
+telemetry boundary for OpenCode, Pi, Grok, and Hermes. It records which harness and
 model started/ended without claiming visibility into direct API usage.
 
 **paths** (`paths.ts`, shared) — the single source of truth for the togetherlink
