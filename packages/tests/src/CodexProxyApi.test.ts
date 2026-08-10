@@ -267,7 +267,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     );
     expect(compactLimitByModel).toMatchObject({
       [DEFAULT_MODEL.id]: 900_000,
-      [GLM_5_2.id]: 235_000,
+      [GLM_5_2.id]: 460_000,
       [MINIMAX_M3.id]: 470_000,
       [QWEN_3_7_MAX.id]: 880_000,
     });

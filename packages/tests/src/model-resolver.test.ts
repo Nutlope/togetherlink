@@ -118,4 +118,12 @@ describe("shared harness default", () => {
     expect(togetherReasoningEffort({ effort: "high" }, metadataDrivenModel)).toBeUndefined();
     expect(togetherReasoningEffort({ effort: "xhigh" }, KIMI_K3)).toBe("max");
   });
+
+  it("uses GLM-5.2's current serverless limits without changing its pricing", () => {
+    expect(GLM_5_2).toMatchObject({
+      cost: { input: 1.4, cache_read: 0.26, output: 4.4 },
+      limit: { context: 512_000, output: 164_000 },
+      codexAutoCompactTokenLimit: 460_000,
+    });
+  });
 });

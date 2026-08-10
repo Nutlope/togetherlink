@@ -8,10 +8,10 @@
  * is the future home of the remotely-updatable curated manifest referenced in
  * the repo PLAN.md; for now the manifest is static and shipped in-tree.
  *
- * Pricing sources:
- *  - GLM-5.2: https://docs.together.ai/docs/glm-5.2-quickstart ($1.40/$0.26/$4.40)
- *    and the models.dev PR github.com/anomalyco/models.dev/pull/2663
- *    (context 262144, output 164000).
+ * Pricing and limits sources:
+ *  - GLM-5.2: https://docs.together.ai/docs/glm-5.2-quickstart ($1.40/$0.26/$4.40),
+ *    https://docs.together.ai/docs/serverless/models (context 512000), and the
+ *    models.dev PR github.com/anomalyco/models.dev/pull/2663 (output 164000).
  *  - Kimi K3 and vision models use Together's published model pricing and
  *    capabilities.
  */
@@ -110,12 +110,12 @@ export const GLM_5_2: ModelDefinition = {
   name: "GLM 5.2",
   anthropicAlias: "together-glm-5-2",
   cost: { input: 1.4, output: 4.4, cache_read: 0.26 },
-  limit: { context: 262_144, output: 164_000 },
+  limit: { context: 512_000, output: 164_000 },
   attachment: false,
   reasoning: true,
   temperature: true,
   tool_call: true,
-  codexAutoCompactTokenLimit: 235_000,
+  codexAutoCompactTokenLimit: 460_000,
   modalities: { input: ["text"], output: ["text"] },
 };
 

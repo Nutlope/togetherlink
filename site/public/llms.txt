@@ -131,7 +131,7 @@ Serverless prices below are in USD per 1 million tokens and come from Together's
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.7.8):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.7.9):
 
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
@@ -144,7 +144,7 @@ Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --mo
 Capabilities:
 
 - `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
-- `zai-org/GLM-5.2` — GLM 5.2. Text-only, 256K context, reasoning.
+- `zai-org/GLM-5.2` — GLM 5.2. Text-only, 512K context, reasoning.
 - `moonshotai/Kimi-K2.7-Code` — Kimi K2.7 Code. Vision-capable, also used as the vision subagent.
 - `moonshotai/Kimi-K2.6` — Kimi K2.6. Vision, 256K context, reasoning.
 - `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.

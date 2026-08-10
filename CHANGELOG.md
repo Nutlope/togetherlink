@@ -13,6 +13,8 @@ version 0.6.5; earlier release history remains available in Git.
 
 ### Changed
 
+- Increased `zai-org/GLM-5.2` serverless context from 262,144 to 512,000 tokens; pricing is
+  unchanged.
 - Simplified Codex context handling so conversation history and historical images pass through
   unchanged while Codex owns compaction; TogetherLink now advertises model-specific compaction
   thresholds and the native-style 10k tool-output truncation policy.
