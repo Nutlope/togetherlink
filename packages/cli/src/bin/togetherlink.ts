@@ -112,19 +112,14 @@ async function runInteractiveLauncher(): Promise<void> {
   const choice = await clack.select({
     message: "What do you want to run?",
     options: [
-      { value: "codex", label: "Codex", hint: "tcodex" },
-      { value: "grok", label: "Grok Build", hint: "tgrok" },
       { value: "claude", label: "Claude Code", hint: "tclaude" },
-      { value: "pi", label: "Pi Code", hint: "tpi" },
-      { value: "opencode", label: "OpenCode", hint: "topencode" },
+      { value: "codex", label: "Codex", hint: "tcodex" },
       { value: "chatgpt", label: "ChatGPT Desktop", hint: "chatgpt" },
-      { value: "configure", label: "Configure", hint: "API keys and detected tools" },
+      { value: "grok", label: "Grok Build", hint: "tgrok" },
+      { value: "opencode", label: "OpenCode", hint: "topencode" },
+      { value: "pi", label: "Pi Code", hint: "tpi" },
       { value: "hermes", label: "Hermes Agent", hint: "thermes" },
-      {
-        value: "hermes-desktop",
-        label: "Hermes Desktop",
-        hint: "togetherlink hermes desktop",
-      },
+      { value: "configure", label: "Configure", hint: "API keys and detected tools" },
     ],
   });
   if (clack.isCancel(choice)) {
@@ -148,11 +143,6 @@ async function runInteractiveLauncher(): Promise<void> {
     }
     return;
   }
-  if (choice === "hermes-desktop") {
-    await dispatchHarnessCommand("hermes", undefined, { passthrough: ["desktop"] });
-    return;
-  }
-
   await dispatchHarnessCommand(choice, undefined, {});
 }
 
