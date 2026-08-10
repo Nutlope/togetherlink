@@ -19,6 +19,9 @@ export function sanitizeNativeResponsesReplay<T extends JsonObject>(body: T): T 
     if (!isJsonObject(value) || value.type !== "reasoning") {
       return value;
     }
+    if (!isTogetherLinkReasoningId(value.id)) {
+      return value;
+    }
     const encryptedContent = value.encrypted_content;
     if (
       typeof encryptedContent === "string" &&
@@ -35,6 +38,11 @@ export function sanitizeNativeResponsesReplay<T extends JsonObject>(body: T): T 
   });
 
   return changed ? ({ ...body, input } as T) : body;
+}
+
+/** IDs minted by TogetherLink's Responses adapter for synthetic reasoning items. */
+export function isTogetherLinkReasoningId(value: unknown): value is string {
+  return typeof value === "string" && /^rs_[0-9a-f]{32}$/.test(value);
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

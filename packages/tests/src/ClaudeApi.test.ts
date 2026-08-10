@@ -308,7 +308,7 @@ describe("Claude proxy compatibility API", () => {
   });
 
   test("count_tokens does not hide prompts that exceed the advertised safe input limit", async () => {
-    const hugePrompt = "oversized context ".repeat(70_000);
+    const hugePrompt = "oversized context ".repeat(Math.ceil(GLM_5_2.limit.context / 4));
     const response = await callClaudeProxy({
       method: "POST",
       url: "/v1/messages/count_tokens",
@@ -349,7 +349,9 @@ describe("Claude proxy compatibility API", () => {
       }),
     );
 
-    const nearFullContext = "context budget pressure ".repeat(44_000);
+    const nearFullContext = "context budget pressure ".repeat(
+      Math.ceil(GLM_5_2.limit.context / 5.5),
+    );
     const response = await callClaudeProxy({
       method: "POST",
       url: "/v1/messages",

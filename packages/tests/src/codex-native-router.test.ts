@@ -363,7 +363,7 @@ describe("Codex additive native/Together router", () => {
     });
   });
 
-  test("sanitizes foreign plaintext reasoning before native replay without losing native or TogetherLink state", async () => {
+  test("preserves non-Together reasoning state while decoding TogetherLink compaction", async () => {
     let upstreamBody: Record<string, unknown> | undefined;
     const ownedSummary = `tlc1:${Buffer.from("Continue from TogetherLink checkpoint.").toString("base64")}`;
     const nativeEncryptedContent = validNativeReasoningEncryptedContent();
@@ -397,11 +397,11 @@ describe("Codex additive native/Together router", () => {
     expect(response.status).toBe(200);
     const sent = upstreamBody?.input as Array<Record<string, unknown>>;
     expect(sent[0]).toMatchObject({
+      id: "foreign-reasoning",
       type: "reasoning",
       summary: [{ type: "summary_text", text: "Readable summary remains." }],
+      encrypted_content: "claude-signature",
     });
-    expect(sent[0]).not.toHaveProperty("id");
-    expect(sent[0]).not.toHaveProperty("encrypted_content");
     expect(sent[1]).toMatchObject({
       id: "native-reasoning",
       encrypted_content: nativeEncryptedContent,

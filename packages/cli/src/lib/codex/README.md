@@ -17,10 +17,19 @@ If `~/.codex/config.toml` already has any content, leave it untouched, even if i
 
 ## History ownership
 
-The Codex proxy forwards conversation history, including historical images,
-without deleting, summarizing, or retrying with modified content. Codex owns
-context accounting and compaction; TogetherLink only maps Together context
-errors to the standard Responses error contract.
+The Codex proxy forwards ordinary conversation history, including historical
+images, without deleting, summarizing, or retrying with modified content.
+Codex owns context accounting and decides when to request compaction;
+TogetherLink maps Together context errors to the standard Responses error
+contract and serves client-requested compaction through the selected Together
+model.
+
+Native replay has one narrow compatibility exception: for synthetic reasoning
+items whose IDs were minted by TogetherLink and whose encrypted transport state
+cannot be replayed by OpenAI, the proxy removes only the unusable `id` and
+`encrypted_content` fields while preserving visible summaries and content.
+Restore applies the same repair to existing TogetherLink-shaped task history,
+after backing up every changed JSONL file.
 
 Future investigation: if live long-running sessions show that repeated
 computer-use or tool-result screenshots cause material Together failures,

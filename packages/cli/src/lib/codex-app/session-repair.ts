@@ -1,6 +1,9 @@
 import path from "node:path";
 import { copyFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
-import { sanitizeNativeResponsesReplay } from "../codex/native-replay.js";
+import {
+  isTogetherLinkReasoningId,
+  sanitizeNativeResponsesReplay,
+} from "../codex/native-replay.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -74,12 +77,7 @@ export async function repairCodexSessionHistory(home: string): Promise<CodexSess
 }
 
 function isTogetherLinkReasoningPayload(value: unknown): value is JsonObject {
-  return (
-    isJsonObject(value) &&
-    value.type === "reasoning" &&
-    typeof value.id === "string" &&
-    /^rs_[0-9a-f]{32}$/.test(value.id)
-  );
+  return isJsonObject(value) && value.type === "reasoning" && isTogetherLinkReasoningId(value.id);
 }
 
 async function jsonlFiles(root: string): Promise<string[]> {
