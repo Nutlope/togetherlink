@@ -17,9 +17,15 @@ If `~/.codex/config.toml` already has any content, leave it untouched, even if i
 
 ## History ownership
 
-The Codex proxy forwards ordinary conversation history, including historical
-images, without deleting, summarizing, or retrying with modified content.
-Codex owns context accounting and decides when to request compaction;
+The Codex proxy forwards ordinary conversation history and user-attached images
+without deleting, summarizing, or retrying with modified content. Tool-generated
+`view_image` screenshots have a narrower lifecycle: the newest screenshot stays
+as native vision input, while an older screenshot is replaced after a subsequent
+assistant observation exists. The replacement retains a content hash, that
+observation, and the original local path so Codex can explicitly inspect it
+again. Base64 image transport bytes are excluded from the text-token estimate.
+
+Codex otherwise owns context accounting and decides when to request compaction;
 TogetherLink maps Together context errors to the standard Responses error
 contract and serves client-requested compaction through the selected Together
 model.
@@ -31,8 +37,7 @@ cannot be replayed by OpenAI, the proxy removes only the unusable `id` and
 Restore applies the same repair to existing TogetherLink-shaped task history,
 after backing up every changed JSONL file.
 
-Future investigation: if live long-running sessions show that repeated
-computer-use or tool-result screenshots cause material Together failures,
-evaluate retiring only stale tool-generated images after their observations are
-captured in text. Do not remove user attachments or introduce request rewriting
-without reproducible long-session evidence.
+Future investigation: extend the same evidence-preserving lifecycle to other
+high-volume tool-generated screenshots only after reproducing their exact wire
+format. Do not retire user attachments or tool images that have no subsequent
+assistant observation.

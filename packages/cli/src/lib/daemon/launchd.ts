@@ -4,8 +4,10 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { togetherlinkHome } from "../paths.js";
 import { runningFromBundle } from "./detect-bundle.js";
+import { stopLegacyDaemonForTakeover, waitForManagedDaemonReady } from "./takeover.js";
 
-const AUTO_INSTALL_SENTINEL = "launchd-auto-installed";
+const AUTO_INSTALL_SENTINEL = "launchd-supervision-v2-installed";
+const LEGACY_AUTO_INSTALL_SENTINEL = "launchd-auto-installed";
 const LAUNCHD_LABEL = "com.togetherlink.daemon";
 
 function autoInstallSentinelPath(): string {
@@ -73,6 +75,7 @@ type LaunchdPlist = {
   StandardErrorPath: string;
   EnvironmentVariables: {
     TOGETHERLINK_HOME: string;
+    TOGETHERLINK_SUPERVISED: string;
     PATH: string;
   };
 };
@@ -126,6 +129,8 @@ function buildPlist(plist: LaunchdPlist): string {
     "  <dict>",
     `    <key>TOGETHERLINK_HOME</key>`,
     `    <string>${escapeXml(plist.EnvironmentVariables.TOGETHERLINK_HOME)}</string>`,
+    `    <key>TOGETHERLINK_SUPERVISED</key>`,
+    `    <string>${escapeXml(plist.EnvironmentVariables.TOGETHERLINK_SUPERVISED)}</string>`,
     `    <key>PATH</key>`,
     `    <string>${escapeXml(plist.EnvironmentVariables.PATH)}</string>`,
     "  </dict>",
@@ -150,6 +155,7 @@ export function generateLaunchdPlist(overrides?: { program?: string; home?: stri
     StandardErrorPath: path.join(logDir, "daemon.log"),
     EnvironmentVariables: {
       TOGETHERLINK_HOME: home,
+      TOGETHERLINK_SUPERVISED: "1",
       PATH: launchdPath(),
     },
   };
@@ -192,9 +198,6 @@ export async function maybeAutoInstallLaunchdDaemon(): Promise<boolean> {
 
   try {
     const result = await installLaunchdDaemon();
-    if (result.installed) {
-      await writeFile(sentinel, new Date().toISOString(), { mode: 0o600 });
-    }
     return result.installed;
   } catch (err) {
     // Failing silently is acceptable for an automatic migration.
@@ -234,8 +237,15 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
     // ignore — may not have been loaded
   }
 
+  // The legacy CLI spawned a detached daemon before launchd existed. It may
+  // still own port 7878 even after bootout, causing the new launchd job to
+  // exit cleanly and leave no supervisor. Explicitly transfer ownership.
+  await stopLegacyDaemonForTakeover();
+
   await promisifiedExecFile("launchctl", ["bootstrap", domain, plistDest]);
   await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
+  await waitForManagedDaemonReady();
+  await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
 
   return {
     installed: true,
@@ -286,10 +296,15 @@ export async function uninstallLaunchdDaemon(): Promise<{ removed: boolean; mess
 
   await unlink(plistDest);
   // Clean up the sentinel so a future CLI run can re-offer auto-install if desired.
-  try {
-    await unlink(autoInstallSentinelPath());
-  } catch {
-    // ignore
+  for (const sentinel of [
+    autoInstallSentinelPath(),
+    path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
+  ]) {
+    try {
+      await unlink(sentinel);
+    } catch {
+      // ignore
+    }
   }
 
   return {
@@ -341,4 +356,25 @@ export async function launchdStatus(): Promise<LaunchdStatus> {
 
 export function launchdPlistPath(): string {
   return plistPath();
+}
+
+/** Start an installed launchd job without creating a detached daemon. */
+export async function startLaunchdDaemon(): Promise<boolean> {
+  assertMacOS();
+  const plistDest = plistPath();
+  const installed = await readFile(plistDest, "utf8")
+    .then(() => true)
+    .catch(() => false);
+  if (!installed) {
+    return false;
+  }
+
+  const domain = launchctlDomain();
+  try {
+    await promisifiedExecFile("launchctl", ["kickstart", "-k", `${domain}/${LAUNCHD_LABEL}`]);
+  } catch {
+    await promisifiedExecFile("launchctl", ["bootstrap", domain, plistDest]);
+    await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
+  }
+  return true;
 }

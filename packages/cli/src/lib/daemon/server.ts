@@ -111,7 +111,7 @@ async function listenOrExitOnRace(server: Server, port: number): Promise<void> {
         server.removeListener("error", onError);
         void probeHealthz(port).then((healthy) => {
           if (healthy) {
-            process.exit(0);
+            process.exit(healthyPortRaceExitCode());
           }
           process.stderr.write(
             `[togetherlink daemon] port ${port} in use by a non-daemon process.\n`,
@@ -129,6 +129,16 @@ async function listenOrExitOnRace(server: Server, port: number): Promise<void> {
       resolve();
     });
   });
+}
+
+/**
+ * A detached concurrent spawn may yield to an existing healthy daemon and
+ * finish successfully. A launchd/systemd-owned daemon must instead fail so
+ * its supervisor retries and eventually takes the port when the legacy owner
+ * disappears.
+ */
+export function healthyPortRaceExitCode(): 0 | 1 {
+  return process.env.TOGETHERLINK_SUPERVISED === "1" ? 1 : 0;
 }
 
 /**

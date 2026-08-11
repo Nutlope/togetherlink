@@ -15,6 +15,7 @@ import {
 } from "./server.js";
 import type { RegisterSessionRequest } from "./state.js";
 import { togetherlinkHome, isProcessAlive } from "../paths.js";
+import { runningFromBundle } from "./detect-bundle.js";
 
 const HEALTH_POLL_INTERVAL_MS = 50;
 const HEALTH_POLL_TIMEOUT_MS = 5000;
@@ -60,25 +61,22 @@ export async function ensureDaemon(): Promise<{ url: string }> {
   // removed it on shutdown, but a kill -9 leaves it stale).
   await clearStalePidFile();
 
-  // Spawn a detached daemon copy of the CLI entrypoint. `process.execPath` is
-  // `bun` under the installed bundle (or `node` in dev). The script path MUST
-  // be the bin entry — the file that dispatches `--daemon` to `runDaemon()` —
-  // not this module's own URL: in the multi-file `tsc` dist build,
-  // `import.meta.url` points at `dist/lib/daemon/launch.js`, which only exports
-  // symbols and has no top-level main, so a self-spawn of it would exit
-  // immediately and ensureDaemon would always time out. `process.argv[1]` is
-  // the entry the user invoked (the bundle path, or `dist/bin/togetherlink.js`
-  // in dev) in both builds.
-  const scriptPath = currentScriptPath();
-  const child = spawn(process.execPath, [scriptPath, "--daemon"], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      TOGETHERLINK_PORT: String(port),
-    },
-  });
-  child.unref();
+  const startedBySupervisor = await startInstalledSupervisor();
+  if (!startedBySupervisor) {
+    // Dev builds and unsupported platforms retain the detached fallback. An
+    // installed macOS/Linux bundle must go through launchd/systemd so there is
+    // exactly one daemon owner and it can be restarted after a failure.
+    const scriptPath = currentScriptPath();
+    const child = spawn(process.execPath, [scriptPath, "--daemon"], {
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        TOGETHERLINK_PORT: String(port),
+      },
+    });
+    child.unref();
+  }
 
   // Wait for the new daemon to become healthy.
   const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
@@ -92,6 +90,21 @@ export async function ensureDaemon(): Promise<{ url: string }> {
     `togetherlink daemon did not become healthy on ${url} within ${HEALTH_POLL_TIMEOUT_MS / 1000}s. ` +
       `Set TOGETHERLINK_PORT to use a different port.`,
   );
+}
+
+async function startInstalledSupervisor(): Promise<boolean> {
+  if (!(await runningFromBundle())) {
+    return false;
+  }
+  const { autoStartStatus, startAutoStart } = await import("./platform-auto-start.js");
+  const status = await autoStartStatus();
+  if (!status.installed) {
+    return false;
+  }
+  if (!(await startAutoStart())) {
+    throw new Error("TogetherLink auto-start is installed but could not be started.");
+  }
+  return true;
 }
 
 type ScriptIdentity = {

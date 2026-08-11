@@ -31,6 +31,7 @@ describe("systemd unit generation", () => {
     expect(unit).toContain("RestartSec=10");
     expect(unit).toContain("WantedBy=default.target");
     expect(unit).toContain(`Environment=TOGETHERLINK_HOME=${tempHome}`);
+    expect(unit).toContain("Environment=TOGETHERLINK_SUPERVISED=1");
   });
 
   test("unit does not include temp agent paths in PATH", () => {

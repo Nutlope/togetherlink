@@ -24,6 +24,7 @@ import {
   type CodexMemoriesRequest,
 } from "./memories.js";
 import {
+  codexHistoricalImageReferences,
   resolveCodexRequestModel,
   toChatPayload,
   translateCodexRequestTools,
@@ -189,11 +190,16 @@ export async function handleCodexProxyRequest(
     perf.end({ status: res.statusCode, native: true, model: body.model });
     return;
   }
-  options.costTracker?.noteRequestBytes(request.rawBytes);
+  const inputEstimate = codexInputEstimate(body, request.rawBytes);
+  // Together reports one combined prompt-token total for text and vision. Do
+  // not use image-bearing turns to calibrate the text bytes/token ratio: a
+  // multi-megabyte PNG data URL is transport encoding, not model text.
+  options.costTracker?.noteRequestBytes(inputEstimate.hasImages ? 0 : request.rawBytes);
   options.costTracker?.beginRequest();
+  const estimatedBytes = inputEstimate.hasImages ? inputEstimate.textBytes : request.rawBytes;
   const estimatedInputTokens =
-    options.costTracker?.tokenEstimator.estimate(request.rawBytes) ??
-    Math.max(1, Math.ceil(request.rawBytes / 4));
+    options.costTracker?.tokenEstimator.estimate(estimatedBytes) ??
+    Math.max(1, Math.ceil(estimatedBytes / 4));
   const upstreamAbort = new AbortController();
   const markClientDisconnected = () => {
     if (upstreamAbort.signal.aborted) {
@@ -244,6 +250,7 @@ export async function handleCodexProxyRequest(
       ),
       requestModel.definition,
     );
+    const historicalImageReferences = codexHistoricalImageReferences(compactBody.input);
     const { response: chatResponse } = await perf.span("compaction_upstream_fetch", () =>
       callTogetherWithNativeTools(
         compactPayload,
@@ -253,7 +260,13 @@ export async function handleCodexProxyRequest(
       ),
     );
     recordUsage(chatResponse.usage, options, requestModel.definition);
-    const summary = compactionSummary(chatResponse);
+    const baseSummary = compactionSummary(chatResponse);
+    const summary =
+      historicalImageReferences.length > 0
+        ? `${baseSummary}\n\nHistorical image references preserved by TogetherLink:\n${historicalImageReferences
+            .map((reference) => `- ${reference}`)
+            .join("\n")}`
+        : baseSummary;
     if (compactV1) {
       writeJson(res, 200, togetherV1CompactOutput(body.input, summary));
     } else if (body.stream) {
@@ -317,6 +330,36 @@ export async function handleCodexProxyRequest(
   );
   writeJson(res, 200, responseBody);
   perf.end({ status: res.statusCode, stream: false });
+}
+
+function codexInputEstimate(
+  body: ResponsesRequest,
+  rawBytes: number,
+): { hasImages: boolean; textBytes: number } {
+  let hasImages = false;
+  const textOnlyJson = JSON.stringify(body, (_key, value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return value;
+    }
+    const record = value as Record<string, unknown>;
+    if (record.type === "input_image" || record.type === "image_url") {
+      hasImages = true;
+      return {
+        ...record,
+        ...(typeof record.image_url === "string" ? { image_url: "[image omitted]" } : {}),
+        ...(typeof record.file_id === "string" ? { file_id: "[image file]" } : {}),
+      };
+    }
+    if (record.type === "image_generation_call" && typeof record.result === "string") {
+      hasImages = true;
+      return { ...record, result: "[generated image omitted]" };
+    }
+    return value;
+  });
+  return {
+    hasImages,
+    textBytes: hasImages ? Buffer.byteLength(textOnlyJson, "utf8") : rawBytes,
+  };
 }
 
 function requireCodexTransport(req: IncomingMessage, res: ServerResponse): boolean {

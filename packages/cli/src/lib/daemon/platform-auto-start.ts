@@ -1,8 +1,15 @@
-import { isMacOS, installLaunchdDaemon, launchdStatus, uninstallLaunchdDaemon } from "./launchd.js";
+import {
+  isMacOS,
+  installLaunchdDaemon,
+  launchdStatus,
+  startLaunchdDaemon,
+  uninstallLaunchdDaemon,
+} from "./launchd.js";
 import {
   isLinux,
   maybeAutoInstallSystemdService,
   installSystemdService,
+  startSystemdService,
   systemdStatus,
   uninstallSystemdService,
 } from "./systemd.js";
@@ -36,6 +43,16 @@ export async function uninstallAutoStart(): Promise<{ removed: boolean; message:
     return uninstallSystemdService();
   }
   throw new Error("Auto-start is only supported on macOS and Linux.");
+}
+
+export async function startAutoStart(): Promise<boolean> {
+  if (isMacOS()) {
+    return startLaunchdDaemon();
+  }
+  if (isLinux()) {
+    return startSystemdService();
+  }
+  return false;
 }
 
 export type AutoStartStatus =

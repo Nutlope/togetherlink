@@ -3,6 +3,20 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## Unreleased
+
+### Operations
+
+- Migrated existing CLI users from legacy detached daemons to the installed `launchd` or `systemd`
+  service during upgrade, and made installed bundles restart that service instead of spawning a
+  competing daemon. Installation now waits for the managed daemon to become healthy before it
+  completes.
+
+### Tests
+
+- Added deterministic coverage for legacy-daemon takeover, supervised port races, and restarting an
+  installed service from the public daemon launcher.
+
 ## 0.7.9 - 2026-08-10
 
 ### Added

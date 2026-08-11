@@ -30,6 +30,8 @@ describe("launchd plist generation", () => {
     expect(plist).toContain("<key>KeepAlive</key>");
     expect(plist).toContain("<true/>");
     expect(plist).toContain("<key>EnvironmentVariables</key>");
+    expect(plist).toContain("<key>TOGETHERLINK_SUPERVISED</key>");
+    expect(plist).toContain("<string>1</string>");
     expect(plist).toContain(`<string>${tempHome}</string>`);
     expect(plist).toContain(`${tempHome}/bin/togetherlink`);
     expect(plist).toContain("daemon</string>");

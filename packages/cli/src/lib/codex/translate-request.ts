@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   findModelById,
   isVisionModel,
@@ -162,6 +162,7 @@ function toChatMessages(
     messages.push({ role: "user", content: body.input });
     return messages;
   }
+  const retiredViewImages = retiredViewImageMarkers(body.input ?? []);
   const pendingToolCalls: NonNullable<ChatMessage["tool_calls"]> = [];
   const pendingReasoningParts: string[] = [];
   const takePendingReasoning = () => {
@@ -286,7 +287,11 @@ function toChatMessages(
       messages.push({
         role: "tool",
         tool_call_id: item.call_id ?? "",
-        content: toChatToolOutput(item.output, requestModel?.definition ?? options.modelDefinition),
+        content: toChatToolOutput(
+          item.output,
+          requestModel?.definition ?? options.modelDefinition,
+          retiredViewImages.get(item.call_id ?? ""),
+        ),
       });
       continue;
     }
@@ -302,6 +307,198 @@ function toChatMessages(
   }
   flushPendingToolCalls();
   return messages;
+}
+
+type ViewImageArtifact = {
+  callId: string;
+  index: number;
+  imageUrl: string;
+  artifactId: string;
+  path: string;
+  observation: string;
+  duplicateOfLater: boolean;
+};
+
+type RetiredViewImage = Pick<
+  ViewImageArtifact,
+  "artifactId" | "path" | "observation" | "duplicateOfLater"
+>;
+
+function retiredViewImageMarkers(input: ResponsesInputItem[]): Map<string, RetiredViewImage> {
+  const artifacts = viewImageArtifacts(input);
+  const newest = artifacts.at(-1);
+  const retired = new Map<string, RetiredViewImage>();
+  for (const artifact of artifacts) {
+    if (artifact === newest || (!artifact.observation && !artifact.duplicateOfLater)) {
+      continue;
+    }
+    retired.set(artifact.callId, artifact);
+  }
+  return retired;
+}
+
+function viewImageArtifacts(input: ResponsesInputItem[]): ViewImageArtifact[] {
+  const viewImagePaths = new Map<string, string>();
+  for (const rawItem of input) {
+    const item = normalizeTogetherCompactionItem(rawItem);
+    if (item?.type !== "function_call" || item.name !== "view_image" || !item.call_id) {
+      continue;
+    }
+    const path = viewImagePath(item.arguments);
+    viewImagePaths.set(item.call_id, path);
+  }
+
+  const imageOutputs: Array<{ index: number; callId: string; imageUrl: string; path: string }> = [];
+  for (const [index, rawItem] of input.entries()) {
+    const item = normalizeTogetherCompactionItem(rawItem);
+    const callId = item?.call_id ?? "";
+    if (item?.type !== "function_call_output" || !viewImagePaths.has(callId)) {
+      continue;
+    }
+    const imageUrl = firstToolImageUrl(item.output);
+    if (imageUrl) {
+      imageOutputs.push({ index, callId, imageUrl, path: viewImagePaths.get(callId) ?? "" });
+    }
+  }
+
+  const identified = imageOutputs.map((image) => ({
+    ...image,
+    artifactId: imageArtifactId(image.imageUrl),
+    observation: followingAssistantObservation(input, image.index),
+  }));
+  return identified.map((image, index) => ({
+    ...image,
+    duplicateOfLater: identified
+      .slice(index + 1)
+      .some((candidate) => candidate.artifactId === image.artifactId),
+  }));
+}
+
+export function codexHistoricalImageReferences(input: ResponsesRequest["input"]): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const references = existingHistoricalImageReferences(input);
+  for (const artifact of viewImageArtifacts(input)) {
+    if (!artifact.observation) {
+      continue;
+    }
+    const path = artifact.path ? ` Original path: ${JSON.stringify(artifact.path)}.` : "";
+    references.set(
+      artifact.artifactId,
+      `[Historical image img_${artifact.artifactId}] Observation: ${artifact.observation}.${path} ` +
+        "Re-run view_image for pixel-level inspection.",
+    );
+  }
+  return [...references.values()];
+}
+
+function existingHistoricalImageReferences(input: ResponsesInputItem[]): Map<string, string> {
+  const references = new Map<string, string>();
+  const pattern = /\[Historical image img_([0-9a-f]{12})\][^\r\n]*/g;
+  for (const rawItem of input) {
+    const item = normalizeTogetherCompactionItem(rawItem);
+    if (!item || (item.type !== "message" && !item.role)) {
+      continue;
+    }
+    const text = stringifyResponsesContent(item.content);
+    for (const match of text.matchAll(pattern)) {
+      const artifactId = match[1];
+      const reference = match[0];
+      if (artifactId && reference) {
+        references.set(artifactId, reference);
+      }
+    }
+  }
+  return references;
+}
+
+function imageArtifactId(imageUrl: string): string {
+  let content: string | Buffer = imageUrl;
+  if (imageUrl.startsWith("data:")) {
+    const comma = imageUrl.indexOf(",");
+    if (comma >= 0) {
+      const metadata = imageUrl.slice(5, comma);
+      const payload = imageUrl.slice(comma + 1);
+      try {
+        content = metadata.split(";").includes("base64")
+          ? Buffer.from(payload, "base64")
+          : Buffer.from(decodeURIComponent(payload), "utf8");
+      } catch {
+        content = payload;
+      }
+    }
+  }
+  return createHash("sha256").update(content).digest("hex").slice(0, 12);
+}
+
+function retiredViewImageText(image: RetiredViewImage): string {
+  const evidence = image.observation
+    ? `Observation: ${image.observation}.`
+    : "An identical image remains later in the conversation.";
+  const reopen = image.path
+    ? ` Re-run view_image with path ${JSON.stringify(image.path)} if pixel-level inspection is needed.`
+    : " Re-run view_image if pixel-level inspection is needed.";
+  return `[Historical view_image screenshot retired from replay: img_${image.artifactId}. ${evidence}${reopen}]`;
+}
+
+function viewImagePath(argumentsValue: unknown): string {
+  try {
+    const parsed =
+      typeof argumentsValue === "string" ? JSON.parse(argumentsValue) : (argumentsValue ?? {});
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const path = (parsed as { path?: unknown }).path;
+      return typeof path === "string" ? path : "";
+    }
+  } catch {
+    // Keep the screenshot usable even if an old tool call has malformed arguments.
+  }
+  return "";
+}
+
+function firstToolImageUrl(output: unknown): string {
+  if (!Array.isArray(output)) {
+    return "";
+  }
+  for (const rawPart of output) {
+    if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) {
+      continue;
+    }
+    const part = rawPart as ResponsesContentPart;
+    if (part.type === "input_image" && typeof part.image_url === "string") {
+      return part.image_url;
+    }
+  }
+  return "";
+}
+
+function followingAssistantObservation(input: ResponsesInputItem[], outputIndex: number): string {
+  for (let index = outputIndex + 1; index < input.length; index += 1) {
+    const rawItem = input[index];
+    if (!rawItem) {
+      continue;
+    }
+    const item = normalizeTogetherCompactionItem(rawItem);
+    if (!item) {
+      continue;
+    }
+    if (
+      (item.type === "function_call" && item.name === "view_image") ||
+      (item.type === "function_call_output" && firstToolImageUrl(item.output))
+    ) {
+      return "";
+    }
+    if ((item.type === "message" || item.role) && toChatRole(item.role) === "user") {
+      return "";
+    }
+    if ((item.type === "message" || item.role) && toChatRole(item.role) === "assistant") {
+      const observation = stringifyResponsesContent(item.content).trim();
+      if (observation) {
+        return observation.replace(/\s+/g, " ").slice(0, 1_000);
+      }
+    }
+  }
+  return "";
 }
 
 function toChatHistoryToolName(
@@ -686,7 +883,11 @@ function agentMessageHistory(item: ResponsesInputItem): string {
   return `Agent message from ${author} to ${recipient}: ${readable}`;
 }
 
-function toChatToolOutput(output: unknown, model: ModelDefinition): string | ChatContentPart[] {
+function toChatToolOutput(
+  output: unknown,
+  model: ModelDefinition,
+  retiredImage?: RetiredViewImage,
+): string | ChatContentPart[] {
   if (typeof output === "string") {
     return output;
   }
@@ -705,18 +906,20 @@ function toChatToolOutput(output: unknown, model: ModelDefinition): string | Cha
       parts.push({ type: "text", text: part.text });
     } else if (part.type === "input_image" && typeof part.image_url === "string") {
       parts.push(
-        isVisionModel(model)
-          ? {
-              type: "image_url",
-              image_url: {
-                url: part.image_url,
-                ...(part.detail ? { detail: part.detail } : {}),
+        retiredImage
+          ? { type: "text", text: retiredViewImageText(retiredImage) }
+          : isVisionModel(model)
+            ? {
+                type: "image_url",
+                image_url: {
+                  url: part.image_url,
+                  ...(part.detail ? { detail: part.detail } : {}),
+                },
+              }
+            : {
+                type: "text",
+                text: "[Image output is unavailable to the selected Together model.]",
               },
-            }
-          : {
-              type: "text",
-              text: "[Image output is unavailable to the selected Together model.]",
-            },
       );
     } else if (part.type === "input_audio") {
       parts.push({

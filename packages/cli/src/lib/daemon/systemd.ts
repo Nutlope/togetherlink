@@ -4,8 +4,10 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { togetherlinkHome } from "../paths.js";
 import { runningFromBundle } from "./detect-bundle.js";
+import { stopLegacyDaemonForTakeover, waitForManagedDaemonReady } from "./takeover.js";
 
-const AUTO_INSTALL_SENTINEL = "systemd-auto-installed";
+const AUTO_INSTALL_SENTINEL = "systemd-supervision-v2-installed";
+const LEGACY_AUTO_INSTALL_SENTINEL = "systemd-auto-installed";
 const SYSTEMD_SERVICE_NAME = "togetherlink-daemon.service";
 
 export function isLinux(): boolean {
@@ -66,6 +68,7 @@ export function generateSystemdUnit(overrides?: { program?: string; home?: strin
     "",
     "[Service]",
     `Environment=TOGETHERLINK_HOME=${home}`,
+    "Environment=TOGETHERLINK_SUPERVISED=1",
     `Environment=PATH=${systemdPath()}`,
     `ExecStart=${quotedProgram} daemon serve`,
     "Restart=on-failure",
@@ -115,9 +118,6 @@ export async function maybeAutoInstallSystemdService(): Promise<boolean> {
 
   try {
     const result = await installSystemdService();
-    if (result.installed) {
-      await writeFile(sentinel, new Date().toISOString(), { mode: 0o600 });
-    }
     return result.installed;
   } catch {
     return false;
@@ -143,9 +143,17 @@ export async function installSystemdService(): Promise<{ installed: boolean; mes
 
   const unit = generateSystemdUnit();
   await writeFile(svcPath, unit, { mode: 0o644 });
+  try {
+    await promisifiedExecFile("systemctl", ["--user", "stop", SYSTEMD_SERVICE_NAME]);
+  } catch {
+    // The legacy daemon may not have been systemd-managed.
+  }
+  await stopLegacyDaemonForTakeover();
   await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
   await promisifiedExecFile("systemctl", ["--user", "enable", SYSTEMD_SERVICE_NAME]);
   await promisifiedExecFile("systemctl", ["--user", "start", SYSTEMD_SERVICE_NAME]);
+  await waitForManagedDaemonReady();
+  await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
 
   return {
     installed: true,
@@ -192,10 +200,15 @@ export async function uninstallSystemdService(): Promise<{ removed: boolean; mes
   }
 
   await unlink(svcPath);
-  try {
-    await unlink(autoInstallSentinelPath());
-  } catch {
-    // ignore
+  for (const sentinel of [
+    autoInstallSentinelPath(),
+    path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
+  ]) {
+    try {
+      await unlink(sentinel);
+    } catch {
+      // ignore
+    }
   }
 
   await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
@@ -245,4 +258,17 @@ export async function systemdStatus(): Promise<SystemdStatus> {
 
 export function systemdServicePath(): string {
   return servicePath();
+}
+
+/** Start an installed systemd user service without creating a detached daemon. */
+export async function startSystemdService(): Promise<boolean> {
+  assertLinux();
+  const installed = await readFile(servicePath(), "utf8")
+    .then(() => true)
+    .catch(() => false);
+  if (!installed) {
+    return false;
+  }
+  await promisifiedExecFile("systemctl", ["--user", "start", SYSTEMD_SERVICE_NAME]);
+  return true;
 }

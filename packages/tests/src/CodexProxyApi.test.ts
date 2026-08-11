@@ -7,6 +7,7 @@ import {
   QWEN_3_5_9B,
   QWEN_3_7_MAX,
 } from "@togetherlink/models";
+import { CostTracker } from "../../cli/src/lib/cost.js";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 import { asRecord } from "./json-lines.js";
 
@@ -273,7 +274,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
-  test("forwards historical images without rewriting the conversation", async () => {
+  test("preserves historical user-attached images without rewriting them", async () => {
     const requests: Array<{ messages?: unknown[] }> = [];
     vi.stubGlobal(
       "fetch",
@@ -329,6 +330,174 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(upstreamBody).toContain("OLDER_IMAGE");
     expect(upstreamBody).toContain("NEWER_IMAGE");
     expect(upstreamBody).not.toContain("togetherlink removed an older image");
+  });
+
+  test("retires stale view_image screenshots while preserving the newest screenshot", async () => {
+    const requests: Array<{ messages?: unknown[] }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)) as { messages?: unknown[] });
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: DEFAULT_MODEL.id,
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Inspect the first screenshot." }],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_old_image",
+            arguments: JSON.stringify({ path: "/tmp/old.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_old_image",
+            output: [{ type: "input_image", image_url: "data:image/png;base64,STALE_TOOL_IMAGE" }],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text: "The first screenshot shows the settings page with a red error banner.",
+              },
+            ],
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Now inspect the updated screenshot." }],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_duplicate_image",
+            arguments: JSON.stringify({ path: "/tmp/new.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_duplicate_image",
+            output: [
+              {
+                type: "input_image",
+                image_url: "data:image/png;name=duplicate.png;base64,Q1VSUkVOVF9UT09MX0lNQUdF",
+              },
+            ],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_new_image",
+            arguments: JSON.stringify({ path: "/tmp/new.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_new_image",
+            output: [
+              {
+                type: "input_image",
+                image_url: "data:image/png;base64,Q1VSUkVOVF9UT09MX0lNQUdF",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...options,
+        modelId: DEFAULT_MODEL.id,
+        targetModelId: DEFAULT_MODEL.id,
+        modelName: DEFAULT_MODEL.name,
+        modelDefinition: DEFAULT_MODEL,
+      },
+    );
+
+    const upstreamBody = JSON.stringify(requests[0]);
+    expect(upstreamBody).not.toContain("STALE_TOOL_IMAGE");
+    expect(upstreamBody).toContain("Q1VSUkVOVF9UT09MX0lNQUdF");
+    expect(upstreamBody.match(/Q1VSUkVOVF9UT09MX0lNQUdF/g)).toHaveLength(1);
+    expect(upstreamBody).toContain("Historical view_image screenshot retired from replay");
+    expect(upstreamBody).toContain("The first screenshot shows the settings page");
+    expect(upstreamBody).toContain("/tmp/old.png");
+  });
+
+  test("keeps an older view_image screenshot when no assistant observation was captured", async () => {
+    const requests: Array<{ messages?: unknown[] }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)) as { messages?: unknown[] });
+        return jsonResponse({ choices: [{ message: { content: "DONE" }, finish_reason: "stop" }] });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: DEFAULT_MODEL.id,
+        input: [
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_unobserved",
+            arguments: JSON.stringify({ path: "/tmp/unobserved.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_unobserved",
+            output: [{ type: "input_image", image_url: "data:image/png;base64,UNOBSERVED_IMAGE" }],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_current",
+            arguments: JSON.stringify({ path: "/tmp/current.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_current",
+            output: [{ type: "input_image", image_url: "data:image/png;base64,CURRENT_IMAGE" }],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text: "The current screenshot shows a successful result.",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...options,
+        modelId: DEFAULT_MODEL.id,
+        targetModelId: DEFAULT_MODEL.id,
+        modelName: DEFAULT_MODEL.name,
+        modelDefinition: DEFAULT_MODEL,
+      },
+    );
+
+    const upstreamBody = JSON.stringify(requests[0]);
+    expect(upstreamBody).toContain("UNOBSERVED_IMAGE");
+    expect(upstreamBody).toContain("CURRENT_IMAGE");
   });
 
   test("preserves prior reasoning items when translating Codex history", async () => {
@@ -2108,6 +2277,55 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
 
     expect(requests[1]?.max_tokens).toBe(1234);
+
+    await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "Inspect this image." },
+            {
+              type: "input_image",
+              image_url: `data:image/png;base64,${"A".repeat(2_000_000)}`,
+            },
+          ],
+        },
+      ],
+    });
+
+    // Base64 transport bytes are not text tokens and must not consume the
+    // output allowance. Vision usage is accounted for separately by Together.
+    expect(requests[2]?.max_tokens).toBe(GLM_5_2.limit.output);
+
+    const calibratedCostTracker = new CostTracker(GLM_5_2);
+    calibratedCostTracker.noteRequestBytes(10_000);
+    calibratedCostTracker.beginRequest();
+    calibratedCostTracker.addUsage(10_000, 0, 1, GLM_5_2);
+    await postResponses(
+      {
+        model: GLM_5_2.id,
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "x".repeat(400_000) },
+              {
+                type: "input_image",
+                image_url: `data:image/png;base64,${"A".repeat(2_000_000)}`,
+              },
+            ],
+          },
+        ],
+      },
+      { ...options, costTracker: calibratedCostTracker },
+    );
+
+    // Image-bearing turns still use the calibrated estimator for their text;
+    // only the image transport bytes are excluded.
+    expect(requests[3]?.max_tokens).toBeLessThan(GLM_5_2.limit.output);
   });
 
   test("routes Codex memory extraction requests to the default long-context Together model", async () => {

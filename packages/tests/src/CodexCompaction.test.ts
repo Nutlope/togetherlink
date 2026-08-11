@@ -55,7 +55,22 @@ describe("Codex compaction compatibility", () => {
       model: GLM_5_2.id,
       stream: false,
       tools: [{ type: "function", name: "dangerous_tool", parameters: { type: "object" } }],
-      input: [message("user", "Preserve marker BLUE-CHAIR-8273."), { type: "compaction_trigger" }],
+      input: [
+        message("user", "Preserve marker BLUE-CHAIR-8273."),
+        {
+          type: "function_call",
+          name: "view_image",
+          call_id: "call_v2_image",
+          arguments: JSON.stringify({ path: "/tmp/v2-image.png" }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_v2_image",
+          output: [{ type: "input_image", image_url: "data:image/png;base64,V2_IMAGE_BYTES" }],
+        },
+        message("assistant", "The V2 screenshot shows the migration completed."),
+        { type: "compaction_trigger" },
+      ],
     });
 
     expect(response.output).toHaveLength(1);
@@ -69,6 +84,14 @@ describe("Codex compaction compatibility", () => {
     expect(response.output.some((item: any) => ["reasoning", "message"].includes(item.type))).toBe(
       false,
     );
+    const encodedSummary = response.output[0]?.encrypted_content as string;
+    const decodedSummary = Buffer.from(encodedSummary.slice("tlc1:".length), "base64").toString(
+      "utf8",
+    );
+    expect(decodedSummary).toContain("img_");
+    expect(decodedSummary).toContain("/tmp/v2-image.png");
+    expect(decodedSummary).toContain("The V2 screenshot shows the migration completed.");
+    expect(decodedSummary).not.toContain("V2_IMAGE_BYTES");
     expect(upstreamBodies).toHaveLength(1);
     expect(upstreamBodies[0]).not.toHaveProperty("tools");
     expect(upstreamBodies[0]?.tool_choice).toBe("none");
@@ -77,6 +100,25 @@ describe("Codex compaction compatibility", () => {
         expect.objectContaining({ content: expect.stringContaining("trigger") }),
       ]),
     );
+
+    const repeated = await postCodexPath("/v1/responses", {
+      model: GLM_5_2.id,
+      stream: false,
+      input: [
+        response.output[0],
+        message("user", "Compact the continuation again."),
+        {
+          type: "compaction_trigger",
+        },
+      ],
+    });
+    const repeatedEncoded = repeated.output[0]?.encrypted_content as string;
+    const repeatedSummary = Buffer.from(repeatedEncoded.slice("tlc1:".length), "base64").toString(
+      "utf8",
+    );
+    expect(repeatedSummary).toContain("img_");
+    expect(repeatedSummary).toContain("/tmp/v2-image.png");
+    expect(repeatedSummary).toContain("The V2 screenshot shows the migration completed.");
   });
 
   test("v2 streaming compaction emits one compaction item and no ordinary output", async () => {
@@ -171,6 +213,18 @@ describe("Codex compaction compatibility", () => {
       input: [
         message("user", "x".repeat(90_000)),
         message("assistant", "old answer"),
+        {
+          type: "function_call",
+          name: "view_image",
+          call_id: "call_compact_image",
+          arguments: JSON.stringify({ path: "/tmp/compact.png" }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_compact_image",
+          output: [{ type: "input_image", image_url: "data:image/png;base64,COMPACT_IMAGE_BYTES" }],
+        },
+        message("assistant", "The compacted screenshot shows deployment succeeded."),
         message("user", "Newest user constraint."),
       ],
       tools: [{ type: "function", name: "dangerous_tool", parameters: { type: "object" } }],
@@ -188,6 +242,12 @@ describe("Codex compaction compatibility", () => {
     expect(retainedText.length).toBeLessThanOrEqual(80_000);
     expect(retainedText).toContain("Newest user constraint.");
     expect(response.output.at(-1)?.content[0]?.text).toContain("V1 durable summary.");
+    expect(response.output.at(-1)?.content[0]?.text).toContain("img_");
+    expect(response.output.at(-1)?.content[0]?.text).toContain("/tmp/compact.png");
+    expect(response.output.at(-1)?.content[0]?.text).toContain(
+      "The compacted screenshot shows deployment succeeded.",
+    );
+    expect(JSON.stringify(response.output)).not.toContain("COMPACT_IMAGE_BYTES");
     expect(upstreamBodies[0]).not.toHaveProperty("tools");
     expect(upstreamBodies[0]?.tool_choice).toBe("none");
   });
