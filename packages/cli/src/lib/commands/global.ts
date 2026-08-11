@@ -19,9 +19,9 @@ Usage:
   togetherlink configure
   togetherlink whoami
   togetherlink chatgpt [--model <model>] [--restore]  (alpha)
-  togetherlink daemon install-launchd    enable daemon auto-start at login (macOS)
-  togetherlink daemon uninstall-launchd  disable daemon auto-start at login (macOS)
-  togetherlink daemon status             show launchd agent status
+  togetherlink daemon install    enable daemon auto-start at login (macOS/Linux)
+  togetherlink daemon uninstall  disable daemon auto-start at login (macOS/Linux)
+  togetherlink daemon status     show auto-start service status
   togetherlink codex [...]       (alias: tcodex)
   togetherlink grok [...]        (alias: tgrok)
   togetherlink hermes [...]      (alias: thermes)
