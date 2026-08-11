@@ -1,41 +1,26 @@
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { togetherlinkHome } from "../paths.js";
+import { runningFromBundle } from "./detect-bundle.js";
 
 const AUTO_INSTALL_SENTINEL = "launchd-auto-installed";
+const LAUNCHD_LABEL = "com.togetherlink.daemon";
 
 function autoInstallSentinelPath(): string {
   return path.join(togetherlinkHome(), AUTO_INSTALL_SENTINEL);
 }
 
-export async function maybeAutoInstallLaunchdDaemon(): Promise<boolean> {
-  if (!isMacOS()) return false;
-  // Do not try to (re-)install the agent from inside the launchd-managed daemon
-  // process itself; the agent is already responsible for starting it.
-  if (process.argv.includes("--daemon")) return false;
-  if (process.argv[2] === "daemon") return false;
-  const sentinel = autoInstallSentinelPath();
-  const already = await readFile(sentinel, "utf8")
-    .then(() => true)
-    .catch(() => false);
-  if (already) return false;
-  // Only auto-install for the installed bundle, not a dev checkout.
-  if (!(await runningFromBundle())) return false;
-  try {
-    const result = await installLaunchdDaemon();
-    if (result.installed) {
-      await writeFile(sentinel, new Date().toISOString(), { mode: 0o600 });
-    }
-    return result.installed;
-  } catch (err) {
-    // Failing silently is acceptable for an automatic migration.
-    return false;
-  }
+export function isMacOS(): boolean {
+  return process.platform === "darwin";
 }
 
-const LAUNCHD_LABEL = "com.togetherlink.daemon";
+function assertMacOS(): void {
+  if (!isMacOS()) {
+    throw new Error("LaunchAgents are only supported on macOS.");
+  }
+}
 
 function launchAgentsDir(): string {
   return path.join(os.homedir(), "Library", "LaunchAgents");
@@ -49,37 +34,41 @@ function bundleExecutable(): string {
   return path.join(togetherlinkHome(), "bin", "togetherlink");
 }
 
+function launchctlDomain(): string {
+  return `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+}
+
+function isInsideLaunchdJob(): boolean {
+  return process.env.LAUNCHD_SESSION_TYPE !== undefined || process.env.PPID === "1";
+}
+
 /**
- * Return a PATH string that should let the launchd job find `bun` even when
- * the user's shell startup files have not been sourced. Common install
- * locations plus the current process PATH are included.
+ * Return a conservative PATH that lets the launchd job find `bun` without
+ * leaking the current caller's PATH, which may contain temp agent/runtime
+ * directories. The common macOS package-manager dirs and bun's default
+ * install location are included.
  */
 export function launchdPath(): string {
   const home = os.homedir();
-  const parts = [
+  return [
     path.join(home, ".bun", "bin"),
     "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
     "/usr/local/bin",
+    "/usr/local/sbin",
     "/usr/bin",
     "/bin",
     "/usr/sbin",
     "/sbin",
-  ];
-  if (process.env.PATH) {
-    for (const part of process.env.PATH.split(":").map((p) => p.trim())) {
-      if (part && !parts.includes(part)) {
-        parts.push(part);
-      }
-    }
-  }
-  return parts.join(":");
+  ].join(":");
 }
 
 type LaunchdPlist = {
   Label: string;
   ProgramArguments: string[];
   RunAtLoad: boolean;
-  KeepAlive: boolean;
+  KeepAlive: { SuccessfulExit: boolean };
+  ThrottleInterval: number;
   StandardOutPath: string;
   StandardErrorPath: string;
   EnvironmentVariables: {
@@ -88,25 +77,6 @@ type LaunchdPlist = {
   };
 };
 
-export function generateLaunchdPlist(overrides?: { program?: string; home?: string }): string {
-  const home = overrides?.home ?? togetherlinkHome();
-  const program = overrides?.program ?? bundleExecutable();
-  const logDir = path.join(home, "logs");
-  const plist: LaunchdPlist = {
-    Label: LAUNCHD_LABEL,
-    ProgramArguments: [program, "daemon", "serve"],
-    RunAtLoad: true,
-    KeepAlive: true,
-    StandardOutPath: path.join(logDir, "daemon.log"),
-    StandardErrorPath: path.join(logDir, "daemon.log"),
-    EnvironmentVariables: {
-      TOGETHERLINK_HOME: home,
-      PATH: launchdPath(),
-    },
-  };
-  return buildPlist(plist);
-}
-
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -114,6 +84,16 @@ function escapeXml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function renderKeepAlive(value: LaunchdPlist["KeepAlive"]): string {
+  const lines = ["  <dict>"];
+  for (const [k, v] of Object.entries(value)) {
+    lines.push(`    <key>${k}</key>`);
+    lines.push(v ? "    <true/>" : "    <false/>");
+  }
+  lines.push("  </dict>");
+  return lines.join("\n");
 }
 
 function buildPlist(plist: LaunchdPlist): string {
@@ -135,7 +115,9 @@ function buildPlist(plist: LaunchdPlist): string {
     `  <key>RunAtLoad</key>`,
     plist.RunAtLoad ? "  <true/>" : "  <false/>",
     `  <key>KeepAlive</key>`,
-    plist.KeepAlive ? "  <true/>" : "  <false/>",
+    renderKeepAlive(plist.KeepAlive),
+    `  <key>ThrottleInterval</key>`,
+    `  <integer>${plist.ThrottleInterval}</integer>`,
     `  <key>StandardOutPath</key>`,
     `  <string>${escapeXml(plist.StandardOutPath)}</string>`,
     `  <key>StandardErrorPath</key>`,
@@ -154,6 +136,26 @@ function buildPlist(plist: LaunchdPlist): string {
   return lines.join("\n");
 }
 
+export function generateLaunchdPlist(overrides?: { program?: string; home?: string }): string {
+  const home = overrides?.home ?? togetherlinkHome();
+  const program = overrides?.program ?? bundleExecutable();
+  const logDir = path.join(home, "logs");
+  const plist: LaunchdPlist = {
+    Label: LAUNCHD_LABEL,
+    ProgramArguments: [program, "daemon", "serve"],
+    RunAtLoad: true,
+    KeepAlive: { SuccessfulExit: false },
+    ThrottleInterval: 10,
+    StandardOutPath: path.join(logDir, "daemon.log"),
+    StandardErrorPath: path.join(logDir, "daemon.log"),
+    EnvironmentVariables: {
+      TOGETHERLINK_HOME: home,
+      PATH: launchdPath(),
+    },
+  };
+  return buildPlist(plist);
+}
+
 function promisifiedExecFile(
   file: string,
   args: string[],
@@ -170,27 +172,32 @@ function promisifiedExecFile(
   });
 }
 
-export function isMacOS(): boolean {
-  return process.platform === "darwin";
-}
+/**
+ * One-time migration: install the launchd agent for existing macOS users the
+ * first time they run the installed bundle. It is silent, non-blocking, and
+ * skipped when already installed or when running the daemon itself.
+ */
+export async function maybeAutoInstallLaunchdDaemon(): Promise<boolean> {
+  if (!isMacOS()) return false;
+  if (isInsideLaunchdJob()) return false;
+  if (process.argv.includes("--daemon") || process.argv[2] === "daemon") return false;
 
-function assertMacOS(): void {
-  if (!isMacOS()) {
-    throw new Error("LaunchAgents are only supported on macOS.");
-  }
-}
+  const sentinel = autoInstallSentinelPath();
+  const already = await readFile(sentinel, "utf8")
+    .then(() => true)
+    .catch(() => false);
+  if (already) return false;
 
-async function runningFromBundle(): Promise<boolean> {
-  const argv1 = process.argv[1];
-  if (!argv1) return false;
+  if (!(await runningFromBundle())) return false;
+
   try {
-    const resolved = await realpath(argv1);
-    const home = togetherlinkHome();
-    return (
-      resolved === path.join(home, "bin", "togetherlink.js") ||
-      resolved === path.join(home, "bin", "togetherlink")
-    );
-  } catch {
+    const result = await installLaunchdDaemon();
+    if (result.installed) {
+      await writeFile(sentinel, new Date().toISOString(), { mode: 0o600 });
+    }
+    return result.installed;
+  } catch (err) {
+    // Failing silently is acceptable for an automatic migration.
     return false;
   }
 }
@@ -203,6 +210,7 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
   assertMacOS();
   const plistDest = plistPath();
   const agentsDir = launchAgentsDir();
+  const domain = launchctlDomain();
   await mkdir(agentsDir, { recursive: true });
   await mkdir(path.join(togetherlinkHome(), "logs"), { recursive: true });
 
@@ -219,16 +227,15 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
   const plistContent = generateLaunchdPlist();
   await writeFile(plistDest, plistContent, { mode: 0o644 });
 
-  // Best-effort unload first to avoid "service already loaded" errors.
-  await Promise.resolve().then(async () => {
-    try {
-      await promisifiedExecFile("launchctl", ["unload", plistDest]);
-    } catch {
-      // ignored
-    }
-  });
+  // Best-effort bootout of any previous registration before bootstrapping.
+  try {
+    await promisifiedExecFile("launchctl", ["bootout", domain, plistDest]);
+  } catch {
+    // ignore — may not have been loaded
+  }
 
-  await promisifiedExecFile("launchctl", ["load", plistDest]);
+  await promisifiedExecFile("launchctl", ["bootstrap", domain, plistDest]);
+  await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
 
   return {
     installed: true,
@@ -242,6 +249,7 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
 export async function uninstallLaunchdDaemon(): Promise<{ removed: boolean; message: string }> {
   assertMacOS();
   const plistDest = plistPath();
+  const domain = launchctlDomain();
 
   const exists = await readFile(plistDest, "utf8")
     .then(() => true)
@@ -254,16 +262,35 @@ export async function uninstallLaunchdDaemon(): Promise<{ removed: boolean; mess
     };
   }
 
+  // Stop the job before removing the plist so we don't leave a loaded orphan.
+  let stopped = false;
   try {
-    await promisifiedExecFile("launchctl", ["unload", plistDest]);
+    await promisifiedExecFile("launchctl", ["bootout", domain, plistDest]);
+    stopped = true;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException)?.code;
-    if (code !== "ENOENT") {
-      // ignore load-domain errors; the job may not be running
-    }
+    const message = (err as Error).message ?? "";
+    stopped =
+      message.includes("No such file") ||
+      message.includes("not loaded") ||
+      (err as NodeJS.ErrnoException).code === "ENOENT";
+  }
+
+  if (!stopped) {
+    return {
+      removed: false,
+      message:
+        `Could not unload launchd agent at ${plistDest}. ` +
+        `Run \`launchctl bootout ${domain} '${plistDest}'\` and remove the file manually.`,
+    };
   }
 
   await unlink(plistDest);
+  // Clean up the sentinel so a future CLI run can re-offer auto-install if desired.
+  try {
+    await unlink(autoInstallSentinelPath());
+  } catch {
+    // ignore
+  }
 
   return {
     removed: true,
@@ -281,6 +308,7 @@ export type LaunchdStatus =
 export async function launchdStatus(): Promise<LaunchdStatus> {
   assertMacOS();
   const plistDest = plistPath();
+  const domain = launchctlDomain();
 
   const installed = await readFile(plistDest, "utf8")
     .then(() => true)
@@ -295,8 +323,11 @@ export async function launchdStatus(): Promise<LaunchdStatus> {
 
   let loaded = false;
   try {
-    const { stdout } = await promisifiedExecFile("launchctl", ["list", LAUNCHD_LABEL]);
-    loaded = stdout.includes("PID") || !stdout.includes("Could not find");
+    const { stdout } = await promisifiedExecFile("launchctl", [
+      "print",
+      `${domain}/${LAUNCHD_LABEL}`,
+    ]);
+    loaded = stdout.includes("PID") || stdout.includes("state = running");
   } catch {
     loaded = false;
   }
