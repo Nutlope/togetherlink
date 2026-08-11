@@ -84,7 +84,7 @@ export function toTogetherCompactionPayload(
     ...translatedPayload,
     messages,
     max_tokens: Math.min(COMPACTION_MAX_OUTPUT_TOKENS, modelDefinition.limit.output),
-    tools: [],
+    tools: undefined as unknown as [],
     tool_choice: "none",
     stream: false,
   };

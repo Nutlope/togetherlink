@@ -227,7 +227,8 @@ export async function handleCodexProxyRequest(
   const compactV1 = path === CODEX_COMPACTION_PATH;
   const compactV2 = isTogetherCompactionV2(body);
   if (compactV1 || compactV2) {
-    const compactBody: ResponsesRequest = { ...body, tools: [] };
+    const compactBody: ResponsesRequest = structuredClone(body);
+    delete (compactBody as { tools?: unknown }).tools;
     const normalizedInput = compactionInput(body);
     if (normalizedInput !== undefined) {
       compactBody.input = normalizedInput;

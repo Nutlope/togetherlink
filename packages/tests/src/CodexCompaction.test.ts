@@ -70,7 +70,7 @@ describe("Codex compaction compatibility", () => {
       false,
     );
     expect(upstreamBodies).toHaveLength(1);
-    expect(upstreamBodies[0]?.tools).toEqual([]);
+    expect(upstreamBodies[0]).not.toHaveProperty("tools");
     expect(upstreamBodies[0]?.tool_choice).toBe("none");
     expect(upstreamBodies[0]?.messages).not.toEqual(
       expect.arrayContaining([
@@ -188,7 +188,7 @@ describe("Codex compaction compatibility", () => {
     expect(retainedText.length).toBeLessThanOrEqual(80_000);
     expect(retainedText).toContain("Newest user constraint.");
     expect(response.output.at(-1)?.content[0]?.text).toContain("V1 durable summary.");
-    expect(upstreamBodies[0]?.tools).toEqual([]);
+    expect(upstreamBodies[0]).not.toHaveProperty("tools");
     expect(upstreamBodies[0]?.tool_choice).toBe("none");
   });
 
