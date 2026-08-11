@@ -1,6 +1,6 @@
 {
   "name": "togetherlink",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "private": true,
   "description": "Use Together AI models in Claude Code, OpenCode, Codex, Grok Build, Hermes, and Pi Code",
   "license": "MIT",
