@@ -31,14 +31,24 @@ version 0.6.5; earlier release history remains available in Git.
   safety margin for request-estimation error.
 - Ended partially-started native responses cleanly when the upstream body fails after headers have
   already been sent.
-- Kept Exa web-search results inside structured `web_search_call` items when ChatGPT Desktop also
-  requests a client tool, instead of exposing raw search payloads as assistant replies.
+- Kept Exa web-search results inside structured `web_search_call` items instead of exposing raw
+  search payloads as assistant replies, and discarded unfinished pre-search drafts so Desktop
+  renders the search event before one clean final answer.
 
 ### Tests
 
 - Added deterministic coverage for compaction v1/v2, memories, native route pass-through,
   Responses-over-WebSocket routing and continuation, response item normalization, transport
   validation, context budgeting, error propagation, and mixed web-search/client-tool turns.
+
+### Operations
+
+- Added a macOS `launchd` user agent (`com.togetherlink.daemon`) that auto-starts the shared proxy
+  daemon at login and keeps it alive, so ChatGPT Desktop no longer hits `Connection refused` after
+  a MacBook restart.
+- Existing installed bundles silently install the agent once on the next CLI launch; new installs get
+  it automatically from `install.sh`.
+- Added `togetherlink daemon install-launchd`, `uninstall-launchd`, and `status` commands.
 
 ## 0.7.8 - 2026-08-10
 

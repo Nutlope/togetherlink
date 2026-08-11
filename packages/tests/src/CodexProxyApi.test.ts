@@ -1573,7 +1573,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
-  test("streams native web_search thinking and final answer deltas instead of buffering", async () => {
+  test("discards a pre-search draft before streaming the native web_search final answer", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     vi.stubGlobal(
@@ -1601,6 +1601,15 @@ describe("Codex Responses proxy tool compatibility", () => {
         if (togetherRequestCount === 1) {
           return sseResponse([
             { choices: [{ delta: { reasoning_content: "Need current docs. " } }] },
+            {
+              choices: [
+                {
+                  delta: {
+                    content: "The docs may have changed. Let me check the current",
+                  },
+                },
+              ],
+            },
             {
               choices: [
                 {
@@ -1668,6 +1677,17 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response).toContain('"type":"web_search_call"');
     expect(response).toContain('"action":{"type":"search","query":"Codex docs"}');
     expect(response).toContain("https://developers.openai.com/codex");
+    expect(response).not.toContain("The docs may have changed. Let me check the current");
+    const completed = response
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)) as Record<string, any>)
+      .find((event) => event.type === "response.completed");
+    expect(completed?.response.output.map((item: Record<string, unknown>) => item.type)).toEqual([
+      "reasoning",
+      "web_search_call",
+      "message",
+    ]);
 
     expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
     expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);

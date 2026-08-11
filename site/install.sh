@@ -240,5 +240,15 @@ if PATH="$BIN_DIR:$PATH" togetherlink --version >/dev/null 2>&1; then
   PATH="$BIN_DIR:$PATH" togetherlink __telemetry-install-completed >/dev/null 2>&1 || true
 fi
 
+# On macOS, install the launchd user agent so the shared proxy daemon starts
+# automatically at login and survives restarts.
+if [ "$(uname -s)" = "Darwin" ]; then
+  if PATH="$BIN_DIR:$PATH" togetherlink daemon install-launchd >/dev/null 2>&1; then
+    ok "Installed launchd agent: the TogetherLink daemon will start at login."
+  else
+    info "launchd agent not installed; the daemon will need to be started manually."
+  fi
+fi
+
 bold "Done. Run \`togetherlink help\` to get started."
 info "On first run, togetherlink will ask for your Together API key (Enter to skip)."

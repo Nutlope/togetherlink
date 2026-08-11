@@ -200,6 +200,7 @@ async function streamTogetherTurn(
   outputState: StreamOutputState,
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
+  deferText = false,
 ): Promise<StreamTurnResult> {
   const upstreamResult = await (perf?.span(
     "upstream_fetch",
@@ -307,16 +308,10 @@ async function streamTogetherTurn(
     if (delta.content) {
       madeProgress = true;
       perf?.markOnce("first_delta", { kind: "text" });
-      openTextOutputItem(res, outputState);
-      outputState.text += delta.content;
       text += delta.content;
-      writeResponsesSse(res, "response.output_text.delta", {
-        type: "response.output_text.delta",
-        item_id: outputState.textItemId,
-        output_index: outputState.textOutputIndex,
-        content_index: 0,
-        delta: delta.content,
-      });
+      if (!deferText) {
+        emitOutputTextDelta(res, outputState, delta.content);
+      }
     }
     for (const toolCall of delta.tool_calls ?? []) {
       if (toolCall.id || toolCall.function?.name || toolCall.function?.arguments) {
@@ -394,6 +389,7 @@ async function streamResponseWithNativeTools(
         outputState,
         signal,
         perf,
+        true,
       );
     } catch (err) {
       if (signal?.aborted) {
@@ -426,6 +422,7 @@ async function streamResponseWithNativeTools(
     lastFinishReason = turn.finishReason;
     const nativeToolCalls = turn.toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.name));
     if (nativeToolCalls.length === 0) {
+      emitOutputTextDelta(res, outputState, turn.text);
       return completeStreamResponse(
         res,
         body,
@@ -437,6 +434,7 @@ async function streamResponseWithNativeTools(
         modelDefinition,
         toolTranslation,
         turn.finishReason,
+        nativeSearchItems,
       );
     }
 
@@ -529,6 +527,7 @@ async function streamTogetherTurnWithIdleRetries(
   outputState: StreamOutputState,
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
+  deferText = false,
 ): Promise<StreamTurnResult> {
   const maxRetries = codexStreamIdleRetries();
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -543,6 +542,7 @@ async function streamTogetherTurnWithIdleRetries(
         outputState,
         signal,
         perf,
+        deferText,
       );
     } catch (err) {
       if (
@@ -562,6 +562,25 @@ async function streamTogetherTurnWithIdleRetries(
     }
   }
   throw new SseIdleTimeoutError(codexStreamIdleTimeoutMs());
+}
+
+function emitOutputTextDelta(
+  res: ServerResponse,
+  outputState: StreamOutputState,
+  delta: string,
+): void {
+  if (!delta) {
+    return;
+  }
+  openTextOutputItem(res, outputState);
+  outputState.text += delta;
+  writeResponsesSse(res, "response.output_text.delta", {
+    type: "response.output_text.delta",
+    item_id: outputState.textItemId,
+    output_index: outputState.textOutputIndex,
+    content_index: 0,
+    delta,
+  });
 }
 
 function streamOutputStarted(outputState: StreamOutputState): boolean {

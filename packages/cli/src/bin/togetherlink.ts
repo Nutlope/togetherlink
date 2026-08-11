@@ -13,6 +13,7 @@ import {
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
+import { maybeAutoInstallLaunchdDaemon } from "../lib/daemon/launchd.js";
 
 async function daemonStop(): Promise<void> {
   const { resolveDaemonPort, daemonUrl, daemonPidPath } = await import("../lib/daemon/server.js");
@@ -167,6 +168,14 @@ async function main() {
   // without the user re-sourcing .env every session.
   await loadStoredExaKey();
 
+  // One-time migration: ensure the shared daemon auto-starts at login on macOS
+  // for installed bundles. This is silent, non-blocking, and only runs once so
+  // users who previously removed the agent are not re-prompted.
+  const launchdAutoInstalled = await maybeAutoInstallLaunchdDaemon();
+  if (launchdAutoInstalled) {
+    console.log("Enabled TogetherLink daemon auto-start at login.");
+  }
+
   const parsed = parseArgs(process.argv.slice(2));
   const [rawCommand, rawVerb] = parsed.positional;
   // `chatgpt` is the canonical command now that the Codex desktop app merged
@@ -231,7 +240,9 @@ async function main() {
   if (command === "daemon") {
     const verb = rawVerb;
     if (verb === undefined) {
-      throw new Error('Unknown "daemon" command. Expected: stop.');
+      throw new Error(
+        'Unknown "daemon" command. Expected: stop, install-launchd, uninstall-launchd, status.',
+      );
     }
     if (verb === "stop") {
       await daemonStop();
@@ -241,6 +252,26 @@ async function main() {
       const { runDaemon } = await import("../lib/daemon/server.js");
       await runDaemon();
       return;
+    }
+    if (verb === "install-launchd" || verb === "uninstall-launchd" || verb === "status") {
+      const { installLaunchdDaemon, uninstallLaunchdDaemon, launchdStatus, isMacOS } =
+        await import("../lib/daemon/launchd.js");
+      if (!isMacOS()) {
+        throw new Error("Launchd auto-start is only supported on macOS.");
+      }
+      if (verb === "install-launchd") {
+        const { installed, message } = await installLaunchdDaemon();
+        console.log(message);
+        process.exit(installed ? 0 : 1);
+      }
+      if (verb === "uninstall-launchd") {
+        const { removed, message } = await uninstallLaunchdDaemon();
+        console.log(message);
+        process.exit(removed ? 0 : 1);
+      }
+      const status = await launchdStatus();
+      console.log(status.message);
+      process.exit(status.installed && status.loaded ? 0 : 1);
     }
     throw new Error(`Unknown "daemon ${verb}" command. Expected: stop.`);
   }
