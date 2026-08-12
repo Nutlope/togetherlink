@@ -3,6 +3,21 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.11 - 2026-08-12
+
+### Fixed
+
+- Automatically repair and reload an installed `launchd` or `systemd` daemon service once when a
+  normal restart does not restore proxy health.
+- Replaced the misleading suggestion to change the shared proxy port with actionable daemon
+  install, status, and log diagnostics that preserve ChatGPT Desktop routing.
+
+### Tests
+
+- Isolated live Prime Agent retry transcripts so a model-sensitive retry cannot count children
+  persisted by earlier attempts.
+- Added deterministic coverage for automatic daemon supervisor repair and recovery guidance.
+
 ## 0.7.10 - 2026-08-11
 
 ### Added

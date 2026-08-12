@@ -35,10 +35,13 @@ const LOCAL_PROXY_TOKEN_FILE = "local-proxy-token";
  * token with the daemon. The daemon outlives the launcher, so N sessions share
  * one daemon process (the whole point of Phase 1).
  */
-export async function ensureDaemon(): Promise<{ url: string }> {
+export async function ensureDaemon(options?: {
+  healthPollTimeoutMs?: number;
+}): Promise<{ url: string }> {
   const port = resolveDaemonPort();
   const url = daemonUrl(port);
   const scriptIdentity = await currentScriptIdentity();
+  const healthPollTimeoutMs = options?.healthPollTimeoutMs ?? HEALTH_POLL_TIMEOUT_MS;
 
   const health = await probeDaemonHealth(port);
   if (health && daemonMatchesCurrentScript(health, scriptIdentity)) {
@@ -61,8 +64,8 @@ export async function ensureDaemon(): Promise<{ url: string }> {
   // removed it on shutdown, but a kill -9 leaves it stale).
   await clearStalePidFile();
 
-  const startedBySupervisor = await startInstalledSupervisor();
-  if (!startedBySupervisor) {
+  const supervisor = await startInstalledSupervisor();
+  if (!supervisor.installed) {
     // Dev builds and unsupported platforms retain the detached fallback. An
     // installed macOS/Linux bundle must go through launchd/systemd so there is
     // exactly one daemon owner and it can be restarted after a failure.
@@ -79,32 +82,69 @@ export async function ensureDaemon(): Promise<{ url: string }> {
   }
 
   // Wait for the new daemon to become healthy.
-  const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
+  const deadline = Date.now() + healthPollTimeoutMs;
   while (Date.now() < deadline) {
     await sleep(HEALTH_POLL_INTERVAL_MS);
     if (await probeHealthz(port)) {
       return { url };
     }
   }
+
+  // A stale or unloaded launchd/systemd definition can survive an update even
+  // when a simple kickstart fails. Repair it once in place before involving the
+  // user. installAutoStart rewrites, reloads, starts, and health-checks the
+  // service while preserving the fixed proxy port used by ChatGPT Desktop.
+  let repairError: unknown = supervisor.installed ? supervisor.error : undefined;
+  if (supervisor.installed) {
+    try {
+      const { installAutoStart } = await import("./platform-auto-start.js");
+      const repaired = await installAutoStart();
+      if (!repaired.installed) {
+        repairError = new Error(repaired.message);
+      } else {
+        repairError = undefined;
+      }
+    } catch (err) {
+      repairError = err;
+    }
+    if (await probeHealthz(port)) {
+      return { url };
+    }
+  }
+
+  const logPath = path.join(togetherlinkHome(), "logs", "daemon.log");
+  const repairDetail = repairError
+    ? ` Automatic repair failed: ${repairError instanceof Error ? repairError.message : String(repairError)}.`
+    : "";
   throw new Error(
-    `togetherlink daemon did not become healthy on ${url} within ${HEALTH_POLL_TIMEOUT_MS / 1000}s. ` +
-      `Set TOGETHERLINK_PORT to use a different port.`,
+    `togetherlink daemon did not become healthy on ${url} within ${healthPollTimeoutMs / 1000}s after an automatic restart and repair.${repairDetail} ` +
+      `Run \`togetherlink daemon install\` to repair and restart it, then \`togetherlink daemon status\`. ` +
+      `Daemon log: ${logPath}`,
   );
 }
 
-async function startInstalledSupervisor(): Promise<boolean> {
+type SupervisorStartResult = { installed: false } | { installed: true; error?: unknown };
+
+async function startInstalledSupervisor(): Promise<SupervisorStartResult> {
   if (!(await runningFromBundle())) {
-    return false;
+    return { installed: false };
   }
   const { autoStartStatus, startAutoStart } = await import("./platform-auto-start.js");
   const status = await autoStartStatus();
   if (!status.installed) {
-    return false;
+    return { installed: false };
   }
-  if (!(await startAutoStart())) {
-    throw new Error("TogetherLink auto-start is installed but could not be started.");
+  try {
+    if (!(await startAutoStart())) {
+      return {
+        installed: true,
+        error: new Error("TogetherLink auto-start is installed but could not be started."),
+      };
+    }
+    return { installed: true };
+  } catch (error) {
+    return { installed: true, error };
   }
-  return true;
 }
 
 type ScriptIdentity = {
