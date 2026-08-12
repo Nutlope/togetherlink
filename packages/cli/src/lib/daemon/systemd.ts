@@ -6,7 +6,8 @@ import { togetherlinkHome } from "../paths.js";
 import { runningFromBundle } from "./detect-bundle.js";
 import { stopLegacyDaemonForTakeover, waitForManagedDaemonReady } from "./takeover.js";
 
-const AUTO_INSTALL_SENTINEL = "systemd-supervision-v2-installed";
+const AUTO_INSTALL_SENTINEL = "systemd-supervision-v3-installed";
+const PREVIOUS_AUTO_INSTALL_SENTINEL = "systemd-supervision-v2-installed";
 const LEGACY_AUTO_INSTALL_SENTINEL = "systemd-auto-installed";
 const SYSTEMD_SERVICE_NAME = "togetherlink-daemon.service";
 
@@ -71,7 +72,9 @@ export function generateSystemdUnit(overrides?: { program?: string; home?: strin
     "Environment=TOGETHERLINK_SUPERVISED=1",
     `Environment=PATH=${systemdPath()}`,
     `ExecStart=${quotedProgram} daemon serve`,
-    "Restart=on-failure",
+    // systemctl stop suppresses restart, but every process exit (including 0)
+    // must recover the proxy automatically.
+    "Restart=always",
     "RestartSec=10",
     `StandardOutput=append:${path.join(logDir, "daemon.log")}`,
     `StandardError=append:${path.join(logDir, "daemon.log")}`,
@@ -154,6 +157,16 @@ export async function installSystemdService(): Promise<{ installed: boolean; mes
   await promisifiedExecFile("systemctl", ["--user", "start", SYSTEMD_SERVICE_NAME]);
   await waitForManagedDaemonReady();
   await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
+  for (const staleSentinel of [
+    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
+    path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
+  ]) {
+    try {
+      await unlink(staleSentinel);
+    } catch {
+      // ignore
+    }
+  }
 
   return {
     installed: true,
@@ -202,6 +215,7 @@ export async function uninstallSystemdService(): Promise<{ removed: boolean; mes
   await unlink(svcPath);
   for (const sentinel of [
     autoInstallSentinelPath(),
+    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
     path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
   ]) {
     try {
@@ -270,5 +284,18 @@ export async function startSystemdService(): Promise<boolean> {
     return false;
   }
   await promisifiedExecFile("systemctl", ["--user", "start", SYSTEMD_SERVICE_NAME]);
+  return true;
+}
+
+/** Stop the installed unit; systemd suppresses Restart=always for explicit stops. */
+export async function stopSystemdService(): Promise<boolean> {
+  assertLinux();
+  const installed = await readFile(servicePath(), "utf8")
+    .then(() => true)
+    .catch(() => false);
+  if (!installed) {
+    return false;
+  }
+  await promisifiedExecFile("systemctl", ["--user", "stop", SYSTEMD_SERVICE_NAME]);
   return true;
 }

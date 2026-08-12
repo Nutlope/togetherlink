@@ -88,7 +88,7 @@ togetherlink opencode [...]     # alias: topencode (OpenCode)
 
 togetherlink chatgpt [--model <model>] [--restore]   # alpha: ChatGPT Desktop (alias: codex-app)
 
-togetherlink daemon stop                   # stop the background proxy daemon
+togetherlink daemon stop                   # stop it until the next daemon-backed command or login
 ```
 
 Any arguments after the harness name are passed straight through to the underlying agent CLI. For example, `tcodex exec "fix the typo"` runs `codex exec` with togetherlink routing.
@@ -258,6 +258,9 @@ The daemon is one persistent local process shared by all proxied sessions. If yo
 ```
 togetherlink daemon stop
 ```
+
+This unloads the OS-supervised service so the always-restart policy does not immediately bring it
+back. The next daemon-backed TogetherLink command, or the next login, starts it again.
 
 `togetherlink chatgpt` (alpha) is the exception: it persistently patches ChatGPT Desktop config to route through Together (instead of per-run injection), with backups under `~/.togetherlink/backup/codex-app/`. Restore with `togetherlink chatgpt --restore`.
 

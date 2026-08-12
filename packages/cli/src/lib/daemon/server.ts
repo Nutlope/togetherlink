@@ -268,6 +268,11 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
 
   await mkdir(path.dirname(daemonPidPath()), { recursive: true });
   await writeFile(daemonPidPath(), `${process.pid}\n`, { encoding: "utf8" });
+  if (process.env.TOGETHERLINK_SUPERVISED === "1") {
+    process.stderr.write(
+      `[togetherlink daemon] supervised daemon started on ${daemonUrl(port)} (pid ${process.pid}).\n`,
+    );
+  }
   if (debug) {
     process.stderr.write(
       `[togetherlink daemon] listening: ${daemonUrl(port)} (pid ${process.pid})\n`,
@@ -294,6 +299,11 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       return;
     }
     closing = true;
+    if (process.env.TOGETHERLINK_SUPERVISED === "1") {
+      process.stderr.write(
+        `[togetherlink daemon] received ${signal}; shutting down cleanly for supervisor restart.\n`,
+      );
+    }
     clearInterval(reaper);
     if (debug) {
       process.stderr.write(`[togetherlink daemon] ${signal} — shutting down.\n`);

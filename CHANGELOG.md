@@ -30,11 +30,18 @@ version 0.6.5; earlier release history remains available in Git.
   service during upgrade, and made installed bundles restart that service instead of spawning a
   competing daemon. Installation now waits for the managed daemon to become healthy before it
   completes.
+- Made the OS supervisor restart the shared proxy after every unexpected exit, including a clean
+  exit after `SIGTERM`, so ChatGPT Desktop cannot remain disconnected just because the daemon shut
+  down gracefully. Existing supervised installs migrate automatically to the stronger policy.
+- Routed `togetherlink daemon stop` through the OS supervisor so an intentional stop remains
+  possible without fighting the always-restart policy, and added persistent lifecycle logs for
+  supervised starts and shutdown signals.
 
 ### Tests
 
 - Added deterministic coverage for legacy-daemon takeover, supervised port races, and restarting an
   installed service from the public daemon launcher.
+- Added deterministic coverage for unconditional macOS and Linux daemon restart policies.
 - Added a Codex launcher regression covering generated configuration, passthrough separators, and
   prompt tokens that resemble command-line flags.
 - Added Prime provider, native passthrough, concurrent endpoint-isolation, and installed-wrapper

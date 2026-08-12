@@ -16,6 +16,15 @@ import { VERSION } from "../lib/version.js";
 import { maybeAutoInstallService } from "../lib/daemon/platform-auto-start.js";
 
 async function daemonStop(): Promise<void> {
+  const { autoStartStatus, stopAutoStart } = await import("../lib/daemon/platform-auto-start.js");
+  const supervisor = await autoStartStatus();
+  if (supervisor.installed && supervisor.loaded && (await stopAutoStart())) {
+    console.log(
+      "togetherlink daemon: stopped via the OS supervisor. It will start again on the next daemon-backed command or login.",
+    );
+    return;
+  }
+
   const { resolveDaemonPort, daemonUrl, daemonPidPath } = await import("../lib/daemon/server.js");
   const { readFile, unlink } = await import("node:fs/promises");
   const pidPath = daemonPidPath();

@@ -27,8 +27,8 @@ describe("launchd plist generation", () => {
     expect(plist).toContain("<key>Label</key>");
     expect(plist).toContain("com.togetherlink.daemon");
     expect(plist).toContain("<key>RunAtLoad</key>");
-    expect(plist).toContain("<key>KeepAlive</key>");
-    expect(plist).toContain("<true/>");
+    expect(plist).toContain("<key>KeepAlive</key>\n  <true/>");
+    expect(plist).not.toContain("<key>SuccessfulExit</key>");
     expect(plist).toContain("<key>EnvironmentVariables</key>");
     expect(plist).toContain("<key>TOGETHERLINK_SUPERVISED</key>");
     expect(plist).toContain("<string>1</string>");

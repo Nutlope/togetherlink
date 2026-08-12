@@ -6,7 +6,8 @@ import { togetherlinkHome } from "../paths.js";
 import { runningFromBundle } from "./detect-bundle.js";
 import { stopLegacyDaemonForTakeover, waitForManagedDaemonReady } from "./takeover.js";
 
-const AUTO_INSTALL_SENTINEL = "launchd-supervision-v2-installed";
+const AUTO_INSTALL_SENTINEL = "launchd-supervision-v3-installed";
+const PREVIOUS_AUTO_INSTALL_SENTINEL = "launchd-supervision-v2-installed";
 const LEGACY_AUTO_INSTALL_SENTINEL = "launchd-auto-installed";
 const LAUNCHD_LABEL = "com.togetherlink.daemon";
 
@@ -69,7 +70,7 @@ type LaunchdPlist = {
   Label: string;
   ProgramArguments: string[];
   RunAtLoad: boolean;
-  KeepAlive: { SuccessfulExit: boolean };
+  KeepAlive: boolean;
   ThrottleInterval: number;
   StandardOutPath: string;
   StandardErrorPath: string;
@@ -87,16 +88,6 @@ function escapeXml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
-}
-
-function renderKeepAlive(value: LaunchdPlist["KeepAlive"]): string {
-  const lines = ["  <dict>"];
-  for (const [k, v] of Object.entries(value)) {
-    lines.push(`    <key>${k}</key>`);
-    lines.push(v ? "    <true/>" : "    <false/>");
-  }
-  lines.push("  </dict>");
-  return lines.join("\n");
 }
 
 function buildPlist(plist: LaunchdPlist): string {
@@ -118,7 +109,7 @@ function buildPlist(plist: LaunchdPlist): string {
     `  <key>RunAtLoad</key>`,
     plist.RunAtLoad ? "  <true/>" : "  <false/>",
     `  <key>KeepAlive</key>`,
-    renderKeepAlive(plist.KeepAlive),
+    plist.KeepAlive ? "  <true/>" : "  <false/>",
     `  <key>ThrottleInterval</key>`,
     `  <integer>${plist.ThrottleInterval}</integer>`,
     `  <key>StandardOutPath</key>`,
@@ -149,7 +140,10 @@ export function generateLaunchdPlist(overrides?: { program?: string; home?: stri
     Label: LAUNCHD_LABEL,
     ProgramArguments: [program, "daemon", "serve"],
     RunAtLoad: true,
-    KeepAlive: { SuccessfulExit: false },
+    // The proxy is an availability service. Restart even after exit(0): a
+    // SIGTERM is handled gracefully by the daemon and therefore looks like a
+    // successful exit to launchd. Intentional stops unload the job first.
+    KeepAlive: true,
     ThrottleInterval: 10,
     StandardOutPath: path.join(logDir, "daemon.log"),
     StandardErrorPath: path.join(logDir, "daemon.log"),
@@ -246,6 +240,16 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
   await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
   await waitForManagedDaemonReady();
   await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
+  for (const staleSentinel of [
+    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
+    path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
+  ]) {
+    try {
+      await unlink(staleSentinel);
+    } catch {
+      // ignore
+    }
+  }
 
   return {
     installed: true,
@@ -298,6 +302,7 @@ export async function uninstallLaunchdDaemon(): Promise<{ removed: boolean; mess
   // Clean up the sentinel so a future CLI run can re-offer auto-install if desired.
   for (const sentinel of [
     autoInstallSentinelPath(),
+    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
     path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
   ]) {
     try {
@@ -377,4 +382,23 @@ export async function startLaunchdDaemon(): Promise<boolean> {
     await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
   }
   return true;
+}
+
+/** Stop and unload the installed job so KeepAlive does not immediately restart it. */
+export async function stopLaunchdDaemon(): Promise<boolean> {
+  assertMacOS();
+  const plistDest = plistPath();
+  const installed = await readFile(plistDest, "utf8")
+    .then(() => true)
+    .catch(() => false);
+  if (!installed) {
+    return false;
+  }
+
+  try {
+    await promisifiedExecFile("launchctl", ["bootout", launchctlDomain(), plistDest]);
+    return true;
+  } catch {
+    return false;
+  }
 }

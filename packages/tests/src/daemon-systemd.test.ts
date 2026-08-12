@@ -27,7 +27,8 @@ describe("systemd unit generation", () => {
     expect(unit).toContain("[Service]");
     expect(unit).toContain("[Install]");
     expect(unit).toContain(`ExecStart="${tempHome}/bin/togetherlink" daemon serve`);
-    expect(unit).toContain("Restart=on-failure");
+    expect(unit).toContain("Restart=always");
+    expect(unit).not.toContain("Restart=on-failure");
     expect(unit).toContain("RestartSec=10");
     expect(unit).toContain("WantedBy=default.target");
     expect(unit).toContain(`Environment=TOGETHERLINK_HOME=${tempHome}`);

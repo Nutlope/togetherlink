@@ -3,6 +3,7 @@ import {
   installLaunchdDaemon,
   launchdStatus,
   startLaunchdDaemon,
+  stopLaunchdDaemon,
   uninstallLaunchdDaemon,
 } from "./launchd.js";
 import {
@@ -10,6 +11,7 @@ import {
   maybeAutoInstallSystemdService,
   installSystemdService,
   startSystemdService,
+  stopSystemdService,
   systemdStatus,
   uninstallSystemdService,
 } from "./systemd.js";
@@ -51,6 +53,16 @@ export async function startAutoStart(): Promise<boolean> {
   }
   if (isLinux()) {
     return startSystemdService();
+  }
+  return false;
+}
+
+export async function stopAutoStart(): Promise<boolean> {
+  if (isMacOS()) {
+    return stopLaunchdDaemon();
+  }
+  if (isLinux()) {
+    return stopSystemdService();
   }
   return false;
 }
