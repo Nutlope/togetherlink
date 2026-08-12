@@ -97,6 +97,55 @@ describe("Together response-header timeout", () => {
     expect(secondInit?.dispatcher).not.toBe(firstInit?.dispatcher);
   });
 
+  test("routes the owned Node transport through an environment proxy when configured", async () => {
+    let requestedUrl: string | undefined;
+    const proxy = http.createServer((_request, response) => {
+      response.writeHead(500);
+      response.end();
+    });
+    proxy.on("connect", (request, socket) => {
+      requestedUrl = request.url;
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      socket.once("data", () => {
+        const body = '{"id":"proxied"}';
+        socket.end(
+          "HTTP/1.1 200 OK\r\n" +
+            "Content-Type: application/json\r\n" +
+            `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+            "Connection: close\r\n\r\n" +
+            body,
+        );
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    const address = proxy.address();
+    if (!address || typeof address === "string") {
+      throw new Error("proxy server did not bind");
+    }
+    vi.stubEnv("HTTP_PROXY", `http://127.0.0.1:${address.port}`);
+    vi.stubEnv("http_proxy", "");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("no_proxy", "");
+    vi.stubEnv("TOGETHERLINK_STREAM_RETRIES", "0");
+    vi.stubEnv("TOGETHERLINK_RESPONSE_HEADER_RETRIES", "0");
+
+    try {
+      const response = await postChatCompletionStream(
+        { model: "fault-injection", messages: [], stream: true },
+        {
+          apiKey: "redacted",
+          baseUrl: "http://unreachable.invalid/v1",
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(requestedUrl).toBe("unreachable.invalid:80");
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        proxy.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   test("uses the owned Node transport even when process-global fetch is broken", async () => {
     let connectionHeader: string | undefined;
     const server = http.createServer((request, response) => {

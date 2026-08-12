@@ -19,15 +19,19 @@ Usage:
   togetherlink configure
   togetherlink whoami
   togetherlink chatgpt [--model <model>] [--restore]  (alpha)
+  togetherlink daemon install    enable daemon auto-start at login (macOS/Linux)
+  togetherlink daemon uninstall  disable daemon auto-start at login (macOS/Linux)
+  togetherlink daemon status     show auto-start service status
   togetherlink codex [...]       (alias: tcodex)
   togetherlink grok [...]        (alias: tgrok)
   togetherlink hermes [...]      (alias: thermes)
   togetherlink hermes desktop [...]
   togetherlink claude [...]      (alias: tclaude)
   togetherlink pi [...]          (alias: tpi)
+  togetherlink prime [...]       (alias: tprime)
   togetherlink opencode [...]    (alias: topencode)
 
-Extra args after codex/claude/grok/hermes/pi/opencode are passed through.
+Extra args after codex/claude/grok/hermes/pi/prime/opencode are passed through.
 ChatGPT App support is alpha; run \`togetherlink chatgpt --restore\` (alias: codex-app) to restore the previous desktop config.
 
 Docs: https://togetherlink.vercel.app/llms.txt

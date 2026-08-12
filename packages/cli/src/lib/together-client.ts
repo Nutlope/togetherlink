@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ModelDefinition } from "@togetherlink/models";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { TOGETHER_BASE_URL } from "./together-core.js";
 import { backoffMs, parseRetryAfter, sleep } from "./together-retry.js";
 import { persistRequestDiagnostic } from "./request-diagnostics.js";
@@ -10,7 +10,6 @@ import {
   applyContextFit,
   emitContextTrimAlarm,
   newContextFitState,
-  stripHistoricalImages,
 } from "./context-fit.js";
 import type { ContextTrimTelemetryInfo } from "./telemetry.js";
 
@@ -40,10 +39,26 @@ import type { ContextTrimTelemetryInfo } from "./telemetry.js";
 // errors remain terminal because replaying them only delays the same failure.
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
-export const MAX_RETRIES = 3;
+const MAX_RETRIES = 3;
 const DEFAULT_STREAM_RETRIES = 1;
 const DEFAULT_RESPONSE_HEADER_RETRIES = 0;
 const DEFAULT_RESPONSE_HEADER_TIMEOUT_MS = 120_000;
+
+function hasEnvironmentProxy(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"].some((key) =>
+    Boolean(environment[key]?.trim()),
+  );
+}
+
+function environmentProxyOptions(environment: NodeJS.ProcessEnv = process.env) {
+  const httpProxy = environment.http_proxy?.trim() || environment.HTTP_PROXY?.trim();
+  const httpsProxy = environment.https_proxy?.trim() || environment.HTTPS_PROXY?.trim();
+  return {
+    ...(httpProxy ? { httpProxy } : {}),
+    ...(httpsProxy ? { httpsProxy } : {}),
+    noProxy: environment.no_proxy ?? environment.NO_PROXY ?? "",
+  };
+}
 
 export type TogetherResponseDiagnostics = {
   clientRequestId: string;
@@ -112,7 +127,6 @@ export async function postChatCompletion(
   signal?: AbortSignal,
   fit?: ContextFitConfig,
 ): Promise<Response> {
-  pruneHistoricalImages(payload, options);
   const doFetch = (body: string) =>
     payload.stream === true
       ? streamFetchOnce(body, options, signal)
@@ -184,9 +198,6 @@ export async function postChatCompletionStream(
   body?: string,
   fit?: ContextFitConfig,
 ): Promise<Response> {
-  if (body === undefined) {
-    pruneHistoricalImages(payload, options);
-  }
   const doFetch = (b: string) => streamFetchOnce(b, options, signal);
   if (body !== undefined || !fit) {
     return doFetch(body ?? JSON.stringify(payload));
@@ -255,7 +266,14 @@ async function fetchTogetherResponse(
     // isolation under Bun, whose fetch currently ignores Undici dispatchers.
     const dispatcher = process.versions.bun
       ? undefined
-      : new Agent({ connections: 1, keepAliveTimeout: 1, keepAliveMaxTimeout: 1 });
+      : hasEnvironmentProxy()
+        ? new EnvHttpProxyAgent({
+            ...environmentProxyOptions(),
+            connections: 1,
+            keepAliveTimeout: 1,
+            keepAliveMaxTimeout: 1,
+          })
+        : new Agent({ connections: 1, keepAliveTimeout: 1, keepAliveMaxTimeout: 1 });
     const requestInit = {
       method: "POST",
       headers: {
@@ -367,20 +385,6 @@ function withResponseBodyCleanup(response: Response, cleanup: () => void): Respo
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
-  });
-}
-
-function pruneHistoricalImages(
-  payload: Record<string, unknown>,
-  options: TogetherClientOptions,
-): void {
-  const pruned = stripHistoricalImages(payload.messages);
-  if (!pruned) {
-    return;
-  }
-  writeProxyDebugLog("togetherlink proxy", options, "historical images pruned", {
-    removedParts: pruned.removedParts,
-    freedBytes: pruned.freedChars,
   });
 }
 

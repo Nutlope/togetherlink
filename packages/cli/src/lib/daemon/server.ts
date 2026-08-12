@@ -1,9 +1,11 @@
 import http, { type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import type { Duplex } from "node:stream";
 import { once } from "node:events";
 import { statSync } from "node:fs";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { WebSocketServer } from "ws";
 import { VERSION } from "../version.js";
 import { CLAUDE_LOCAL_PROXY_HOST } from "../claude/defaults.js";
 import { extractToken, readJsonBody, requestPath, writeJson } from "../http-util.js";
@@ -14,6 +16,10 @@ import {
   writeOpenAIError,
   type CodexProxyOptions,
 } from "../codex/proxy.js";
+import { handleCodexResponsesWebsocket } from "../codex/responses-websocket.js";
+import { CodexRequestError } from "../codex/native-router.js";
+import { isCodexResponsesWebsocketPath } from "../codex/routes.js";
+import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
@@ -31,7 +37,13 @@ import {
 /** Active registry — runDaemon may override this with an injected one. */
 let activeSessions: SessionRegistry = defaultSessions;
 
-export const DEFAULT_DAEMON_PORT = 7878;
+/**
+ * Stateless WS handshake helper (`noServer: true` never binds its own socket),
+ * so one instance is safely shared across every `runDaemon()` call/http.Server.
+ */
+const responsesWebsocketServer = new WebSocketServer({ noServer: true });
+
+const DEFAULT_DAEMON_PORT = 7878;
 
 /** How often the daemon sweeps for sessions whose launcher has died. */
 const SESSION_REAP_INTERVAL_MS = 30_000;
@@ -99,7 +111,7 @@ async function listenOrExitOnRace(server: Server, port: number): Promise<void> {
         server.removeListener("error", onError);
         void probeHealthz(port).then((healthy) => {
           if (healthy) {
-            process.exit(0);
+            process.exit(healthyPortRaceExitCode());
           }
           process.stderr.write(
             `[togetherlink daemon] port ${port} in use by a non-daemon process.\n`,
@@ -120,6 +132,16 @@ async function listenOrExitOnRace(server: Server, port: number): Promise<void> {
 }
 
 /**
+ * A detached concurrent spawn may yield to an existing healthy daemon and
+ * finish successfully. A launchd/systemd-owned daemon must instead fail so
+ * its supervisor retries and eventually takes the port when the legacy owner
+ * disappears.
+ */
+export function healthyPortRaceExitCode(): 0 | 1 {
+  return process.env.TOGETHERLINK_SUPERVISED === "1" ? 1 : 0;
+}
+
+/**
  * Render an error from the daemon's top-level catch-all in the wire format the
  * requesting client actually speaks. Anthropic errors get the Anthropic shape;
  * Codex (Responses API) errors get the OpenAI shape; unknown agents default to
@@ -135,7 +157,31 @@ export function renderDaemonError(
   err: unknown,
   agent: string | undefined,
 ): void {
+  if (res.headersSent) {
+    // A streaming response (Codex SSE, native passthrough) already sent
+    // headers before this error hit; the client has a partial response on
+    // this connection, so a fresh error body can't be written on top of it.
+    // Writing one anyway throws ERR_HTTP_HEADERS_SENT, which — uncaught here —
+    // used to crash the whole daemon process for every active session.
+    if (!res.writableEnded) {
+      res.end();
+    }
+    return;
+  }
   if (agent === "codex" || agent === "codex-app") {
+    if (err instanceof CodexTogetherError) {
+      writeOpenAIError(res, err.status, err.type, err.message, err.code);
+      return;
+    }
+    if (err instanceof CodexRequestError) {
+      writeOpenAIError(
+        res,
+        err.status,
+        err.status === 413 ? "request_too_large" : "invalid_request_error",
+        err.message,
+      );
+      return;
+    }
     if (err instanceof TogetherResponseHeaderTimeoutError) {
       writeOpenAIError(res, 504, "timeout_error", err.message);
       return;
@@ -171,28 +217,44 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   activeSessions = options.sessions ?? defaultSessions;
   const restored = await activeSessions.restorePersisted();
 
-  // Per-request agent context: handleDaemonRequest sets this so the catch-all
-  // renders errors in the wire format the client actually speaks. Without it,
-  // Codex (Responses API) errors were being mis-rendered as Anthropic errors.
-  let requestAgent: string | undefined;
   const server = http.createServer((req, res) => {
+    // This context must be request-local: concurrent Claude and Codex requests
+    // can fail in either order and still need their own wire-format error.
+    let requestAgent: string | undefined;
     handleDaemonRequest(req, res, {
       debug,
       setAgent: (a) => {
         requestAgent = a;
       },
     }).catch((err: unknown) => {
-      renderDaemonError(res, err, requestAgent);
+      if (debug) {
+        process.stderr.write(
+          `[togetherlink daemon] request error (${requestAgent ?? "unknown"}): ${
+            err instanceof Error ? (err.stack ?? err.message) : String(err)
+          }\n`,
+        );
+      }
+      try {
+        renderDaemonError(res, err, requestAgent);
+      } catch {
+        // A response-write failure here must never take the daemon down —
+        // it's shared across every active session, not just this request.
+        if (!res.writableEnded) {
+          res.destroy();
+        }
+      }
     });
   });
-  // The built-in OpenAI provider advertises Responses-over-WebSocket even
-  // when `openai_base_url` points at this HTTP/SSE-only loopback proxy. Codex
-  // treats 426 as an immediate signal to fall back to HTTP for the session;
-  // without an upgrade listener Node handles the handshake as an ordinary
-  // unauthenticated GET, leaves it alive, and Codex retries five timeouts.
-  server.on("upgrade", (_req, socket) => {
-    socket.on("error", () => {});
-    socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  // Codex/ChatGPT Desktop's Responses-over-WebSocket transport is only
+  // supported for the codex/codex-app `/v1/responses` route, which is the
+  // only place we can usefully terminate it (Together has no upstream WS to
+  // relay to — see codex/responses-websocket.ts). Everything else (other
+  // paths, other agents, unresolved sessions) gets the same immediate 426
+  // rejection as before instead of hanging as a long-lived ordinary GET.
+  server.on("upgrade", (req, socket, head) => {
+    handleDaemonUpgrade(req, socket, head).catch(() => {
+      socket.destroy();
+    });
   });
   // Node's default requestTimeout (5 min) kills the socket outright once a
   // client is slow sending a large request body — e.g. a Codex turn with a
@@ -206,6 +268,11 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
 
   await mkdir(path.dirname(daemonPidPath()), { recursive: true });
   await writeFile(daemonPidPath(), `${process.pid}\n`, { encoding: "utf8" });
+  if (process.env.TOGETHERLINK_SUPERVISED === "1") {
+    process.stderr.write(
+      `[togetherlink daemon] supervised daemon started on ${daemonUrl(port)} (pid ${process.pid}).\n`,
+    );
+  }
   if (debug) {
     process.stderr.write(
       `[togetherlink daemon] listening: ${daemonUrl(port)} (pid ${process.pid})\n`,
@@ -232,6 +299,11 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       return;
     }
     closing = true;
+    if (process.env.TOGETHERLINK_SUPERVISED === "1") {
+      process.stderr.write(
+        `[togetherlink daemon] received ${signal}; shutting down cleanly for supervisor restart.\n`,
+      );
+    }
     clearInterval(reaper);
     if (debug) {
       process.stderr.write(`[togetherlink daemon] ${signal} — shutting down.\n`);
@@ -267,7 +339,8 @@ async function handleDaemonRequest(
 ): Promise<void> {
   const path_ = requestPath(req);
   if (opts.debug) {
-    process.stderr.write(`[togetherlink daemon] ${req.method} ${path_}\n`);
+    const loggedPath = path_.replace(/^\/session\/[^/]+(?=\/|$)/, "/session/[REDACTED]");
+    process.stderr.write(`[togetherlink daemon] ${req.method} ${loggedPath}\n`);
   }
 
   // Unauthenticated liveness + health (must work before any session exists).
@@ -494,6 +567,48 @@ function localSessionRoute(
     },
   };
 }
+
+const REJECT_UPGRADE =
+  "HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+
+async function handleDaemonUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+): Promise<void> {
+  const path_ = requestPath(req);
+  const sessionRoute = localSessionRoute(req, path_);
+  // localSessionRoute rewrites req.url to the inner path in place when it
+  // matches, so re-reading it now gives the path with /session/<token>
+  // stripped — same trick handleDaemonRequest's downstream handlers rely on.
+  const innerPath = sessionRoute ? requestPath(req) : undefined;
+  if (!innerPath || !isCodexResponsesWebsocketPath(innerPath)) {
+    socket.on("error", () => {});
+    socket.end(REJECT_UPGRADE);
+    return;
+  }
+
+  const token = sessionRoute!.token;
+  const session = activeSessions.get(token) ?? (await restoreAppSession(token));
+  if (
+    !session ||
+    (session.agent !== "codex" && session.agent !== "codex-app") ||
+    session.options === undefined
+  ) {
+    socket.on("error", () => {});
+    socket.end(REJECT_UPGRADE);
+    return;
+  }
+
+  const options = session.options as CodexProxyOptions;
+  responsesWebsocketServer.handleUpgrade(req, socket, head, (ws) => {
+    // Forward the upgrade's headers so the native WS<->WS relay can reuse the
+    // client's auth/session headers on its upstream dial (the HTTP path gets
+    // these from the request itself; WS turns have no per-message headers).
+    handleCodexResponsesWebsocket(ws, options, req.headers);
+  });
+}
+
 async function registerSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = (await readJsonBody(req)) as RegisterSessionRequest;
   // Agent-neutral core: every session needs a non-empty token + apiKey, a

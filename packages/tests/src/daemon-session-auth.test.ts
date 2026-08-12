@@ -42,4 +42,13 @@ describe("daemon session-URL auth", () => {
     const response = await fetch(`${daemon.url}/session/not-a-registered-token/v1/models`);
     expect(response.status).toBe(401);
   });
+
+  test("redacts the session capability from daemon debug output", async () => {
+    const response = await fetch(`${daemon.url}/session/${token}/v1/models`);
+    expect(response.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(daemon.stderr()).toContain("/session/[REDACTED]/v1/models");
+    expect(daemon.stderr()).not.toContain(`/session/${token}/`);
+  });
 });

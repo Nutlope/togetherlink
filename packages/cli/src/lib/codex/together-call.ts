@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { type ModelDefinition } from "@togetherlink/models";
+import { type ExaSearchOutcome, webSearchQuery } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { postChatCompletion } from "../together-client.js";
 import { parseJsonOrEmpty } from "./content-format.js";
-import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
+import {
+  codexNativeToolMaxUses,
+  rememberCodexNativeSearchResult,
+  runCodexExaSearchDetailed,
+} from "./translate-request.js";
+import { webSearchCallItem } from "./translate-response.js";
 import type {
   ChatMessage,
   ChatResponse,
@@ -16,17 +21,62 @@ type CodexTogetherOptions = {
   apiKey: string;
   baseUrl: string;
   debug?: boolean | undefined;
+  nativeSearchResults?: Map<string, string> | undefined;
 };
+
+type CodexTogetherResponse = {
+  response: ChatResponse;
+  nativeSearchItems: Record<string, unknown>[];
+};
+
+export class CodexTogetherError extends Error {
+  readonly name = "CodexTogetherError";
+  readonly type: string;
+
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.type = codexTogetherErrorType(status);
+  }
+}
+
+function codexTogetherErrorType(status: number): string {
+  switch (status) {
+    case 400:
+      return "invalid_request_error";
+    case 401:
+      return "authentication_error";
+    case 403:
+      return "permission_error";
+    case 404:
+      return "not_found_error";
+    case 408:
+    case 504:
+      return "timeout_error";
+    case 429:
+      return "rate_limit_error";
+    case 503:
+      return "overloaded_error";
+    default:
+      return "api_error";
+  }
+}
 
 async function callTogether(
   payload: Record<string, unknown>,
   options: CodexTogetherOptions,
-  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<ChatResponse> {
-  const result = await fetchTogetherChat(payload, options, modelDefinition, signal);
+  const result = await fetchTogetherChat(payload, options, signal);
   if (!result.ok) {
-    throw new Error(`Together API returned ${result.status}: ${result.text.slice(0, 1000)}`);
+    throw new CodexTogetherError(
+      result.status,
+      result.errorMessage ?? result.text.slice(0, 1000),
+      result.errorCode,
+    );
   }
   return (await result.response.json()) as ChatResponse;
 }
@@ -35,11 +85,10 @@ export async function callTogetherWithNativeTools(
   payload: Record<string, unknown>,
   toolTranslation: CodexToolTranslation,
   options: CodexTogetherOptions,
-  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
-): Promise<ChatResponse> {
+): Promise<CodexTogetherResponse> {
   if (toolTranslation.nativeTools.length === 0) {
-    return callTogether(payload, options, modelDefinition, signal);
+    return { response: await callTogether(payload, options, signal), nativeSearchItems: [] };
   }
 
   const messages = Array.isArray(payload.messages)
@@ -47,46 +96,36 @@ export async function callTogetherWithNativeTools(
     : [];
   const nativeToolNames = new Set(toolTranslation.nativeTools.map((tool) => tool.modelName));
   const nativeToolUses = new Map<string, number>();
+  const nativeSearchItems: Record<string, unknown>[] = [];
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
-    const json = await callTogether({ ...payload, messages }, options, modelDefinition, signal);
+    const json = await callTogether({ ...payload, messages }, options, signal);
     const toolCalls = json.choices?.[0]?.message?.tool_calls ?? [];
     const nativeToolCalls = toolCalls.filter((toolCall) =>
       nativeToolNames.has(toolCall.function?.name ?? ""),
     );
     if (nativeToolCalls.length === 0) {
-      return json;
+      return { response: json, nativeSearchItems };
     }
     if (nativeToolCalls.length !== toolCalls.length) {
       const message = json.choices?.[0]?.message;
       if (message) {
-        const nativeResults: string[] = [];
         for (const toolCall of nativeToolCalls) {
-          const name = toolCall.function?.name ?? "web_search";
-          const nativeTool = toolTranslation.mappings.get(name);
-          const input = parseJsonOrEmpty(toolCall.function?.arguments);
-          const priorUses = nativeToolUses.get(name) ?? 0;
-          const webSearchDefinition =
-            nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
-          const maxUses =
-            webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
-          const result = await runNativeWebSearchCall({
-            name,
-            priorUses,
-            maxUses,
-            isWebSearch: webSearchDefinition !== undefined,
-            recordUse: () => nativeToolUses.set(name, priorUses + 1),
-            runSearch: () => runCodexExaSearch(input, webSearchDefinition!, options),
-          });
-          nativeResults.push(`Native ${name} result:\n${result}`);
+          const nativeResult = await runBufferedNativeTool(
+            toolCall,
+            nativeToolUses,
+            toolTranslation,
+            options,
+          );
+          if (nativeResult.searchItem) {
+            nativeSearchItems.push(nativeResult.searchItem);
+          }
         }
         message.tool_calls = toolCalls.filter(
           (toolCall) => !nativeToolNames.has(toolCall.function?.name ?? ""),
         );
-        message.content =
-          [message.content?.trim(), ...nativeResults].filter(Boolean).join("\n\n") || null;
       }
-      return json;
+      return { response: json, nativeSearchItems };
     }
 
     const reasoning =
@@ -106,38 +145,93 @@ export async function callTogetherWithNativeTools(
     });
 
     for (const toolCall of nativeToolCalls) {
-      const id = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
-      const name = toolCall.function?.name ?? "web_search";
-      const nativeTool = toolTranslation.mappings.get(name);
-      const input = parseJsonOrEmpty(toolCall.function?.arguments);
-      const priorUses = nativeToolUses.get(name) ?? 0;
-      const webSearchDefinition =
-        nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
-      const maxUses =
-        webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
-      const result = await runNativeWebSearchCall({
-        name,
-        priorUses,
-        maxUses,
-        isWebSearch: webSearchDefinition !== undefined,
-        recordUse: () => nativeToolUses.set(name, priorUses + 1),
-        runSearch: () => runCodexExaSearch(input, webSearchDefinition!, options),
+      const nativeResult = await runBufferedNativeTool(
+        toolCall,
+        nativeToolUses,
+        toolTranslation,
+        options,
+      );
+      if (nativeResult.searchItem) {
+        nativeSearchItems.push(nativeResult.searchItem);
+      }
+      messages.push({
+        role: "tool",
+        tool_call_id: nativeResult.toolCallId,
+        content: nativeResult.content,
       });
-      messages.push({ role: "tool", tool_call_id: id, content: result });
     }
   }
 
   return {
-    id: `chatcmpl_${randomUUID().replaceAll("-", "")}`,
-    choices: [
-      {
-        finish_reason: "stop",
-        message: {
-          content:
-            "I could not complete native web search because the model kept requesting additional search tool calls.",
+    response: {
+      id: `chatcmpl_${randomUUID().replaceAll("-", "")}`,
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content:
+              "I could not complete native web search because the model kept requesting additional search tool calls.",
+          },
         },
-      },
-    ],
+      ],
+    },
+    nativeSearchItems,
+  };
+}
+
+type NativeChatToolCall = NonNullable<
+  NonNullable<NonNullable<ChatResponse["choices"]>[number]["message"]>["tool_calls"]
+>[number];
+
+async function runBufferedNativeTool(
+  toolCall: NativeChatToolCall,
+  nativeToolUses: Map<string, number>,
+  toolTranslation: CodexToolTranslation,
+  options: CodexTogetherOptions,
+): Promise<{
+  toolCallId: string;
+  content: string;
+  searchItem?: Record<string, unknown>;
+}> {
+  const toolCallId = toolCall.id ?? `call_${randomUUID().replaceAll("-", "")}`;
+  const name = toolCall.function?.name ?? "web_search";
+  const nativeTool = toolTranslation.mappings.get(name);
+  const input = parseJsonOrEmpty(toolCall.function?.arguments);
+  const priorUses = nativeToolUses.get(name) ?? 0;
+  const webSearchDefinition = nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
+  const maxUses =
+    webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
+  let outcome: ExaSearchOutcome;
+  if (webSearchDefinition !== undefined && priorUses < maxUses) {
+    nativeToolUses.set(name, priorUses + 1);
+    outcome = await runCodexExaSearchDetailed(input, webSearchDefinition, options);
+  } else {
+    const content = await runNativeWebSearchCall({
+      name,
+      priorUses,
+      maxUses,
+      isWebSearch: webSearchDefinition !== undefined,
+      recordUse: () => nativeToolUses.set(name, priorUses + 1),
+      runSearch: async () => "Unsupported native server tool.",
+    });
+    outcome = {
+      query: webSearchQuery(input),
+      text: content,
+      results: [],
+      errorCode: "unavailable",
+    };
+  }
+  const itemId = `wsc_${randomUUID().replaceAll("-", "")}`;
+  rememberCodexNativeSearchResult(options.nativeSearchResults, itemId, outcome.text);
+  return {
+    toolCallId,
+    content: outcome.text,
+    searchItem: webSearchCallItem(
+      itemId,
+      outcome.errorCode === undefined ? "completed" : "failed",
+      outcome.query,
+      outcome,
+    ),
   };
 }
 
@@ -221,16 +315,12 @@ function sanitizePayloadForTemplateRetry(payload: Record<string, unknown>): bool
 export async function fetchTogetherChat(
   payload: Record<string, unknown>,
   options: CodexTogetherOptions,
-  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<TogetherChatResult> {
-  const first = await postTogetherChat(payload, options, modelDefinition, signal);
+  const first = await postTogetherChat(payload, options, signal);
   if (first.ok) {
     return { ok: true, response: first };
   }
-  // The shared Together client already self-healed any context-length overflow
-  // (max_tokens → strip old images → trim text → drop oldest turns) before
-  // returning, so anything non-OK here is either terminal or a template crash.
   const text = await first.text();
 
   // Template-error self-healing: if Together's chat template crashed on a
@@ -245,28 +335,65 @@ export async function fetchTogetherChat(
         model: sanitized.model,
         originalError: text.slice(0, 1000),
       });
-      const retry = await postTogetherChat(sanitized, options, modelDefinition, signal);
+      const retry = await postTogetherChat(sanitized, options, signal);
       if (retry.ok) {
         return { ok: true, response: retry };
       }
-      return { ok: false, status: retry.status, text: await retry.text() };
+      return togetherChatFailure(retry.status, await retry.text());
     }
   }
 
-  return { ok: false, status: first.status, text };
+  return togetherChatFailure(first.status, text);
+}
+
+function togetherChatFailure(status: number, text: string): TogetherChatResult {
+  let errorCode: string | undefined;
+  let errorMessage = text.slice(0, 1000);
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: {
+        code?: string | null;
+        type?: string;
+        message?: string | { code?: string; message?: string; type?: string };
+      };
+    };
+    const error = parsed.error;
+    if (error) {
+      errorCode =
+        (typeof error.code === "string" ? error.code : undefined) ??
+        (typeof error.message === "object" ? error.message.code : undefined);
+      errorMessage =
+        (typeof error.message === "string" ? error.message : error.message?.message) ??
+        error.type ??
+        errorMessage;
+    }
+  } catch {
+    // Preserve the readable body slice when Together did not return JSON.
+  }
+  if (
+    !errorCode &&
+    status === 400 &&
+    /context[_ -]length|maximum context|input token count|too many tokens/i.test(errorMessage)
+  ) {
+    errorCode = "context_length_exceeded";
+  }
+  return {
+    ok: false,
+    status,
+    text,
+    ...(errorCode ? { errorCode } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+  };
 }
 
 async function postTogetherChat(
   payload: Record<string, unknown>,
   options: CodexTogetherOptions,
-  modelDefinition: ModelDefinition,
   signal?: AbortSignal,
 ): Promise<Response> {
-  // Delegate the transient-status retry loop AND the reactive context-fit retry
-  // to the shared Together client (together-client.ts). Passing the model
-  // definition enables the context-fit repair; this harness keeps only the
-  // Codex-specific debug logging and template-error handling on top.
-  return postChatCompletion(payload, options, signal, { modelDefinition, debug: options.debug });
+  // Codex owns history compaction. The proxy preserves the request verbatim
+  // and only inherits transport retries from the shared Together client.
+  return postChatCompletion(payload, options, signal);
 }
 
 function debugLog(

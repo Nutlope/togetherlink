@@ -4,13 +4,15 @@
  * shell wrapper that calls `bun run` on it. To update, we fetch a small
  * `latest.json` manifest from the project site, compare versions, and if newer
  * download the new bundle and atomically rename it over the installed file.
+ * Each startup also fills in wrapper commands added since the original install.
  *
  * The running process keeps the old inode, so the *next* invocation is the new
  * version — we never hot-swap mid-execution. Every failure path is swallowed:
  * an update problem must never block or crash the user's actual command.
  */
 
-import { readFile, writeFile, rename, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, writeFile, rename, stat, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { VERSION } from "./version.js";
@@ -41,6 +43,88 @@ function resolveInstallDir(): string {
 /** Installed bundle path. `togetherlink` wrapper runs `bun run` on this. */
 function installedBundlePath(): string {
   return path.join(resolveInstallDir(), "bin", "togetherlink.js");
+}
+
+const INSTALLED_WRAPPERS = [
+  ["togetherlink", undefined],
+  ["tclaude", "claude"],
+  ["topencode", "opencode"],
+  ["tcodex", "codex"],
+  ["tgrok", "grok"],
+  ["thermes", "hermes"],
+  ["tpi", "pi"],
+  ["tprime", "prime"],
+] as const;
+
+function quoteForSh(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * Add wrapper commands introduced after a user's original installation. Never
+ * replace an existing launcher: it may be a deliberate local override.
+ */
+async function findWritablePathDir(
+  binDir: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  if (process.platform === "win32") {
+    return undefined;
+  }
+  for (const candidate of (env.PATH ?? "").split(path.delimiter)) {
+    if (!candidate || path.resolve(candidate) === path.resolve(binDir)) {
+      continue;
+    }
+    try {
+      if (!(await stat(candidate)).isDirectory()) {
+        continue;
+      }
+      await access(candidate, constants.W_OK);
+      return candidate;
+    } catch {
+      // Keep looking for the next writable PATH directory.
+    }
+  }
+  return undefined;
+}
+
+export async function ensureInstalledWrappers(
+  installDir = resolveInstallDir(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const binDir = path.join(installDir, "bin");
+  const bundle = quoteForSh(path.join(binDir, "togetherlink.js"));
+  await mkdir(binDir, { recursive: true });
+
+  await Promise.all(
+    INSTALLED_WRAPPERS.map(async ([name, harness]) => {
+      const harnessArg = harness ? ` ${harness}` : "";
+      const contents = `#!/usr/bin/env sh\nexec bun ${bundle}${harnessArg} "$@"\n`;
+      try {
+        await writeFile(path.join(binDir, name), contents, { flag: "wx", mode: 0o755 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+      }
+    }),
+  );
+
+  const linkDir = await findWritablePathDir(binDir, env);
+  if (!linkDir) {
+    return;
+  }
+  await Promise.all(
+    INSTALLED_WRAPPERS.map(async ([name]) => {
+      try {
+        await symlink(path.join(binDir, name), path.join(linkDir, name));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+      }
+    }),
+  );
 }
 
 /**
@@ -176,6 +260,11 @@ async function downloadTo(url: string, dest: string): Promise<void> {
 export async function maybeSelfUpdate(): Promise<void> {
   if (!isInstalledBundle()) {
     return; // dev/source run — don't touch it
+  }
+  try {
+    await ensureInstalledWrappers();
+  } catch {
+    // Non-fatal: wrapper repair must never block the requested command.
   }
   if (await throttled()) {
     return;

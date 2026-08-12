@@ -13,8 +13,18 @@ import {
 import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
+import { maybeAutoInstallService } from "../lib/daemon/platform-auto-start.js";
 
 async function daemonStop(): Promise<void> {
+  const { autoStartStatus, stopAutoStart } = await import("../lib/daemon/platform-auto-start.js");
+  const supervisor = await autoStartStatus();
+  if (supervisor.installed && supervisor.loaded && (await stopAutoStart())) {
+    console.log(
+      "togetherlink daemon: stopped via the OS supervisor. It will start again on the next daemon-backed command or login.",
+    );
+    return;
+  }
+
   const { resolveDaemonPort, daemonUrl, daemonPidPath } = await import("../lib/daemon/server.js");
   const { readFile, unlink } = await import("node:fs/promises");
   const pidPath = daemonPidPath();
@@ -112,18 +122,14 @@ async function runInteractiveLauncher(): Promise<void> {
   const choice = await clack.select({
     message: "What do you want to run?",
     options: [
-      { value: "codex", label: "Codex", hint: "tcodex" },
-      { value: "grok", label: "Grok Build", hint: "tgrok" },
-      { value: "hermes", label: "Hermes Agent", hint: "thermes" },
-      {
-        value: "hermes-desktop",
-        label: "Hermes Desktop",
-        hint: "togetherlink hermes desktop",
-      },
       { value: "claude", label: "Claude Code", hint: "tclaude" },
-      { value: "pi", label: "Pi Code", hint: "tpi" },
-      { value: "opencode", label: "OpenCode", hint: "topencode" },
+      { value: "codex", label: "Codex", hint: "tcodex" },
       { value: "chatgpt", label: "ChatGPT Desktop", hint: "chatgpt" },
+      { value: "grok", label: "Grok Build", hint: "tgrok" },
+      { value: "opencode", label: "OpenCode", hint: "topencode" },
+      { value: "pi", label: "Pi Code", hint: "tpi" },
+      { value: "prime", label: "Prime Agent", hint: "tprime" },
+      { value: "hermes", label: "Hermes Agent", hint: "thermes" },
       { value: "configure", label: "Configure", hint: "API keys and detected tools" },
     ],
   });
@@ -148,11 +154,6 @@ async function runInteractiveLauncher(): Promise<void> {
     }
     return;
   }
-  if (choice === "hermes-desktop") {
-    await dispatchHarnessCommand("hermes", undefined, { passthrough: ["desktop"] });
-    return;
-  }
-
   await dispatchHarnessCommand(choice, undefined, {});
 }
 
@@ -211,6 +212,28 @@ async function main() {
     return;
   }
 
+  // One-time migration: install the launchd/systemd agent for existing
+  // installed bundles. Run only for commands that actually use the shared
+  // daemon (harnesses + chatgpt), so read-only commands, configure and telemetry
+  // stay side-effect free.
+  const DAEMON_REQUIRING_COMMANDS = new Set([
+    "chatgpt",
+    "codex-app",
+    "claude",
+    "codex",
+    "grok",
+    "opencode",
+    "pi",
+    "prime",
+    "hermes",
+  ]);
+  if (DAEMON_REQUIRING_COMMANDS.has(command)) {
+    const serviceAutoInstalled = await maybeAutoInstallService();
+    if (serviceAutoInstalled) {
+      console.log("Enabled TogetherLink daemon auto-start at login.");
+    }
+  }
+
   if (command === "configure") {
     await runConfigure();
     return;
@@ -241,7 +264,7 @@ async function main() {
   if (command === "daemon") {
     const verb = rawVerb;
     if (verb === undefined) {
-      throw new Error('Unknown "daemon" command. Expected: stop.');
+      throw new Error('Unknown "daemon" command. Expected: stop, install, uninstall, status.');
     }
     if (verb === "stop") {
       await daemonStop();
@@ -251,6 +274,23 @@ async function main() {
       const { runDaemon } = await import("../lib/daemon/server.js");
       await runDaemon();
       return;
+    }
+    if (verb === "install" || verb === "uninstall" || verb === "status") {
+      const { installAutoStart, uninstallAutoStart, autoStartStatus } =
+        await import("../lib/daemon/platform-auto-start.js");
+      if (verb === "install") {
+        const { installed, message } = await installAutoStart();
+        console.log(message);
+        process.exit(installed ? 0 : 1);
+      }
+      if (verb === "uninstall") {
+        const { removed, message } = await uninstallAutoStart();
+        console.log(message);
+        process.exit(removed ? 0 : 1);
+      }
+      const status = await autoStartStatus();
+      console.log(status.message);
+      process.exit(status.installed && status.loaded ? 0 : 1);
     }
     throw new Error(`Unknown "daemon ${verb}" command. Expected: stop.`);
   }

@@ -3,6 +3,99 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.10 - 2026-08-11
+
+### Added
+
+- Added Prime Agent beta support through `togetherlink prime` and the `tprime` shortcut, using a
+  generated credential-free provider extension so native Prime settings and sessions stay intact.
+
+### Changed
+
+- Updated the documented installer command to invoke Bash explicitly, fixing installation on
+  Debian systems where `/bin/sh` is Dash and does not support `pipefail`.
+- Clarified that per-run model selection, including Claude Code model pinning, must place
+  `--model` before the harness name so TogetherLink consumes the flag.
+
+### Fixed
+
+- Inserted TogetherLink's generated Codex `-c` overrides before a caller-provided `--` separator,
+  preserving arbitrary prompt arguments while keeping the overrides parseable by Codex.
+- Backfilled installer-style PATH symlinks for wrapper commands added by auto-update, without
+  replacing existing user commands.
+
+### Operations
+
+- Migrated existing CLI users from legacy detached daemons to the installed `launchd` or `systemd`
+  service during upgrade, and made installed bundles restart that service instead of spawning a
+  competing daemon. Installation now waits for the managed daemon to become healthy before it
+  completes.
+- Made the OS supervisor restart the shared proxy after every unexpected exit, including a clean
+  exit after `SIGTERM`, so ChatGPT Desktop cannot remain disconnected just because the daemon shut
+  down gracefully. Existing supervised installs migrate automatically to the stronger policy.
+- Routed `togetherlink daemon stop` through the OS supervisor so an intentional stop remains
+  possible without fighting the always-restart policy, and added persistent lifecycle logs for
+  supervised starts and shutdown signals.
+
+### Tests
+
+- Added deterministic coverage for legacy-daemon takeover, supervised port races, and restarting an
+  installed service from the public daemon launcher.
+- Added deterministic coverage for unconditional macOS and Linux daemon restart policies.
+- Added a Codex launcher regression covering generated configuration, passthrough separators, and
+  prompt tokens that resemble command-line flags.
+- Added Prime provider, native passthrough, concurrent endpoint-isolation, and installed-wrapper
+  regression coverage.
+- Added an opt-in live Prime RLM lifecycle test covering a real recursive child, inherited Together
+  routing, child-to-parent messaging, persisted transcripts, and child usage attribution.
+
+## 0.7.9 - 2026-08-10
+
+### Added
+
+- Completed the ChatGPT Codex endpoint matrix with native image generation/editing and alpha-search
+  pass-through, local Together-backed Responses compaction v1/v2, memory trace summarization, and
+  compatibility aliases with or without the `/v1` prefix.
+
+### Changed
+
+- Increased `zai-org/GLM-5.2` serverless context from 262,144 to 512,000 tokens; pricing is
+  unchanged.
+- Simplified Codex context handling so conversation history and historical images pass through
+  unchanged while Codex owns compaction; TogetherLink now advertises model-specific compaction
+  thresholds and the native-style 10k tool-output truncation policy.
+- Sanitized provider-specific response items and tool/search payloads at the OpenAI-Together
+  boundary without mutating ordinary conversation history.
+
+### Fixed
+
+- Preserved Together context-length and HTTP error codes in Responses errors instead of hiding
+  them behind generic proxy failures.
+- Added native and Together-backed Responses-over-WebSocket support for ChatGPT Desktop, including
+  incremental continuations, the `/responses` compatibility alias, and safe abnormal-close handling.
+- Kept default Together output budgets inside each model's remaining context window, including a
+  safety margin for request-estimation error.
+- Ended partially-started native responses cleanly when the upstream body fails after headers have
+  already been sent.
+- Kept Exa web-search results inside structured `web_search_call` items instead of exposing raw
+  search payloads as assistant replies, and discarded unfinished pre-search drafts so Desktop
+  renders the search event before one clean final answer.
+
+### Tests
+
+- Added deterministic coverage for compaction v1/v2, memories, native route pass-through,
+  Responses-over-WebSocket routing and continuation, response item normalization, transport
+  validation, context budgeting, error propagation, and mixed web-search/client-tool turns.
+
+### Operations
+
+- Added a macOS `launchd` user agent (`com.togetherlink.daemon`) that auto-starts the shared proxy
+  daemon at login and keeps it alive, so ChatGPT Desktop no longer hits `Connection refused` after
+  a MacBook restart.
+- Existing installed bundles silently install the agent once on the next CLI launch; new installs get
+  it automatically from `install.sh`.
+- Added `togetherlink daemon install-launchd`, `uninstall-launchd`, and `status` commands.
+
 ## 0.7.8 - 2026-08-10
 
 ### Added

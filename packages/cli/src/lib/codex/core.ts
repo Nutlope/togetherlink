@@ -48,18 +48,44 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
       return catalog;
     },
     buildEnv: ({ authToken }) => buildCodexEnv(authToken),
-    buildArgs: ({ proxyUrl, authToken, modelId, beforeSpawnResult }) => [
-      ...codexArgsWithoutModelOverrides(args),
-      ...codexConfigArgs(
+    buildArgs: ({ proxyUrl, authToken, modelId, beforeSpawnResult }) =>
+      buildCodexLaunchArgs({
+        args,
         proxyUrl,
         authToken,
         modelId,
-        (beforeSpawnResult as { path: string; cleanup: () => void } | undefined)?.path ?? "",
-      ),
-    ],
+        catalogPath:
+          (beforeSpawnResult as { path: string; cleanup: () => void } | undefined)?.path ?? "",
+      }),
     afterDeregister: () => catalog?.cleanup(),
   });
   return result;
+}
+
+export function buildCodexLaunchArgs({
+  args,
+  proxyUrl,
+  authToken,
+  modelId,
+  catalogPath,
+}: {
+  args: string[];
+  proxyUrl: string;
+  authToken: string;
+  modelId: string;
+  catalogPath: string;
+}): string[] {
+  const nativeArgs = codexArgsWithoutModelOverrides(args);
+  const configArgs = codexConfigArgs(proxyUrl, authToken, modelId, catalogPath);
+  const separatorIndex = nativeArgs.indexOf("--");
+  if (separatorIndex === -1) {
+    return [...nativeArgs, ...configArgs];
+  }
+  return [
+    ...nativeArgs.slice(0, separatorIndex),
+    ...configArgs,
+    ...nativeArgs.slice(separatorIndex),
+  ];
 }
 
 function buildCodexEnv(authToken: string): NodeJS.ProcessEnv {
@@ -116,6 +142,10 @@ function codexArgsWithoutModelOverrides(args: string[]): string[] {
     const arg = args[i];
     if (arg === undefined) {
       continue;
+    }
+    if (arg === "--") {
+      sanitized.push(...args.slice(i));
+      break;
     }
     if (MODEL_OVERRIDE_FLAGS.has(arg)) {
       i += 1;

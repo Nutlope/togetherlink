@@ -4,9 +4,9 @@ import { guideOgPath, type GuideOgKey } from "../lib/guide-og";
 import { GuideOgArtwork } from "./guide-og-artwork";
 
 export const SITE_URL = "https://togetherlink.vercel.app";
-export const GITHUB_URL = "https://github.com/Nutlope/togetherlink";
-export const TOGETHER_API_KEY_URL = "https://api.together.ai/settings/api-keys";
-export const INSTALL_COMMAND = "curl -fsSL https://togetherlink.vercel.app/install.sh | sh";
+const GITHUB_URL = "https://github.com/Nutlope/togetherlink";
+const TOGETHER_API_KEY_URL = "https://api.together.ai/settings/api-keys";
+export const INSTALL_COMMAND = "curl -fsSL https://togetherlink.vercel.app/install.sh | bash";
 
 export type Faq = {
   question: string;
@@ -87,7 +87,7 @@ export function GuideArticlePage({
   );
 }
 
-export function GuideHeader() {
+function GuideHeader() {
   return (
     <header className="mx-auto flex max-w-[1120px] items-center gap-3 px-6 pt-6 max-[520px]:flex-wrap max-[520px]:px-[18px]">
       <a className="flex items-center gap-2 text-base font-semibold" href="/">
@@ -116,7 +116,7 @@ export function GuideHeader() {
   );
 }
 
-export function GuideFooter() {
+function GuideFooter() {
   return (
     <footer className="mx-auto mt-24 max-w-[1120px] border-t border-line px-6 py-8 pb-14 text-sm text-faint max-[520px]:px-[18px]">
       <div className="mb-2.5 flex flex-wrap gap-x-6 gap-y-2 text-muted">
@@ -366,7 +366,7 @@ export function FaqSection({ faqs }: { faqs: Faq[] }) {
   );
 }
 
-export function GuideStructuredData({ guide }: { guide: GuideDefinition }) {
+function GuideStructuredData({ guide }: { guide: GuideDefinition }) {
   const url = `${SITE_URL}${guide.path}`;
   const graph = {
     "@context": "https://schema.org",
@@ -412,7 +412,7 @@ export function GuideStructuredData({ guide }: { guide: GuideDefinition }) {
   );
 }
 
-export function ArticleLink({
+function ArticleLink({
   href,
   eyebrow,
   title,

@@ -38,11 +38,38 @@ describe("Codex App alpha config", () => {
     );
     expect(config).toContain('experimental_realtime_ws_base_url = "https://api.openai.com/v1"');
     expect(config).toContain('[projects."/repo"]');
+    expect(config).not.toContain("[model_providers.openai]");
+    expect(config).not.toContain("supports_websockets");
     expect(config).toContain("[model_providers.togetherlink_codex_app]");
     expect(config).toContain('name = "Togetherlink"');
     expect(config).toContain('base_url = "http://127.0.0.1:7878/session/local-secret/v1"');
     expect(config).toContain('wire_api = "responses"');
     expect(config).not.toContain("requires_openai_auth");
+  });
+
+  test("removes the obsolete reserved OpenAI provider override", () => {
+    const config = buildCodexAppConfig(
+      [
+        "[model_providers.openai]",
+        "supports_websockets = false",
+        "",
+        '[projects."/repo"]',
+        'trust_level = "trusted"',
+        "",
+      ].join("\n"),
+      {
+        providerId: "togetherlink_codex_app",
+        providerName: "Togetherlink",
+        baseUrl: "http://127.0.0.1:7878/session/local-secret/v1",
+        bearerToken: "local-secret",
+        catalogPath: "/tmp/models.json",
+      },
+    );
+
+    expect(config).not.toContain("[model_providers.openai]");
+    expect(config).not.toContain("supports_websockets");
+    expect(config).toContain('[projects."/repo"]');
+    expect(config).toContain('trust_level = "trusted"');
   });
 
   test("replaces an existing managed block instead of appending duplicates", () => {
@@ -182,13 +209,14 @@ describe("Codex App alpha config", () => {
     expect(first?.use_responses_lite).toBe(false);
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
-    // Truncation limit is the context window divided by the Codex↔Together
-    // tokenizer-mismatch ratio, so Codex compacts before Together's
-    // server-side tokenizer rejects. See codex/catalog.ts.
+    // Match native Codex tool-output truncation while leaving conversation
+    // compaction to the model-specific catalog metadata.
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
-      limit: Math.floor(DEFAULT_MODEL.limit.context / 1.8),
+      limit: 10_000,
     });
+    expect(first?.auto_compact_token_limit).toBe(900_000);
+    expect(first?.effective_context_window_percent).toBe(95);
     expect(first?.comp_hash).toBeNull();
     // model_messages MUST be an object (not null) so Codex Desktop can resolve
     // the requested personality instead of warning and falling back.
@@ -240,5 +268,11 @@ describe("Codex App alpha config", () => {
     expect(
       catalog.models.find((model) => model.slug === DEFAULT_MODEL.id)?.priority,
     ).toBeGreaterThan(2);
+    expect(
+      catalog.models.find((model) => model.slug === DEFAULT_MODEL.id)?.availability_nux,
+    ).toEqual({
+      message:
+        "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
+    });
   });
 });

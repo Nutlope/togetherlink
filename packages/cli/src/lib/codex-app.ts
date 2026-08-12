@@ -36,7 +36,9 @@ import {
   type CodexAppLaunchReason,
   launchCodexApp,
   codexAppLaunchMessage,
+  isCodexAppRunning,
 } from "./codex-app/process.js";
+import { repairCodexSessionHistory } from "./codex-app/session-repair.js";
 import { writeMergedCodexAppCatalog, mergedCodexAppCatalogJson } from "./codex-app/catalog.js";
 import { DEFAULT_CODEX_NATIVE_BASE_URL, nativeCodexBaseUrl } from "./codex/native-router.js";
 import type { CodexModelCatalog } from "./codex/catalog.js";
@@ -188,6 +190,12 @@ export function buildCodexAppConfig(
     `profiles."${options.providerId}"`,
     `model_providers.${options.providerId}`,
     `model_providers."${options.providerId}"`,
+    // A short-lived TogetherLink build tried to disable Responses WebSockets
+    // by overriding the built-in provider. Current Codex reserves this ID and
+    // rejects the entire config if that table remains, so clean it up while
+    // retaining the supported HTTP 426 transport fallback in the daemon.
+    "model_providers.openai",
+    'model_providers."openai"',
   ]);
   const withGenericDefaults = applyCodexGenericUserDefaults(withoutLegacyTables);
   const [preamble, rest] = splitTomlPreamble(withGenericDefaults);
@@ -237,6 +245,11 @@ export function buildCodexAppConfig(
 }
 
 async function restoreCodexApp(home: string): Promise<HarnessResult> {
+  if (await isCodexAppRunning()) {
+    throw new Error(
+      "Quit ChatGPT App before restoring TogetherLink so affected task history can be backed up and repaired safely.",
+    );
+  }
   const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
   const raw = await readTextIfExists(manifestPath);
   if (!raw) {
@@ -244,6 +257,7 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   }
 
   const manifest = JSON.parse(raw) as BackupManifest;
+  const repair = await repairCodexSessionHistory(home);
   for (const entry of manifest.files) {
     if (entry.existed) {
       if (!entry.backupPath) {
@@ -282,6 +296,9 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
     message: [
       "ChatGPT App restored to your previous profile.",
       `Backup date: ${manifest.createdAt}`,
+      repair.itemsRepaired > 0
+        ? `Repaired ${repair.itemsRepaired} replay-unsafe reasoning item(s) across ${repair.filesRepaired} task file(s); originals were backed up.`
+        : "No replay-unsafe reasoning history needed repair.",
       codexAppLaunchMessage(launch),
     ].join("\n"),
   };
@@ -476,7 +493,7 @@ function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
 }
 
-export const CODEX_APP_ALPHA_STATUS = {
+const CODEX_APP_ALPHA_STATUS = {
   providerId: CODEX_APP_PROVIDER_ID,
   defaultModel: CODEX_DEFAULT_MODEL,
 };

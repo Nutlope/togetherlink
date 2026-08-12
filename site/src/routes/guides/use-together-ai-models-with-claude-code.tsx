@@ -152,13 +152,18 @@ function TogetherClaudeGuide() {
             <CommandBlock command={INSTALL_COMMAND} label="Install TogetherLink" />
             <CommandBlock command="togetherlink configure" label="Save the Together API key" />
             <CommandBlock command="tclaude" label="Launch Claude Code on Kimi K3" />
+            <CommandBlock
+              command={'togetherlink --model zai-org/GLM-5.2 claude -p "task"'}
+              label="Pin GLM 5.2 for a scripted run"
+            />
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-faint">
             The installer also adds <code className="text-ink">tcodex</code>,{" "}
             <code className="text-ink">tgrok</code>, <code className="text-ink">tpi</code>, and{" "}
             <code className="text-ink">topencode</code>. Use the full{" "}
             <code className="text-ink">togetherlink claude</code> command in scripts when you want
-            the target tool to be explicit.
+            the target tool to be explicit. Put <code className="text-ink">--model</code> before the
+            harness name so TogetherLink consumes it instead of passing it to Claude Code.
           </p>
         </section>
 

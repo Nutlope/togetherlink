@@ -4,22 +4,31 @@ export type ResponsesContentPart = {
   type?: string;
   text?: string;
   image_url?: string;
+  audio_url?: string;
+  encrypted_content?: string;
   detail?: string;
 };
 
 export type ResponsesInputItem = {
+  id?: string;
   type?: string;
   role?: string;
   content?: string | ResponsesContentPart[];
+  author?: string;
+  recipient?: string;
   call_id?: string;
   name?: string;
   namespace?: string;
   arguments?: unknown;
+  action?: Record<string, unknown>;
   input?: string;
   output?: unknown;
   status?: string;
   execution?: string;
-  tools?: ResponsesTool[];
+  tools?: unknown[];
+  encrypted_content?: string;
+  revised_prompt?: string;
+  result?: string;
 };
 
 export type ResponsesTool = {
@@ -145,7 +154,14 @@ export type CodexToolTranslation = {
 
 export type TogetherChatResult =
   | { ok: true; response: Response; error?: undefined }
-  | { ok: false; status: number; text: string; error?: undefined };
+  | {
+      ok: false;
+      status: number;
+      text: string;
+      errorCode?: string;
+      errorMessage?: string;
+      error?: undefined;
+    };
 
 export type StreamProxyResult =
   | { ok: true; status?: number }

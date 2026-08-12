@@ -75,7 +75,7 @@ export async function runCommand(
   return artifact;
 }
 
-export async function writeArtifact(
+async function writeArtifact(
   context: TestContext,
   fileName: string,
   value: unknown,

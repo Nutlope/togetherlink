@@ -12,10 +12,10 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
-curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 ```
 
 Then run `togetherlink` and pick the coding tool you want to start:
@@ -34,10 +34,23 @@ togetherlink grok         # alias: tgrok
 togetherlink hermes       # alias: thermes
 togetherlink hermes desktop
 togetherlink pi           # alias: tpi
+togetherlink prime        # alias: tprime
 togetherlink opencode     # alias: topencode
 ```
 
+To pin a model for one run, put the TogetherLink flag before the harness name:
+
+```bash
+togetherlink --model zai-org/GLM-5.2 claude -p "task"
+togetherlink --model zai-org/GLM-5.2 codex exec "task"
+```
+
+Arguments after `claude`, `codex`, or another harness name belong to the underlying agent CLI, so
+TogetherLink does not consume model flags placed there.
+
 Hermes and Hermes Desktop receive a temporary standalone Together provider plugin for that launch. Existing Hermes sessions, skills, memories, plugins, and preferences remain available; TogetherLink does not persist the provider or replace the user's saved credentials.
+
+Prime Agent receives a generated, credential-free Together provider extension activated only for the `tprime` launch. TogetherLink keeps that metadata under its own home so Prime's detached workers can recover, passes the API key as a runtime override, and leaves Prime's settings, skills, sessions, and `~/.prime/agent/models.json` untouched.
 
 If no Together API key is configured yet, an interactive launch automatically runs `togetherlink configure` first. You can also run `togetherlink configure` directly, or set `TOGETHER_API_KEY`. The installed binary keeps itself up to date automatically from `togetherlink.vercel.app`.
 
@@ -72,6 +85,7 @@ togetherlink grok [...]        (alias: tgrok)
 togetherlink hermes [...]      (alias: thermes)
 togetherlink hermes desktop [...]
 togetherlink pi [...]          (alias: tpi)
+togetherlink prime [...]       (alias: tprime)
 togetherlink opencode [...]    (alias: topencode)
 ```
 

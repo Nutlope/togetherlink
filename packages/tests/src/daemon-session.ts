@@ -87,10 +87,7 @@ export async function registerCodexSession(
   return await registerSession(context, daemon, "codex");
 }
 
-export async function registerCodexAppSession(
-  context: TestContext,
-  daemon: TestDaemon,
-): Promise<string> {
+async function registerCodexAppSession(context: TestContext, daemon: TestDaemon): Promise<string> {
   return await registerSession(context, daemon, "codex-app");
 }
 

@@ -17,11 +17,12 @@ currently enforced in the type system):
   daemon's Together client, tracks cost via a `CostTracker`, and deregisters on
   exit. The shared lifecycle lives in `runProxiedSession`
   (`packages/cli/src/lib/proxied-session.ts`).
-- **Spawned harness** — OpenCode, Pi, Grok, Hermes. `run` spawns the agent binary
+- **Spawned harness** — OpenCode, Pi, Grok, Hermes, Prime. `run` spawns the agent binary
   directly; the binary talks to Together using inline config (OpenCode), a
   temporary `models.json` (Pi), a local metadata-only model catalog (Grok), or
   a temporary standalone model-provider plugin inside a credential-isolated
-  home overlay (Hermes and Hermes Desktop).
+  home overlay (Hermes and Hermes Desktop), or a credential-free provider
+  extension under TogetherLink's own home (Prime).
   No inference proxy, no `CostTracker`, no keepalive. The shared
   `runTrackedSpawnedSession` lifecycle records anonymous session start/end
   telemetry, but token and cost totals remain unavailable because Together
@@ -31,8 +32,8 @@ currently enforced in the type system):
 integration, connector.
 
 **HarnessId** — the enum of harness identifiers (`claude`, `codex`, `grok`,
-`hermes`, `opencode`, `pi`). Note: the daemon also knows about `codex-app`, an agent id not in
-`HarnessId` — an orphan to be reconciled.
+`hermes`, `opencode`, `pi`, `prime`). Note: the daemon also knows about `codex-app`, an agent id
+not in `HarnessId` — an orphan to be reconciled.
 
 ## The daemon seam
 
@@ -71,7 +72,10 @@ poisoned active stream instead of running without a bound.
 **Wire format** — the request/response shape an agent CLI speaks. Claude speaks
 the Anthropic Messages API (`/v1/messages`); Codex speaks the OpenAI Responses
 API (`/v1/responses`). The translation lives in each harness's
-`translate-request.ts` / `translate-response.ts` / `stream.ts`.
+`translate-request.ts` / `translate-response.ts` / `stream.ts`. Codex remote
+context checkpoints live in `codex/compaction.ts`, durable trace summarization
+lives in `codex/memories.ts`, and native-only ChatGPT endpoint forwarding lives
+in `codex/native-router.ts`.
 
 **Error contract** — each harness renders errors in its own wire shape. The
 daemon's catch-all dispatches by `session.agent` and renders Anthropic errors
@@ -98,8 +102,8 @@ proxied harness: model resolve → daemon → register → telemetry → banner 
 spawn → pid update → keepalive → await exit → cost print → deregister.
 
 **spawned-session** (`spawned-session.ts`) — the shared process + lifecycle
-telemetry boundary for OpenCode, Pi, Grok, and Hermes. It records which harness and
-model started/ended without claiming visibility into direct API usage.
+telemetry boundary for OpenCode, Pi, Grok, Hermes, and Prime. It records which harness and model
+started/ended without claiming visibility into direct API usage.
 
 **paths** (`paths.ts`, shared) — the single source of truth for the togetherlink
 home directory + process-liveness check. Replaces 4+3 duplicated copies.

@@ -37,7 +37,7 @@ export class TogetherSseIdleTimeoutError extends Error {
   }
 }
 
-export class TogetherSseTurnTimeoutError extends TogetherSseIdleTimeoutError {
+class TogetherSseTurnTimeoutError extends TogetherSseIdleTimeoutError {
   constructor(
     timeoutMs: number,
     clientRequestId?: string | undefined,

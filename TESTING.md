@@ -343,7 +343,7 @@ try {
     clientInfo: {
       name: "togetherlink-debug",
       title: "Togetherlink Debug",
-      version: "0.7.8",
+      version: "0.7.10",
     },
     capabilities: {
       experimentalApi: true,
@@ -401,7 +401,7 @@ The Claude/Codex proxy and per-run Together settings are intentionally temporary
 
 ## Live Agent Gauntlet
 
-The executable live suite is in `packages/tests`. It uses Vitest, real Claude/Codex/Grok/OpenCode/Pi CLI processes, and real Together inference; it does not mock the model provider.
+The executable live suite is in `packages/tests`. It uses Vitest, real Claude/Codex/Grok/OpenCode/Pi/Prime CLI processes, and real Together inference; it does not mock the model provider.
 
 Build once, then run any harness test file:
 
@@ -413,6 +413,12 @@ packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.confi
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Grok.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
 packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Pi.test.ts
+```
+
+Prime's RLM lifecycle test is opt-in because it starts a real recursive child session:
+
+```bash
+pnpm -F @togetherlink/tests test:live-prime-rlm
 ```
 
 Each run writes JSON artifacts to `packages/tests/artifacts/`, including stdout/stderr for every scenario. Longer coding-task scenarios create disposable Git repos under `packages/tests/tmp/` and remove them when the suite finishes.
@@ -429,6 +435,7 @@ Current scenarios cover:
 - Grok streaming, terminal tools, usage attribution, and curated model catalog behavior.
 - Lighter OpenCode coverage for basic streaming, bash tools, and context pressure.
 - Pi Code coverage for streaming JSON, bash tool calls, usage/cost accounting, and Together model-list vision metadata.
+- Prime Agent RLM coverage for real child admission, inherited Together provider/model settings, a child file write, child-to-parent messaging, and child usage attribution.
 
 ## Live Models Check
 
@@ -463,6 +470,7 @@ The workflow installs the real agent CLIs explicitly:
 ```bash
 npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai @earendil-works/pi-coding-agent
 curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
 ```
 
 This is intentionally a CI setup step, not something `togetherlink` does silently on a user's machine.

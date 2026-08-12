@@ -16,6 +16,7 @@ on:
           - live-models-check
           - opencode
           - pi
+          - prime
 
   push:
     branches:
@@ -97,11 +98,13 @@ jobs:
               # `opencode` binary. See https://github.com/anomalyco/opencode.
               npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai@latest @earendil-works/pi-coding-agent
               curl -fsSL https://x.ai/cli/install.sh | bash
+              curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
               echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
               claude --version
               codex --version
               opencode --version
               pi --version
+              prime-agent --version
               "$HOME/.grok/bin/grok" --version
               ;;
             live-models-check)
@@ -132,6 +135,10 @@ jobs:
               npm install -g @earendil-works/pi-coding-agent
               pi --version
               ;;
+            prime)
+              curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+              prime-agent --version
+              ;;
             *)
               echo "Unknown harness: $HARNESS" >&2
               exit 1
@@ -148,7 +155,7 @@ jobs:
         run: |
           case "$HARNESS" in
             all)
-              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm exec turbo run test:gauntlet:core test:gauntlet:claude test:gauntlet:codex test:gauntlet:grok test:gauntlet:opencode test:gauntlet:pi --filter @togetherlink/tests --concurrency=1
+              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm exec turbo run test:gauntlet:core test:gauntlet:claude test:gauntlet:codex test:gauntlet:grok test:gauntlet:opencode test:gauntlet:pi test:gauntlet:prime --filter @togetherlink/tests --concurrency=1
               ;;
             claude)
               pnpm exec turbo run test:gauntlet:claude --filter @togetherlink/tests
@@ -167,6 +174,9 @@ jobs:
               ;;
             pi)
               pnpm exec turbo run test:gauntlet:pi --filter @togetherlink/tests
+              ;;
+            prime)
+              pnpm exec turbo run test:gauntlet:prime --filter @togetherlink/tests
               ;;
             *)
               echo "Unknown harness: $HARNESS" >&2

@@ -7,6 +7,7 @@ import {
   QWEN_3_5_9B,
   QWEN_3_7_MAX,
 } from "@togetherlink/models";
+import { CostTracker } from "../../cli/src/lib/cost.js";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
 import { asRecord } from "./json-lines.js";
 
@@ -53,15 +54,29 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(first?.apply_patch_tool_type).toBe("freeform");
     expect(first?.web_search_tool_type).toBe("text_and_image");
     expect(first?.supports_search_tool).toBe(true);
-    const expectedLimit = Math.floor(DEFAULT_MODEL.limit.context / 1.8);
     expect(first?.truncation_policy).toEqual({
       mode: "tokens",
-      limit: expectedLimit,
+      limit: 10_000,
     });
-    expect(first?.auto_compact_token_limit).toBe(expectedLimit);
-    expect(first?.effective_context_window_percent).toBe(56);
+    expect(first?.context_window).toBe(1_048_576);
+    expect(first?.auto_compact_token_limit).toBe(900_000);
+    expect(first?.effective_context_window_percent).toBe(95);
     expect(first?.comp_hash).toBeNull();
     expect(first?.use_responses_lite).toBe(false);
+    expect(first?.availability_nux).toEqual({
+      message:
+        "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
+    });
+    expect(
+      catalog.models
+        ?.filter((model: Record<string, unknown>) => model.slug !== DEFAULT_MODEL.id)
+        .every((model: Record<string, unknown>) => model.availability_nux === null),
+    ).toBe(true);
+  });
+
+  test("serves the model catalog with and without the /v1 prefix", async () => {
+    const [versioned, alias] = await Promise.all([getModels("/v1/models"), getModels("/models")]);
+    expect(alias).toEqual(versioned);
   });
 
   test("routes chat completions through the session upstream base URL", async () => {
@@ -80,28 +95,409 @@ describe("Codex Responses proxy tool compatibility", () => {
       }),
     );
 
-    const response = await postResponses(
-      {
-        model: GLM_5_2.id,
-        input: [{ type: "message", role: "user", content: "route me" }],
-      },
-      { ...options, baseUrl: "http://codex-upstream.test/together/v1" },
-    );
+    for (const path of ["/v1/responses", "/responses"]) {
+      const response = await postCodexPath(
+        path,
+        {
+          model: GLM_5_2.id,
+          input: [{ type: "message", role: "user", content: "route me" }],
+        },
+        { ...options, baseUrl: "http://codex-upstream.test/together/v1" },
+      );
+      expect(response.status).toBe("completed");
+    }
 
-    expect(response.status).toBe("completed");
-    expect(urls).toEqual(["http://codex-upstream.test/together/v1/chat/completions"]);
+    expect(urls).toEqual([
+      "http://codex-upstream.test/together/v1/chat/completions",
+      "http://codex-upstream.test/together/v1/chat/completions",
+    ]);
   });
 
-  test("all models compact before Together tokenizer rejects (1.8x mismatch)", async () => {
+  test("forwards Codex search requests to the native ChatGPT endpoint", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push({ url, init });
+        return jsonResponse({ results: [{ title: "Native search result" }] });
+      }),
+    );
+
+    for (const path of ["/v1/alpha/search", "/alpha/search"]) {
+      const response = await postCodexPath(
+        path,
+        { query: "Together AI" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex" },
+        {
+          authorization: "Bearer native-chatgpt-token",
+          "chatgpt-account-id": "acct_test",
+        },
+      );
+      expect(response).toEqual({ results: [{ title: "Native search result" }] });
+    }
+
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request.url).toBe("https://chatgpt.com/backend-api/codex/alpha/search");
+      expect(request.init?.method).toBe("POST");
+      expect(request.init?.headers).toMatchObject({
+        authorization: "Bearer native-chatgpt-token",
+        "chatgpt-account-id": "acct_test",
+      });
+      expect(JSON.parse(String(request.init?.body))).toEqual({ query: "Together AI" });
+    }
+  });
+
+  test("accepts image generation and editing with and without the /v1 prefix", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(url);
+        return jsonResponse({ data: [{ b64_json: "aW1hZ2U=" }] });
+      }),
+    );
+    const nativeOptions = {
+      ...options,
+      nativeBaseUrl: "https://chatgpt.com/backend-api/codex",
+    };
+
+    for (const path of [
+      "/v1/images/generations",
+      "/images/generations",
+      "/v1/images/edits",
+      "/images/edits",
+    ]) {
+      const response = await postCodexPath(
+        path,
+        {
+          model: "gpt-image-2",
+          prompt: "add a red hat",
+          ...(path.endsWith("/edits")
+            ? { images: [{ image_url: "data:image/png;base64,aW1hZ2U=" }] }
+            : {}),
+        },
+        nativeOptions,
+      );
+      expect(response.data).toEqual([{ b64_json: "aW1hZ2U=" }]);
+    }
+
+    expect(requests).toEqual([
+      "https://chatgpt.com/backend-api/codex/images/generations",
+      "https://chatgpt.com/backend-api/codex/images/generations",
+      "https://chatgpt.com/backend-api/codex/images/edits",
+      "https://chatgpt.com/backend-api/codex/images/edits",
+    ]);
+  });
+
+  test.each(["/v1/responses", "/v1/images/generations", "/v1/alpha/search"])(
+    "does not reject Chromium/Electron-style fetch metadata headers on %s",
+    async (path) => {
+      // ChatGPT Desktop is Electron/Chromium-based, so its legitimate
+      // requests carry `origin` and `sec-fetch-site` just like a browser tab
+      // would. Rejecting on those headers 403'd every Desktop request,
+      // including brand-new chats (incident 2026-08-01) — the per-session
+      // URL token is the real auth boundary, not these headers.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url.startsWith("http://127.0.0.1:")) {
+            return realFetch(url, init);
+          }
+          return jsonResponse({
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          });
+        }),
+      );
+      const response = await requestCodexPath(
+        path,
+        { model: GLM_5_2.id, input: "electron request" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex" },
+        {
+          origin: "https://chatgpt.com",
+          "sec-fetch-site": "cross-site",
+          "content-type": "application/json",
+        },
+      );
+
+      expect(response.status).not.toBe(403);
+    },
+  );
+
+  test.each(["/v1/responses", "/v1/images/generations", "/v1/alpha/search"])(
+    "rejects non-JSON media types before routing %s",
+    async (path) => {
+      const upstream = vi.fn();
+      const response = await requestCodexPath(
+        path,
+        { model: GLM_5_2.id, input: "wrong media type" },
+        { ...options, nativeBaseUrl: "https://chatgpt.com/backend-api/codex", fetch: upstream },
+        { "content-type": "text/plain" },
+      );
+
+      expect(response.status).toBe(415);
+      expect(await response.json()).toEqual({
+        error: {
+          type: "unsupported_media_type",
+          message: "Codex router requests require Content-Type: application/json.",
+        },
+      });
+      expect(upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  test("advertises native-style truncation and model-specific compaction limits", async () => {
     const catalog = await getModels();
     expect(catalog.models.length).toBeGreaterThan(0);
     for (const m of catalog.models as Array<Record<string, unknown>>) {
-      const ctx = m.context_window as number;
-      const expectedLimit = Math.floor(ctx / 1.8);
-      expect(m.auto_compact_token_limit).toBe(expectedLimit);
-      expect(m.effective_context_window_percent).toBe(56);
-      expect((m.truncation_policy as { limit: number }).limit).toBe(expectedLimit);
+      expect(m.effective_context_window_percent).toBe(95);
+      expect(m.truncation_policy).toEqual({ mode: "tokens", limit: 10_000 });
     }
+    const compactLimitByModel = Object.fromEntries(
+      (catalog.models as Array<Record<string, unknown>>).map((model) => [
+        model.slug,
+        model.auto_compact_token_limit,
+      ]),
+    );
+    expect(compactLimitByModel).toMatchObject({
+      [DEFAULT_MODEL.id]: 900_000,
+      [GLM_5_2.id]: 460_000,
+      [MINIMAX_M3.id]: 470_000,
+      [QWEN_3_7_MAX.id]: 880_000,
+    });
+  });
+
+  test("preserves historical user-attached images without rewriting them", async () => {
+    const requests: Array<{ messages?: unknown[] }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)) as { messages?: unknown[] });
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: DEFAULT_MODEL.id,
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "Inspect the original." },
+              { type: "input_image", image_url: "data:image/png;base64,OLDER_IMAGE" },
+            ],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "I inspected it." }],
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "Compare it with this one." },
+              { type: "input_image", image_url: "data:image/png;base64,NEWER_IMAGE" },
+            ],
+          },
+        ],
+      },
+      {
+        ...options,
+        modelId: DEFAULT_MODEL.id,
+        targetModelId: DEFAULT_MODEL.id,
+        modelName: DEFAULT_MODEL.name,
+        modelDefinition: DEFAULT_MODEL,
+      },
+    );
+
+    const upstreamBody = JSON.stringify(requests[0]);
+    expect(upstreamBody).toContain("OLDER_IMAGE");
+    expect(upstreamBody).toContain("NEWER_IMAGE");
+    expect(upstreamBody).not.toContain("togetherlink removed an older image");
+  });
+
+  test("retires stale view_image screenshots while preserving the newest screenshot", async () => {
+    const requests: Array<{ messages?: unknown[] }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)) as { messages?: unknown[] });
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: DEFAULT_MODEL.id,
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Inspect the first screenshot." }],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_old_image",
+            arguments: JSON.stringify({ path: "/tmp/old.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_old_image",
+            output: [{ type: "input_image", image_url: "data:image/png;base64,STALE_TOOL_IMAGE" }],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text: "The first screenshot shows the settings page with a red error banner.",
+              },
+            ],
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Now inspect the updated screenshot." }],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_duplicate_image",
+            arguments: JSON.stringify({ path: "/tmp/new.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_duplicate_image",
+            output: [
+              {
+                type: "input_image",
+                image_url: "data:image/png;name=duplicate.png;base64,Q1VSUkVOVF9UT09MX0lNQUdF",
+              },
+            ],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_new_image",
+            arguments: JSON.stringify({ path: "/tmp/new.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_new_image",
+            output: [
+              {
+                type: "input_image",
+                image_url: "data:image/png;base64,Q1VSUkVOVF9UT09MX0lNQUdF",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...options,
+        modelId: DEFAULT_MODEL.id,
+        targetModelId: DEFAULT_MODEL.id,
+        modelName: DEFAULT_MODEL.name,
+        modelDefinition: DEFAULT_MODEL,
+      },
+    );
+
+    const upstreamBody = JSON.stringify(requests[0]);
+    expect(upstreamBody).not.toContain("STALE_TOOL_IMAGE");
+    expect(upstreamBody).toContain("Q1VSUkVOVF9UT09MX0lNQUdF");
+    expect(upstreamBody.match(/Q1VSUkVOVF9UT09MX0lNQUdF/g)).toHaveLength(1);
+    expect(upstreamBody).toContain("Historical view_image screenshot retired from replay");
+    expect(upstreamBody).toContain("The first screenshot shows the settings page");
+    expect(upstreamBody).toContain("/tmp/old.png");
+  });
+
+  test("keeps an older view_image screenshot when no assistant observation was captured", async () => {
+    const requests: Array<{ messages?: unknown[] }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)) as { messages?: unknown[] });
+        return jsonResponse({ choices: [{ message: { content: "DONE" }, finish_reason: "stop" }] });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: DEFAULT_MODEL.id,
+        input: [
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_unobserved",
+            arguments: JSON.stringify({ path: "/tmp/unobserved.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_unobserved",
+            output: [{ type: "input_image", image_url: "data:image/png;base64,UNOBSERVED_IMAGE" }],
+          },
+          {
+            type: "function_call",
+            name: "view_image",
+            call_id: "call_current",
+            arguments: JSON.stringify({ path: "/tmp/current.png" }),
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_current",
+            output: [{ type: "input_image", image_url: "data:image/png;base64,CURRENT_IMAGE" }],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text: "The current screenshot shows a successful result.",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...options,
+        modelId: DEFAULT_MODEL.id,
+        targetModelId: DEFAULT_MODEL.id,
+        modelName: DEFAULT_MODEL.name,
+        modelDefinition: DEFAULT_MODEL,
+      },
+    );
+
+    const upstreamBody = JSON.stringify(requests[0]);
+    expect(upstreamBody).toContain("UNOBSERVED_IMAGE");
+    expect(upstreamBody).toContain("CURRENT_IMAGE");
   });
 
   test("preserves prior reasoning items when translating Codex history", async () => {
@@ -180,7 +576,12 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response.output).toEqual([
       expect.objectContaining({
         type: "reasoning",
-        summary: [],
+        summary: [
+          {
+            type: "summary_text",
+            text: "Private Together reasoning must not enter persisted history.",
+          },
+        ],
         content: [],
       }),
       expect.objectContaining({
@@ -225,10 +626,16 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(reasoningDelta?.delta).toBe("VISIBLE_WHILE_RUNNING");
     expect(asRecord(reasoningDone?.item).content).toEqual([]);
+    expect(asRecord(reasoningDone?.item).summary).toEqual([
+      { type: "summary_text", text: "VISIBLE_WHILE_RUNNING" },
+    ]);
     expect(Array.isArray(completedOutput)).toBe(true);
     expect(
       asRecord(Array.isArray(completedOutput) ? completedOutput[0] : undefined).content,
     ).toEqual([]);
+    expect(
+      asRecord(Array.isArray(completedOutput) ? completedOutput[0] : undefined).summary,
+    ).toEqual([{ type: "summary_text", text: "VISIBLE_WHILE_RUNNING" }]);
     expect(raw).toContain("PORTABLE_ANSWER");
   });
 
@@ -990,8 +1397,16 @@ describe("Codex Responses proxy tool compatibility", () => {
       ],
     });
 
-    expect(response).toContain("response.failed");
-    expect(response).toContain("without a finish reason");
+    const failedLine = response
+      .split("\n")
+      .find((line) => line.startsWith("data: ") && line.includes('"response.failed"'));
+    expect(failedLine).toBeDefined();
+    const failedData = JSON.parse(failedLine!.replace(/^data: /, ""));
+    expect(failedData.response.status).toBe("failed");
+    expect(failedData.response.error).toEqual({
+      message: "Together stream ended without a finish reason.",
+    });
+    expect(failedData).not.toHaveProperty("error");
     expect(response).not.toContain("response.completed");
   });
 
@@ -1306,6 +1721,15 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
     expect(response.output[0]).toMatchObject({
+      type: "web_search_call",
+      status: "completed",
+      action: {
+        type: "search",
+        query: "Codex docs",
+        sources: [{ url: "https://developers.openai.com/codex" }],
+      },
+    });
+    expect(response.output[1]).toMatchObject({
       type: "message",
       role: "assistant",
       content: [
@@ -1318,7 +1742,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
   });
 
-  test("streams native web_search thinking and final answer deltas instead of buffering", async () => {
+  test("discards a pre-search draft before streaming the native web_search final answer", async () => {
     const requests: Array<{ url: string; body: any }> = [];
     vi.stubEnv("EXA_API_KEY", "test-exa-key");
     vi.stubGlobal(
@@ -1346,6 +1770,15 @@ describe("Codex Responses proxy tool compatibility", () => {
         if (togetherRequestCount === 1) {
           return sseResponse([
             { choices: [{ delta: { reasoning_content: "Need current docs. " } }] },
+            {
+              choices: [
+                {
+                  delta: {
+                    content: "The docs may have changed. Let me check the current",
+                  },
+                },
+              ],
+            },
             {
               choices: [
                 {
@@ -1397,6 +1830,34 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(reasoningIndex).toBeGreaterThan(-1);
     expect(textIndex).toBeGreaterThan(-1);
     expect(completedIndex).toBeGreaterThan(textIndex);
+
+    // The proxy's intercepted Exa search is surfaced as a visible
+    // web_search_call item with the full lifecycle, matching the native
+    // ChatGPT search card instead of being hidden in the text stream.
+    const addedIndex = response.indexOf("response.output_item.added");
+    const inProgressIndex = response.indexOf("response.web_search_call.in_progress");
+    const searchingIndex = response.indexOf("response.web_search_call.searching");
+    const searchCompletedIndex = response.indexOf("response.web_search_call.completed");
+    expect(addedIndex).toBeGreaterThan(-1);
+    expect(inProgressIndex).toBeGreaterThan(addedIndex);
+    expect(searchingIndex).toBeGreaterThan(inProgressIndex);
+    expect(searchCompletedIndex).toBeGreaterThan(searchingIndex);
+    expect(searchCompletedIndex).toBeLessThan(completedIndex);
+    expect(response).toContain('"type":"web_search_call"');
+    expect(response).toContain('"action":{"type":"search","query":"Codex docs"}');
+    expect(response).toContain("https://developers.openai.com/codex");
+    expect(response).not.toContain("The docs may have changed. Let me check the current");
+    const completed = response
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)) as Record<string, any>)
+      .find((event) => event.type === "response.completed");
+    expect(completed?.response.output.map((item: Record<string, unknown>) => item.type)).toEqual([
+      "reasoning",
+      "web_search_call",
+      "message",
+    ]);
+
     expect(requests.filter((request) => request.url.includes("api.together.ai"))).toHaveLength(2);
     expect(requests.some((request) => request.url.includes("api.exa.ai/search"))).toBe(true);
     expect(requests[2]?.body.messages.at(-1)).toMatchObject({
@@ -1597,17 +2058,14 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(requests.some((request) => request.url.includes("api.exa.ai"))).toBe(true);
     expect(response.output).toEqual([
       {
-        id: expect.stringMatching(/^msg_/),
-        type: "message",
-        role: "assistant",
+        id: expect.stringMatching(/^wsc_/),
+        type: "web_search_call",
         status: "completed",
-        content: [
-          {
-            type: "output_text",
-            text: expect.stringContaining('Web search results for "Codex docs" via Exa'),
-            annotations: [],
-          },
-        ],
+        action: {
+          type: "search",
+          query: "Codex docs",
+          sources: [{ url: "https://developers.openai.com/codex" }],
+        },
       },
       {
         id: expect.stringMatching(/^ctc_/),
@@ -1618,6 +2076,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         input: "*** Begin Patch\n*** End Patch\n",
       },
     ]);
+    expect(JSON.stringify(response.output)).not.toContain("Web search results for");
   });
 
   test("forwards Responses input_image parts to Together vision message content", async () => {
@@ -1818,6 +2277,55 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
 
     expect(requests[1]?.max_tokens).toBe(1234);
+
+    await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "Inspect this image." },
+            {
+              type: "input_image",
+              image_url: `data:image/png;base64,${"A".repeat(2_000_000)}`,
+            },
+          ],
+        },
+      ],
+    });
+
+    // Base64 transport bytes are not text tokens and must not consume the
+    // output allowance. Vision usage is accounted for separately by Together.
+    expect(requests[2]?.max_tokens).toBe(GLM_5_2.limit.output);
+
+    const calibratedCostTracker = new CostTracker(GLM_5_2);
+    calibratedCostTracker.noteRequestBytes(10_000);
+    calibratedCostTracker.beginRequest();
+    calibratedCostTracker.addUsage(10_000, 0, 1, GLM_5_2);
+    await postResponses(
+      {
+        model: GLM_5_2.id,
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "x".repeat(400_000) },
+              {
+                type: "input_image",
+                image_url: `data:image/png;base64,${"A".repeat(2_000_000)}`,
+              },
+            ],
+          },
+        ],
+      },
+      { ...options, costTracker: calibratedCostTracker },
+    );
+
+    // Image-bearing turns still use the calibrated estimator for their text;
+    // only the image transport bytes are excluded.
+    expect(requests[3]?.max_tokens).toBeLessThan(GLM_5_2.limit.output);
   });
 
   test("routes Codex memory extraction requests to the default long-context Together model", async () => {
@@ -2153,19 +2661,21 @@ describe("Codex Responses proxy tool compatibility", () => {
       ],
     });
 
-    // The turn was truncated by max_tokens — Codex must see "incomplete".
-    // Parse the response.completed event JSON and check the top-level status.
+    // The turn was truncated by max_tokens — Codex must receive the terminal
+    // response.incomplete event that its Responses parser handles as truncation.
     // (Individual output items have their own item-level "completed" status —
     // we only care about the response.status field, not string-matching.)
-    const completedLine = response
+    const incompleteLine = response
       .split("\n")
-      .find((l) => l.startsWith("data: ") && l.includes('"response.completed"'));
-    expect(completedLine).toBeDefined();
-    const completedData = JSON.parse(completedLine!.replace(/^data: /, ""));
-    expect(completedData.response.status).toBe("incomplete");
-    expect(completedData.response.incomplete_details).toEqual({
+      .find((line) => line.startsWith("data: ") && line.includes('"response.incomplete"'));
+    expect(incompleteLine).toBeDefined();
+    const incompleteData = JSON.parse(incompleteLine!.replace(/^data: /, ""));
+    expect(incompleteData.type).toBe("response.incomplete");
+    expect(incompleteData.response.status).toBe("incomplete");
+    expect(incompleteData.response.incomplete_details).toEqual({
       reason: "max_output_tokens",
     });
+    expect(response).not.toContain('"response.completed"');
   });
 
   test("returns status incomplete when upstream finish_reason is length (non-streaming)", async () => {
@@ -2193,75 +2703,57 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(response.incomplete_details).toEqual({ reason: "max_output_tokens" });
   });
 
-  test("trims old context and retries when input alone exceeds the context window", async () => {
-    const requests: Array<{ body: any }> = [];
+  test("surfaces context overflow without mutating or retrying the request", async () => {
     let callCount = 0;
+    const upstreamBodies: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.startsWith("http://127.0.0.1:")) {
           return realFetch(url, init);
         }
-        if (url.includes("/api/telemetry")) {
-          return new Response(null, { status: 204 });
-        }
-        const body = JSON.parse(String(init?.body));
-        requests.push({ body });
         callCount += 1;
-        if (callCount === 1) {
-          // Together rejects: input alone (325k) exceeds the 262k window.
-          return new Response(
-            JSON.stringify({
-              error: {
-                message:
-                  "This model's maximum context length is 262,144 tokens. (325,611 input tokens, 0 output tokens).",
-              },
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        // After trim, succeed.
-        return jsonResponse({
-          choices: [{ message: { content: "Done after trim." }, finish_reason: "stop" }],
-          usage: { prompt_tokens: 200, completion_tokens: 5, total_tokens: 205 },
-        });
+        upstreamBodies.push(JSON.stringify(JSON.parse(String(init?.body))));
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                "This model's maximum context length is 262,144 tokens. (325,611 input tokens, 0 output tokens).",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
       }),
     );
 
-    const longText = "x".repeat(200_000);
-    const longReply = "y".repeat(200_000);
-    const response = await postResponses({
+    const response = await postResponsesText({
       model: GLM_5_2.id,
+      stream: true,
       input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: longText }] },
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "x".repeat(200_000) }],
+        },
         {
           type: "message",
           role: "assistant",
-          content: [{ type: "output_text", text: longReply }],
+          content: [{ type: "output_text", text: "y".repeat(200_000) }],
         },
         { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
       ],
     });
 
-    // Two upstream calls: first 400, retry after input trim succeeded.
-    expect(callCount).toBe(2);
-    expect(response.status).toBe("completed");
-    expect(response.output[0]).toMatchObject({
-      type: "message",
-      role: "assistant",
-      content: [{ type: "output_text", text: "Done after trim.", annotations: [] }],
-    });
-    // The retry payload must have trimmed old context (trim marker inserted).
-    const retryMessages = requests[1]?.body?.messages;
-    expect(retryMessages).toBeDefined();
-    const hasTrimMarker = retryMessages.some(
-      (m: any) => typeof m.content === "string" && m.content.includes("[togetherlink trimmed"),
-    );
-    expect(hasTrimMarker).toBe(true);
+    expect(callCount).toBe(1);
+    expect(response).toContain('"type":"response.failed"');
+    expect(response).toContain('"code":"context_length_exceeded"');
+    expect(upstreamBodies).toHaveLength(1);
+    expect(response).not.toContain("togetherlink trimmed older context");
+    expect(upstreamBodies[0]).not.toContain("togetherlink trimmed older context");
   });
 });
 
-async function getModels(): Promise<Record<string, any>> {
+async function getModels(path = "/v1/models"): Promise<Record<string, any>> {
   const server = http.createServer((req, res) => {
     handleCodexProxyRequest(req, res, options).catch((error) => {
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -2274,7 +2766,7 @@ async function getModels(): Promise<Record<string, any>> {
     throw new Error("test server did not bind");
   }
   try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/v1/models`);
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
     expect(response.ok).toBe(true);
     return (await response.json()) as Record<string, any>;
   } finally {
@@ -2307,6 +2799,48 @@ async function postResponses(
     });
     expect(response.ok).toBe(true);
     return (await response.json()) as Record<string, any>;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+async function postCodexPath(
+  path: string,
+  body: unknown,
+  proxyOptions: CodexProxyOptions,
+  headers: Record<string, string> = {},
+): Promise<Record<string, any>> {
+  const response = await requestCodexPath(path, body, proxyOptions, headers);
+  expect(response.ok).toBe(true);
+  return (await response.json()) as Record<string, any>;
+}
+
+async function requestCodexPath(
+  path: string,
+  body: unknown,
+  proxyOptions: CodexProxyOptions,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const server = http.createServer((req, res) => {
+    handleCodexProxyRequest(req, res, {
+      ...proxyOptions,
+      fetch: proxyOptions.fetch ?? globalThis.fetch,
+    }).catch((error) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    throw new Error("test server did not bind");
+  }
+  try {
+    return await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

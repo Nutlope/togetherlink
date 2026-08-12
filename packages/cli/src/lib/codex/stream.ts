@@ -15,14 +15,21 @@ import {
 } from "../together-stream.js";
 import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty } from "./content-format.js";
-import { codexNativeToolMaxUses, runCodexExaSearch } from "./translate-request.js";
 import {
+  codexNativeToolMaxUses,
+  rememberCodexNativeSearchResult,
+  runCodexExaSearchDetailed,
+} from "./translate-request.js";
+import {
+  completeWebSearchCallItem,
   messageOutputItem,
   openReasoningOutputItem,
   openTextOutputItem,
+  openWebSearchCallItem,
   reasoningOutputItem,
   responseToolCallOutputItem,
   toResponsesUsage,
+  webSearchCallItem,
 } from "./translate-response.js";
 import { fetchTogetherChat } from "./together-call.js";
 import { recordUsage } from "./usage.js";
@@ -50,7 +57,7 @@ type StreamTurnResult =
       text: string;
       finishReason?: string | null | undefined;
     }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; errorCode?: string };
 
 class SseIdleTimeoutError extends Error {
   constructor(readonly timeoutMs: number) {
@@ -65,6 +72,7 @@ type CodexStreamOptions = {
   modelId: string;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
+  nativeSearchResults?: Map<string, string> | undefined;
 };
 export async function streamResponseFromTogether(
   res: ServerResponse,
@@ -166,7 +174,7 @@ export async function streamResponseFromTogether(
     throw err;
   }
   if (!turn.ok) {
-    return failStream(res, responseId, turn.status, turn.error);
+    return failStream(res, responseId, turn.status, turn.error, turn.errorCode);
   }
   return completeStreamResponse(
     res,
@@ -192,15 +200,23 @@ async function streamTogetherTurn(
   outputState: StreamOutputState,
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
+  deferText = false,
 ): Promise<StreamTurnResult> {
   const upstreamResult = await (perf?.span(
     "upstream_fetch",
-    () => fetchTogetherChat(payload, options, modelDefinition, signal),
+    () => fetchTogetherChat(payload, options, signal),
     { stream: true },
-  ) ?? fetchTogetherChat(payload, options, modelDefinition, signal));
+  ) ?? fetchTogetherChat(payload, options, signal));
   if (!upstreamResult.ok) {
-    const message = `Together API returned ${upstreamResult.status}: ${upstreamResult.text.slice(0, 1000)}`;
-    return { ok: false, status: upstreamResult.status, error: message };
+    const message = `Together API returned ${upstreamResult.status}: ${
+      upstreamResult.errorMessage ?? upstreamResult.text.slice(0, 1000)
+    }`;
+    return {
+      ok: false,
+      status: upstreamResult.status,
+      error: message,
+      ...(upstreamResult.errorCode ? { errorCode: upstreamResult.errorCode } : {}),
+    };
   }
   const upstream = upstreamResult.response;
   if (!upstream.body) {
@@ -220,7 +236,7 @@ async function streamTogetherTurn(
   for await (const eventData of readTogetherSseWithRetry(
     upstream,
     async () => {
-      const retried = await fetchTogetherChat(payload, options, modelDefinition, signal);
+      const retried = await fetchTogetherChat(payload, options, signal);
       return retried.ok
         ? retried.response
         : new Response(retried.text, {
@@ -292,16 +308,10 @@ async function streamTogetherTurn(
     if (delta.content) {
       madeProgress = true;
       perf?.markOnce("first_delta", { kind: "text" });
-      openTextOutputItem(res, outputState);
-      outputState.text += delta.content;
       text += delta.content;
-      writeResponsesSse(res, "response.output_text.delta", {
-        type: "response.output_text.delta",
-        item_id: outputState.textItemId,
-        output_index: outputState.textOutputIndex,
-        content_index: 0,
-        delta: delta.content,
-      });
+      if (!deferText) {
+        emitOutputTextDelta(res, outputState, delta.content);
+      }
     }
     for (const toolCall of delta.tool_calls ?? []) {
       if (toolCall.id || toolCall.function?.name || toolCall.function?.arguments) {
@@ -364,6 +374,7 @@ async function streamResponseWithNativeTools(
   const nativeToolUses = new Map<string, number>();
   let usage: ChatResponse["usage"] | undefined;
   let lastFinishReason: string | null | undefined;
+  const nativeSearchItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
 
   for (let iteration = 0; iteration < 6; iteration += 1) {
     let turn: StreamTurnResult;
@@ -378,6 +389,7 @@ async function streamResponseWithNativeTools(
         outputState,
         signal,
         perf,
+        true,
       );
     } catch (err) {
       if (signal?.aborted) {
@@ -404,12 +416,13 @@ async function streamResponseWithNativeTools(
       throw err;
     }
     if (!turn.ok) {
-      return failStream(res, responseId, turn.status, turn.error);
+      return failStream(res, responseId, turn.status, turn.error, turn.errorCode);
     }
     usage = mergeUsage(usage, turn.usage);
     lastFinishReason = turn.finishReason;
     const nativeToolCalls = turn.toolCalls.filter((toolCall) => nativeToolNames.has(toolCall.name));
     if (nativeToolCalls.length === 0) {
+      emitOutputTextDelta(res, outputState, turn.text);
       return completeStreamResponse(
         res,
         body,
@@ -421,6 +434,7 @@ async function streamResponseWithNativeTools(
         modelDefinition,
         toolTranslation,
         turn.finishReason,
+        nativeSearchItems,
       );
     }
 
@@ -432,32 +446,18 @@ async function streamResponseWithNativeTools(
         arguments: toolCall.arguments || "{}",
       },
     }));
-    const nativeResultMessages = await runNativeToolCalls(
+    const nativeRun = await runNativeToolCalls(
+      res,
       nativeToolCalls,
       nativeToolUses,
       toolTranslation,
       options,
+      outputState,
     );
+    const nativeResultMessages = nativeRun.results;
+    nativeSearchItems.push(...nativeRun.items);
 
     if (nativeToolCalls.length !== turn.toolCalls.length) {
-      const nativeText = nativeResultMessages
-        .map(
-          (message) =>
-            `Native ${toolTranslation.mappings.get(message.name)?.sourceName ?? message.name} result:\n${message.content}`,
-        )
-        .join("\n\n");
-      if (nativeText) {
-        openTextOutputItem(res, outputState);
-        const delta = `${outputState.text ? "\n\n" : ""}${nativeText}`;
-        outputState.text += delta;
-        writeResponsesSse(res, "response.output_text.delta", {
-          type: "response.output_text.delta",
-          item_id: outputState.textItemId,
-          output_index: outputState.textOutputIndex,
-          content_index: 0,
-          delta,
-        });
-      }
       const clientToolCalls = turn.toolCalls.filter(
         (toolCall) => !nativeToolNames.has(toolCall.name),
       );
@@ -472,6 +472,7 @@ async function streamResponseWithNativeTools(
         modelDefinition,
         toolTranslation,
         turn.finishReason,
+        nativeSearchItems,
       );
     }
 
@@ -508,6 +509,7 @@ async function streamResponseWithNativeTools(
     modelDefinition,
     toolTranslation,
     lastFinishReason,
+    nativeSearchItems,
   );
 }
 
@@ -525,6 +527,7 @@ async function streamTogetherTurnWithIdleRetries(
   outputState: StreamOutputState,
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
+  deferText = false,
 ): Promise<StreamTurnResult> {
   const maxRetries = codexStreamIdleRetries();
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -539,6 +542,7 @@ async function streamTogetherTurnWithIdleRetries(
         outputState,
         signal,
         perf,
+        deferText,
       );
     } catch (err) {
       if (
@@ -560,17 +564,42 @@ async function streamTogetherTurnWithIdleRetries(
   throw new SseIdleTimeoutError(codexStreamIdleTimeoutMs());
 }
 
+function emitOutputTextDelta(
+  res: ServerResponse,
+  outputState: StreamOutputState,
+  delta: string,
+): void {
+  if (!delta) {
+    return;
+  }
+  openTextOutputItem(res, outputState);
+  outputState.text += delta;
+  writeResponsesSse(res, "response.output_text.delta", {
+    type: "response.output_text.delta",
+    item_id: outputState.textItemId,
+    output_index: outputState.textOutputIndex,
+    content_index: 0,
+    delta,
+  });
+}
+
 function streamOutputStarted(outputState: StreamOutputState): boolean {
   return outputState.reasoningItemId !== undefined || outputState.textItemId !== undefined;
 }
 
 async function runNativeToolCalls(
+  res: ServerResponse,
   nativeToolCalls: PendingToolCall[],
   nativeToolUses: Map<string, number>,
   toolTranslation: CodexToolTranslation,
   options: CodexStreamOptions,
-): Promise<Array<{ id: string; name: string; content: string }>> {
+  outputState: StreamOutputState,
+): Promise<{
+  results: Array<{ id: string; name: string; content: string }>;
+  items: Array<{ item: Record<string, unknown>; outputIndex: number }>;
+}> {
   const results: Array<{ id: string; name: string; content: string }> = [];
+  const items: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
   for (const toolCall of nativeToolCalls) {
     const name = toolCall.name || "web_search";
     const nativeTool = toolTranslation.mappings.get(name);
@@ -580,17 +609,41 @@ async function runNativeToolCalls(
       nativeTool?.kind === "web_search" ? nativeTool.definition : undefined;
     const maxUses =
       webSearchDefinition !== undefined ? codexNativeToolMaxUses(webSearchDefinition) : 0;
+    if (webSearchDefinition !== undefined) {
+      // Surface the search the proxy is about to run as a visible
+      // web_search_call item, matching the native ChatGPT search card.
+      const query =
+        typeof input === "object" && input !== null
+          ? String((input as { query?: unknown }).query ?? "")
+          : "";
+      const { itemId, outputIndex } = openWebSearchCallItem(res, outputState, query);
+      const outcome = await runCodexExaSearchDetailed(input, webSearchDefinition, options);
+      nativeToolUses.set(name, priorUses + 1);
+      completeWebSearchCallItem(res, itemId, outputIndex, query, outcome);
+      rememberCodexNativeSearchResult(options.nativeSearchResults, itemId, outcome.text);
+      items.push({
+        item: webSearchCallItem(
+          itemId,
+          outcome.errorCode === undefined ? "completed" : "failed",
+          query,
+          outcome,
+        ),
+        outputIndex,
+      });
+      results.push({ id: toolCall.id, name, content: outcome.text });
+      continue;
+    }
     const content = await runNativeWebSearchCall({
       name,
       priorUses,
       maxUses,
-      isWebSearch: webSearchDefinition !== undefined,
+      isWebSearch: false,
       recordUse: () => nativeToolUses.set(name, priorUses + 1),
-      runSearch: () => runCodexExaSearch(input, webSearchDefinition!, options),
+      runSearch: async () => "Unsupported native server tool.",
     });
     results.push({ id: toolCall.id, name, content });
   }
-  return results;
+  return { results, items };
 }
 
 function completeOpenOutputItems(res: ServerResponse, outputState: StreamOutputState): void {
@@ -605,7 +658,7 @@ function completeOpenOutputItems(res: ServerResponse, outputState: StreamOutputS
     writeResponsesSse(res, "response.output_item.done", {
       type: "response.output_item.done",
       output_index: outputState.reasoningOutputIndex,
-      item: reasoningOutputItem(outputState.reasoningItemId),
+      item: reasoningOutputItem(outputState.reasoningItemId, outputState.reasoningText),
     });
   }
 
@@ -643,6 +696,7 @@ function completeStreamResponse(
   modelDefinition: ModelDefinition,
   toolTranslation: CodexToolTranslation,
   finishReason?: string | null,
+  nativeSearchItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [],
 ): StreamProxyResult {
   completeOpenOutputItems(res, outputState);
   let outputIndex = outputState.nextOutputIndex;
@@ -670,25 +724,41 @@ function completeStreamResponse(
   // successful completion. This prevents the "model says one sentence then
   // stops" bug where a truncated turn looked like a finished turn.
   const isLengthTruncated = finishReason === "length";
-  writeResponsesSse(res, "response.completed", {
-    type: "response.completed",
+  const terminalEvent = isLengthTruncated ? "response.incomplete" : "response.completed";
+  // Reassemble the full output list in output_index order: reasoning, text,
+  // any visible web_search_call items the proxy surfaced, then client tool
+  // calls. The search items were already emitted as live events; this places
+  // them in the completed response's output list in their original order.
+  const outputItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [];
+  if (outputState.reasoningItemId !== undefined) {
+    outputItems.push({
+      item: reasoningOutputItem(outputState.reasoningItemId, outputState.reasoningText),
+      outputIndex: outputState.reasoningOutputIndex ?? 0,
+    });
+  }
+  if (outputState.textItemId !== undefined) {
+    outputItems.push({
+      item: messageOutputItem(outputState.text, outputState.textItemId),
+      outputIndex: outputState.textOutputIndex ?? 0,
+    });
+  }
+  outputItems.push(...nativeSearchItems);
+  for (const toolCall of toolCalls) {
+    outputItems.push({
+      item: responseToolCallOutputItem(toolCall, toolTranslation),
+      outputIndex: Number.MAX_SAFE_INTEGER,
+    });
+  }
+  outputItems.sort((a, b) => a.outputIndex - b.outputIndex);
+  writeResponsesSse(res, terminalEvent, {
+    type: terminalEvent,
     response: {
       id: responseId,
       object: "response",
       created_at: Math.floor(Date.now() / 1000),
       status: isLengthTruncated ? "incomplete" : "completed",
       model: body.model ?? options.modelId,
-      output: [
-        ...(outputState.reasoningItemId !== undefined
-          ? [reasoningOutputItem(outputState.reasoningItemId)]
-          : []),
-        ...(outputState.textItemId !== undefined
-          ? [messageOutputItem(outputState.text, outputState.textItemId)]
-          : []),
-        ...[...toolCalls.values()].map((toolCall) =>
-          responseToolCallOutputItem(toolCall, toolTranslation),
-        ),
-      ],
+      output: outputItems.map((entry) => entry.item),
       usage: toResponsesUsage(usage),
       ...(isLengthTruncated ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     },
@@ -702,11 +772,15 @@ function failStream(
   responseId: string,
   status: number,
   message: string,
+  code?: string,
 ): StreamProxyResult {
   writeResponsesSse(res, "response.failed", {
     type: "response.failed",
-    response: { id: responseId, status: "failed" },
-    error: { message },
+    response: {
+      id: responseId,
+      status: "failed",
+      error: { ...(code ? { code } : {}), message },
+    },
   });
   res.end();
   return { ok: false, status, error: message };

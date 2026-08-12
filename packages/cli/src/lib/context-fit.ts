@@ -30,7 +30,6 @@ const HARD_WARN_DROPPED_FRACTION = 0.5;
 /** Upper bound on fit retries per request; the ladder converges well under this. */
 export const CONTEXT_FIT_MAX_ATTEMPTS = 6;
 
-const IMAGE_REMOVED_PLACEHOLDER = "[togetherlink removed an older image to fit the model window]";
 const TRIM_MARKER = "\n[togetherlink trimmed older context to fit the model window]\n";
 
 /** Structural view of an OpenAI chat message — harness-agnostic on purpose. */
@@ -205,105 +204,6 @@ function trimOldContextText(
 }
 
 /**
- * Replace all but the most-recent `keepMostRecent` image parts with a short
- * text placeholder. Images (Codex Computer-Use screenshots, pasted images) are
- * vision-expanded by Together into far more tokens than their JSON bytes
- * suggest, so stripping stale ones frees the most context for the least
- * information loss. The freed-char count understates the real token savings —
- * that's fine, the client re-reads Together's true count on the next attempt.
- */
-export function stripOldImages(
-  messages: unknown,
-  keepMostRecent = 1,
-): { removedParts: number; freedChars: number } | undefined {
-  if (!Array.isArray(messages)) {
-    return undefined;
-  }
-  const locations: Array<{ parts: FitContentPart[]; index: number }> = [];
-  for (const message of messages) {
-    const record = asFitMessage(message);
-    if (!record || !Array.isArray(record.content)) {
-      continue;
-    }
-    record.content.forEach((part, index) => {
-      if (isImagePart(part)) {
-        locations.push({ parts: record.content as FitContentPart[], index });
-      }
-    });
-  }
-  if (locations.length <= keepMostRecent) {
-    return undefined;
-  }
-  const toRemove = locations.slice(0, locations.length - keepMostRecent);
-  let removedParts = 0;
-  let freedChars = 0;
-  for (const location of toRemove) {
-    const before = jsonByteLength(location.parts[location.index]);
-    location.parts[location.index] = { type: "text", text: IMAGE_REMOVED_PLACEHOLDER };
-    const after = jsonByteLength(location.parts[location.index]);
-    freedChars += Math.max(0, before - after);
-    removedParts += 1;
-  }
-  return removedParts > 0 ? { removedParts, freedChars } : undefined;
-}
-
-/**
- * Replace image bodies from every completed user turn while preserving every
- * image in the latest user turn (including tool results that follow it).
- *
- * Coding harnesses resend the complete conversation on every request. Keeping
- * historical base64 screenshots makes that JSON grow without adding current
- * visual state, while keeping only one image would break a current turn that
- * intentionally contains several attachments.
- */
-export function stripHistoricalImages(
-  messages: unknown,
-): { removedParts: number; freedChars: number } | undefined {
-  if (!Array.isArray(messages)) {
-    return undefined;
-  }
-  let latestUserIndex = -1;
-  for (let index = 0; index < messages.length; index += 1) {
-    if (asFitMessage(messages[index])?.role === "user") {
-      latestUserIndex = index;
-    }
-  }
-  if (latestUserIndex <= 0) {
-    return undefined;
-  }
-
-  let removedParts = 0;
-  let freedChars = 0;
-  for (let messageIndex = 0; messageIndex < latestUserIndex; messageIndex += 1) {
-    const record = asFitMessage(messages[messageIndex]);
-    if (!record || !Array.isArray(record.content)) {
-      continue;
-    }
-    for (let partIndex = 0; partIndex < record.content.length; partIndex += 1) {
-      if (!isImagePart(record.content[partIndex])) {
-        continue;
-      }
-      const before = jsonByteLength(record.content[partIndex]);
-      record.content[partIndex] = { type: "text", text: IMAGE_REMOVED_PLACEHOLDER };
-      const after = jsonByteLength(record.content[partIndex]);
-      freedChars += Math.max(0, before - after);
-      removedParts += 1;
-    }
-  }
-  return removedParts > 0 ? { removedParts, freedChars } : undefined;
-}
-
-function isImagePart(part: unknown): part is FitContentPart {
-  if (!part || typeof part !== "object") {
-    return false;
-  }
-  const record = part as FitContentPart;
-  return (
-    record.type === "image_url" || record.type === "input_image" || record.image_url !== undefined
-  );
-}
-
-/**
  * Drop the oldest whole conversation turns until at least `charsToFree` bytes
  * are removed. Segments messages into turns at each `user` boundary and removes
  * whole turns from the front, so a tool-call assistant message is never
@@ -388,9 +288,8 @@ export function newContextFitState(payload: Record<string, unknown>): ContextFit
  * mutate `payload` in place. One rung per call; the client re-posts and calls
  * again with Together's fresh count, so the ladder escalates across attempts:
  *   1. reduce max_tokens   (input fits, only output too big — zero context loss)
- *   2. strip old images    (huge tokens freed, minimal information loss)
- *   3. trim old text        (string + array content)
- *   4. drop oldest turns    (pairing-aware guaranteed fit)
+ *   2. trim old text       (string + array content)
+ *   3. drop oldest turns   (pairing-aware guaranteed fit)
  * Returns `mutated:false` only when nothing further can be freed (floor).
  */
 export function applyContextFit(
@@ -445,18 +344,12 @@ export function applyContextFit(
   const realCharsPerToken = Math.max(1, payloadBytes / Math.max(1, inputTokens));
   const charsToFree = Math.max(1, Math.ceil(tokensToFree * realCharsPerToken));
 
-  // Rung 2: strip completed-turn images while preserving every image in the
-  // latest user turn.
-  const stripped = stripHistoricalImages(payload.messages);
-  if (stripped) {
-    return finish(state, base, "strip_images", stripped.freedChars);
-  }
-  // Rung 3: trim old text.
+  // Rung 2: trim old text without rewriting image history.
   const trimmed = trimPayloadMessages(payload.messages, charsToFree);
   if (trimmed) {
     return finish(state, base, "trim_text", trimmed.trimmedChars);
   }
-  // Rung 4: drop oldest whole turns.
+  // Rung 3: drop oldest whole turns.
   const dropped = dropOldestTurns(payload.messages, charsToFree);
   if (dropped) {
     return finish(state, base, "drop_turns", dropped.freedChars);

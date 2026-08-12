@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type ServerResponse } from "node:http";
 import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty, stringifyUnknown } from "./content-format.js";
+import type { ExaSearchOutcome } from "../exa-search.js";
 import type {
   ChatResponse,
   CodexToolTranslation,
@@ -19,6 +20,7 @@ export function toResponsesResponse(
   body: ResponsesRequest,
   options: CodexResponseOptions,
   toolTranslation: CodexToolTranslation,
+  nativeSearchItems: Record<string, unknown>[] = [],
 ): Record<string, unknown> {
   const responseId = chatResponse.id ?? `resp_${randomUUID().replaceAll("-", "")}`;
   // When the model hit max_tokens (finish_reason "length"), the response is
@@ -32,7 +34,7 @@ export function toResponsesResponse(
     status: isLengthTruncated ? "incomplete" : "completed",
     ...(isLengthTruncated ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
     model: body.model ?? options.modelId,
-    output: toResponsesOutput(chatResponse, toolTranslation),
+    output: toResponsesOutput(chatResponse, toolTranslation, nativeSearchItems),
     usage: toResponsesUsage(chatResponse.usage),
   };
 }
@@ -40,13 +42,15 @@ export function toResponsesResponse(
 function toResponsesOutput(
   chatResponse: ChatResponse,
   toolTranslation: CodexToolTranslation,
+  nativeSearchItems: Record<string, unknown>[],
 ): Record<string, unknown>[] {
   const message = chatResponse.choices?.[0]?.message ?? {};
   const output: Record<string, unknown>[] = [];
   const reasoning = message.reasoning ?? message.reasoning_content;
   if (reasoning) {
-    output.push(reasoningOutputItem());
+    output.push(reasoningOutputItem(undefined, reasoning));
   }
+  output.push(...nativeSearchItems);
   if (message.content) {
     output.push(messageOutputItem(message.content));
   }
@@ -113,19 +117,94 @@ export function openTextOutputItem(res: ServerResponse, state: StreamOutputState
   });
 }
 
+/** Visible web_search_call output item, mirroring what the native ChatGPT
+ * path surfaces in the app for a search turn: the item carries the query and
+ * action, and (once done) the sources the proxy's Exa search returned. */
+export function webSearchCallItem(
+  id: string,
+  status: "in_progress" | "completed" | "failed",
+  query: string,
+  outcome?: ExaSearchOutcome,
+): Record<string, unknown> {
+  const action: Record<string, unknown> = { type: "search", query };
+  const sources = (outcome?.results ?? [])
+    .map((result) => result.url)
+    .filter((url): url is string => typeof url === "string" && url !== "")
+    .map((url) => ({ url }));
+  if (sources.length > 0) {
+    action.sources = sources;
+  }
+  return {
+    id,
+    type: "web_search_call",
+    status,
+    action,
+  };
+}
+
+/** Emit the full web_search_call lifecycle (item added → in_progress →
+ * searching) up to the point where the search is running. Returns the item id
+ * and its output index so the caller can close it out afterwards. */
+export function openWebSearchCallItem(
+  res: ServerResponse,
+  state: StreamOutputState,
+  query: string,
+): { itemId: string; outputIndex: number } {
+  const itemId = `wsc_${randomUUID().replaceAll("-", "")}`;
+  const outputIndex = state.nextOutputIndex;
+  state.nextOutputIndex += 1;
+  writeResponsesSse(res, "response.output_item.added", {
+    type: "response.output_item.added",
+    output_index: outputIndex,
+    item: webSearchCallItem(itemId, "in_progress", query),
+  });
+  writeResponsesSse(res, "response.web_search_call.in_progress", {
+    type: "response.web_search_call.in_progress",
+    item_id: itemId,
+    output_index: outputIndex,
+  });
+  writeResponsesSse(res, "response.web_search_call.searching", {
+    type: "response.web_search_call.searching",
+    item_id: itemId,
+    output_index: outputIndex,
+  });
+  return { itemId, outputIndex };
+}
+
+export function completeWebSearchCallItem(
+  res: ServerResponse,
+  itemId: string,
+  outputIndex: number,
+  query: string,
+  outcome: ExaSearchOutcome,
+): void {
+  const status = outcome.errorCode === undefined ? "completed" : "failed";
+  writeResponsesSse(res, "response.web_search_call.completed", {
+    type: "response.web_search_call.completed",
+    item_id: itemId,
+    output_index: outputIndex,
+  });
+  writeResponsesSse(res, "response.output_item.done", {
+    type: "response.output_item.done",
+    output_index: outputIndex,
+    item: webSearchCallItem(itemId, status, query, outcome),
+  });
+}
+
 export function reasoningOutputItem(
   id = `rs_${randomUUID().replaceAll("-", "")}`,
+  summaryText?: string,
 ): Record<string, unknown> {
   return {
     id,
     type: "reasoning",
     status: "completed",
-    summary: [],
-    // Native OpenAI reasoning items carry encrypted_content and no raw content.
-    // Together reasoning cannot be encrypted for OpenAI, so keeping its text in
-    // this completed item makes a later `codex resume` fail validation. Streamed
-    // reasoning deltas remain visible during the turn; persisted history keeps
-    // only this replay-safe marker.
+    // Native OpenAI reasoning items carry encrypted_content for replay. Together
+    // reasoning cannot be encrypted for OpenAI, so we keep the reasoning text in
+    // the replay-safe `summary` field (not `content` or `encrypted_content`). The
+    // native backend does not require `encrypted_content` when `summary` is
+    // present, so mid-thread model switches and `codex resume` work without 404s.
+    summary: summaryText ? [{ type: "summary_text", text: summaryText }] : [],
     content: [],
   };
 }

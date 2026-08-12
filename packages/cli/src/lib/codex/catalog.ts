@@ -4,24 +4,10 @@ import { CODEX_SUPPORTED_MODELS } from "./defaults.js";
 const CODEX_BASE_INSTRUCTIONS =
   "You are Codex, a coding agent. You and the user share one workspace, and your job is to help them complete their coding task accurately and efficiently.";
 
-// Safety margin for the Codex ↔ Together tokenizer mismatch.
-//
-// Codex counts tokens with its own tokenizer, which consistently
-// underestimates relative to Together's server-side count: the mismatch is
-// ~1.77× for text+tool-schemas and even higher with vision content. With the
-// full context window Codex never compacts until Together already rejected
-// with context_length_exceeded — by then the SSE stream is dead and the user
-// sees "stream disconnected before completion".
-//
-// We derive three catalog fields from this ratio so Codex compacts and
-// truncates *proactively*, before Together's tokenizer rejects:
-//   auto_compact_token_limit  = floor(context / RATIO)  ← compaction trigger
-//   effective_context_window_percent = round(100 / RATIO) ← fallback %
-//   truncation_policy.limit   = floor(context / RATIO)  ← hard truncation
-//
-// The proxy's reactive input-trim (together-call.ts) remains the backstop
-// for edge cases (e.g. vision-heavy payloads with a higher ratio).
-const CODEX_TOKENIZER_MISMATCH_RATIO = 1.8;
+// Match the native Codex catalog's per-tool-output truncation policy. This is
+// not the model context window; Codex owns conversation compaction separately.
+const CODEX_TOOL_OUTPUT_TRUNCATION_TOKENS = 10_000;
+const CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 95;
 
 const CODEX_MODEL_MESSAGES = {
   instructions_template: `${CODEX_BASE_INSTRUCTIONS}\n\n{{ personality }}`,
@@ -76,7 +62,7 @@ export function codexModelCatalogJson(): string {
   return JSON.stringify(codexModelCatalog());
 }
 
-export function toCodexModelCatalogEntry(
+function toCodexModelCatalogEntry(
   model: { id: string; definition: ModelDefinition },
   priority = 50,
 ): Record<string, unknown> {
@@ -103,7 +89,9 @@ export function toCodexModelCatalogEntry(
     additional_speed_tiers: [],
     service_tiers: [],
     default_service_tier: null,
-    availability_nux: null,
+    availability_nux: model.definition.codexAvailabilityNuxMessage
+      ? { message: model.definition.codexAvailabilityNuxMessage }
+      : null,
     upgrade: null,
     base_instructions: CODEX_BASE_INSTRUCTIONS,
     model_messages: CODEX_MODEL_MESSAGES,
@@ -116,17 +104,15 @@ export function toCodexModelCatalogEntry(
     web_search_tool_type: "text_and_image",
     truncation_policy: {
       mode: "tokens",
-      limit: Math.floor(model.definition.limit.context / CODEX_TOKENIZER_MISMATCH_RATIO),
+      limit: CODEX_TOOL_OUTPUT_TRUNCATION_TOKENS,
     },
     supports_parallel_tool_calls: model.definition.tool_call,
     supports_image_detail_original: model.definition.attachment,
     context_window: model.definition.limit.context,
     max_context_window: model.definition.limit.context,
-    auto_compact_token_limit: Math.floor(
-      model.definition.limit.context / CODEX_TOKENIZER_MISMATCH_RATIO,
-    ),
+    auto_compact_token_limit: model.definition.codexAutoCompactTokenLimit,
     comp_hash: null,
-    effective_context_window_percent: Math.round(100 / CODEX_TOKENIZER_MISMATCH_RATIO),
+    effective_context_window_percent: CODEX_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
     experimental_supported_tools: [],
     input_modalities: model.definition.modalities.input,
     supports_search_tool: model.definition.tool_call,

@@ -5,6 +5,7 @@ export const HARNESS = {
   HERMES: "hermes",
   OPENCODE: "opencode",
   PI: "pi",
+  PRIME: "prime",
 } as const;
 
 export type HarnessId = (typeof HARNESS)[keyof typeof HARNESS];
@@ -16,6 +17,7 @@ export const ALL_HARNESSES = [
   HARNESS.HERMES,
   HARNESS.OPENCODE,
   HARNESS.PI,
+  HARNESS.PRIME,
 ] as const;
 
 // The CLI binary each harness ships, used for `which`-based detection.
@@ -26,6 +28,7 @@ export const HARNESS_BIN: Record<HarnessId, string> = {
   [HARNESS.HERMES]: "hermes",
   [HARNESS.OPENCODE]: "opencode",
   [HARNESS.PI]: "pi",
+  [HARNESS.PRIME]: "prime-agent",
 };
 
 export const HARNESS_LABEL: Record<HarnessId, string> = {
@@ -35,6 +38,7 @@ export const HARNESS_LABEL: Record<HarnessId, string> = {
   [HARNESS.HERMES]: "Hermes Agent",
   [HARNESS.OPENCODE]: "OpenCode",
   [HARNESS.PI]: "Pi Code",
+  [HARNESS.PRIME]: "Prime Agent",
 };
 
 export const HARNESS_INSTALL: Record<HarnessId, { command: string; url: string }> = {
@@ -61,5 +65,9 @@ export const HARNESS_INSTALL: Record<HarnessId, { command: string; url: string }
   [HARNESS.PI]: {
     command: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
     url: "https://pi.dev/docs/latest/quickstart",
+  },
+  [HARNESS.PRIME]: {
+    command: "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh",
+    url: "https://github.com/PrimeIntellect-ai/prime-agent",
   },
 };

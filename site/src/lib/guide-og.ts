@@ -1,4 +1,4 @@
-export const GUIDE_OG_VERSION = "7";
+const GUIDE_OG_VERSION = "7";
 
 export const guideOgContent = {
   "glm-codex": {

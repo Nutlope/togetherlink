@@ -17,6 +17,15 @@ const test = spawnSync(
   pnpm,
   ["exec", "vitest", "run", "--config", "vitest.config.ts", ...vitestArgs],
   {
+    // The default suite contains real Claude, Codex, Grok, OpenCode, and Pi
+    // inference gauntlets. Running their files concurrently saturates a shared
+    // Together account and turns healthy harnesses into response-header
+    // timeouts. Match the release workflow's serial default while preserving
+    // an explicit developer override.
+    env: {
+      ...process.env,
+      VITEST_FILE_PARALLELISM: process.env.VITEST_FILE_PARALLELISM ?? "0",
+    },
     stdio: "inherit",
   },
 );
