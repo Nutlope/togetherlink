@@ -22,8 +22,9 @@ describe("launchd plist generation", () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  test("plist uses the installed bundle executable and includes required keys", () => {
-    const plist = generateLaunchdPlist();
+  test("plist pins the current Bun runtime instead of relying on launchd PATH", () => {
+    const runtime = path.join(tempHome, "mise", "installs", "bun", "bin", "bun");
+    const plist = generateLaunchdPlist({ runtime });
     expect(plist).toContain("<key>Label</key>");
     expect(plist).toContain("com.togetherlink.daemon");
     expect(plist).toContain("<key>RunAtLoad</key>");
@@ -33,15 +34,18 @@ describe("launchd plist generation", () => {
     expect(plist).toContain("<key>TOGETHERLINK_SUPERVISED</key>");
     expect(plist).toContain("<string>1</string>");
     expect(plist).toContain(`<string>${tempHome}</string>`);
-    expect(plist).toContain(`${tempHome}/bin/togetherlink`);
+    expect(plist).toContain(`<string>${runtime}</string>`);
+    expect(plist).toContain(`<string>${tempHome}/bin/togetherlink.js</string>`);
+    expect(plist).not.toContain(`<string>${tempHome}/bin/togetherlink</string>`);
     expect(plist).toContain("daemon</string>");
     expect(plist).toContain("serve</string>");
   });
 
   test("plist escapes XML special characters", () => {
     const home = path.join(tempHome, "<special&>");
-    const program = path.join(home, "bin", "togetherlink");
-    const plist = generateLaunchdPlist({ home, program });
+    const runtime = path.join(home, "mise", "bun");
+    const bundle = path.join(home, "bin", "togetherlink.js");
+    const plist = generateLaunchdPlist({ home, runtime, bundle });
     expect(plist).not.toContain("<special&>");
     expect(plist).toContain("&lt;special&amp;&gt;");
   });

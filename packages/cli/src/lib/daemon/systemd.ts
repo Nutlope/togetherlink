@@ -6,8 +6,11 @@ import { togetherlinkHome } from "../paths.js";
 import { runningFromBundle } from "./detect-bundle.js";
 import { stopLegacyDaemonForTakeover, waitForManagedDaemonReady } from "./takeover.js";
 
-const AUTO_INSTALL_SENTINEL = "systemd-supervision-v3-installed";
-const PREVIOUS_AUTO_INSTALL_SENTINEL = "systemd-supervision-v2-installed";
+const AUTO_INSTALL_SENTINEL = "systemd-supervision-v4-installed";
+const PREVIOUS_AUTO_INSTALL_SENTINELS = [
+  "systemd-supervision-v3-installed",
+  "systemd-supervision-v2-installed",
+];
 const LEGACY_AUTO_INSTALL_SENTINEL = "systemd-auto-installed";
 const SYSTEMD_SERVICE_NAME = "togetherlink-daemon.service";
 
@@ -37,6 +40,10 @@ function bundleExecutable(): string {
   return path.join(togetherlinkHome(), "bin", "togetherlink");
 }
 
+function bundleScript(home = togetherlinkHome()): string {
+  return path.join(home, "bin", "togetherlink.js");
+}
+
 function isInsideSystemdJob(): boolean {
   return (
     process.env.SYSTEMD_EXEC_PID !== undefined ||
@@ -57,11 +64,15 @@ function systemdPath(): string {
   ].join(":");
 }
 
-export function generateSystemdUnit(overrides?: { program?: string; home?: string }): string {
+export function generateSystemdUnit(overrides?: {
+  runtime?: string;
+  bundle?: string;
+  home?: string;
+}): string {
   const home = overrides?.home ?? togetherlinkHome();
-  const program = overrides?.program ?? bundleExecutable();
+  const runtime = overrides?.runtime ?? process.execPath;
+  const bundle = overrides?.bundle ?? bundleScript(home);
   const logDir = path.join(home, "logs");
-  const quotedProgram = `"${program}"`;
   return [
     "[Unit]",
     "Description=TogetherLink shared proxy daemon",
@@ -71,7 +82,9 @@ export function generateSystemdUnit(overrides?: { program?: string; home?: strin
     `Environment=TOGETHERLINK_HOME=${home}`,
     "Environment=TOGETHERLINK_SUPERVISED=1",
     `Environment=PATH=${systemdPath()}`,
-    `ExecStart=${quotedProgram} daemon serve`,
+    // Pin the runtime that is successfully executing the installed CLI now;
+    // systemd does not inherit shell version-manager PATH configuration.
+    `ExecStart="${runtime}" "${bundle}" daemon serve`,
     // systemctl stop suppresses restart, but every process exit (including 0)
     // must recover the proxy automatically.
     "Restart=always",
@@ -158,7 +171,7 @@ export async function installSystemdService(): Promise<{ installed: boolean; mes
   await waitForManagedDaemonReady();
   await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
   for (const staleSentinel of [
-    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
+    ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
     path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
   ]) {
     try {
@@ -215,7 +228,7 @@ export async function uninstallSystemdService(): Promise<{ removed: boolean; mes
   await unlink(svcPath);
   for (const sentinel of [
     autoInstallSentinelPath(),
-    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
+    ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
     path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
   ]) {
     try {

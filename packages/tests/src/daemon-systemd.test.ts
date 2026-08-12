@@ -21,12 +21,14 @@ describe("systemd unit generation", () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  test("unit uses the installed bundle executable and required sections", () => {
-    const unit = generateSystemdUnit();
+  test("unit pins the current Bun runtime instead of relying on systemd PATH", () => {
+    const runtime = path.join(tempHome, "mise", "installs", "bun", "bin", "bun");
+    const unit = generateSystemdUnit({ runtime });
     expect(unit).toContain("[Unit]");
     expect(unit).toContain("[Service]");
     expect(unit).toContain("[Install]");
-    expect(unit).toContain(`ExecStart="${tempHome}/bin/togetherlink" daemon serve`);
+    expect(unit).toContain(`ExecStart="${runtime}" "${tempHome}/bin/togetherlink.js" daemon serve`);
+    expect(unit).not.toContain(`ExecStart="${tempHome}/bin/togetherlink"`);
     expect(unit).toContain("Restart=always");
     expect(unit).not.toContain("Restart=on-failure");
     expect(unit).toContain("RestartSec=10");

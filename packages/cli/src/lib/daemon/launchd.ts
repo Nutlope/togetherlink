@@ -6,8 +6,11 @@ import { togetherlinkHome } from "../paths.js";
 import { runningFromBundle } from "./detect-bundle.js";
 import { stopLegacyDaemonForTakeover, waitForManagedDaemonReady } from "./takeover.js";
 
-const AUTO_INSTALL_SENTINEL = "launchd-supervision-v3-installed";
-const PREVIOUS_AUTO_INSTALL_SENTINEL = "launchd-supervision-v2-installed";
+const AUTO_INSTALL_SENTINEL = "launchd-supervision-v4-installed";
+const PREVIOUS_AUTO_INSTALL_SENTINELS = [
+  "launchd-supervision-v3-installed",
+  "launchd-supervision-v2-installed",
+];
 const LEGACY_AUTO_INSTALL_SENTINEL = "launchd-auto-installed";
 const LAUNCHD_LABEL = "com.togetherlink.daemon";
 
@@ -35,6 +38,10 @@ function plistPath(): string {
 
 function bundleExecutable(): string {
   return path.join(togetherlinkHome(), "bin", "togetherlink");
+}
+
+function bundleScript(home = togetherlinkHome()): string {
+  return path.join(home, "bin", "togetherlink.js");
 }
 
 function launchctlDomain(): string {
@@ -132,13 +139,21 @@ function buildPlist(plist: LaunchdPlist): string {
   return lines.join("\n");
 }
 
-export function generateLaunchdPlist(overrides?: { program?: string; home?: string }): string {
+export function generateLaunchdPlist(overrides?: {
+  runtime?: string;
+  bundle?: string;
+  home?: string;
+}): string {
   const home = overrides?.home ?? togetherlinkHome();
-  const program = overrides?.program ?? bundleExecutable();
+  const runtime = overrides?.runtime ?? process.execPath;
+  const bundle = overrides?.bundle ?? bundleScript(home);
   const logDir = path.join(home, "logs");
   const plist: LaunchdPlist = {
     Label: LAUNCHD_LABEL,
-    ProgramArguments: [program, "daemon", "serve"],
+    // Pin the runtime that is successfully executing the installed CLI now.
+    // launchd does not inherit the user's interactive PATH, so invoking the
+    // shell wrapper can fail with `exec: bun: not found` for mise/asdf/etc.
+    ProgramArguments: [runtime, bundle, "daemon", "serve"],
     RunAtLoad: true,
     // The proxy is an availability service. Restart even after exit(0): a
     // SIGTERM is handled gracefully by the daemon and therefore looks like a
@@ -241,7 +256,7 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
   await waitForManagedDaemonReady();
   await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
   for (const staleSentinel of [
-    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
+    ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
     path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
   ]) {
     try {
@@ -302,7 +317,7 @@ export async function uninstallLaunchdDaemon(): Promise<{ removed: boolean; mess
   // Clean up the sentinel so a future CLI run can re-offer auto-install if desired.
   for (const sentinel of [
     autoInstallSentinelPath(),
-    path.join(togetherlinkHome(), PREVIOUS_AUTO_INSTALL_SENTINEL),
+    ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
     path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
   ]) {
     try {

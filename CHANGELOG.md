@@ -3,6 +3,19 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.12 - 2026-08-12
+
+### Fixed
+
+- Pinned the absolute Bun runtime in macOS `launchd` and Linux `systemd` daemon definitions instead
+  of invoking a shell wrapper that could fail when the supervisor did not inherit a version-manager
+  PATH. Existing supervised installs migrate automatically.
+
+### Tests
+
+- Added deterministic launchd and systemd coverage for Bun installations outside standard PATH
+  locations.
+
 ## 0.7.11 - 2026-08-12
 
 ### Fixed
