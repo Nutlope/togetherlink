@@ -5,6 +5,18 @@ version 0.6.5; earlier release history remains available in Git.
 
 ## 0.7.10 - 2026-08-11
 
+### Changed
+
+- Updated the documented installer command to invoke Bash explicitly, fixing installation on
+  Debian systems where `/bin/sh` is Dash and does not support `pipefail`.
+- Clarified that per-run model selection, including Claude Code model pinning, must place
+  `--model` before the harness name so TogetherLink consumes the flag.
+
+### Fixed
+
+- Inserted TogetherLink's generated Codex `-c` overrides before a caller-provided `--` separator,
+  preserving arbitrary prompt arguments while keeping the overrides parseable by Codex.
+
 ### Operations
 
 - Migrated existing CLI users from legacy detached daemons to the installed `launchd` or `systemd`
@@ -16,6 +28,8 @@ version 0.6.5; earlier release history remains available in Git.
 
 - Added deterministic coverage for legacy-daemon takeover, supervised port races, and restarting an
   installed service from the public daemon launcher.
+- Added a Codex launcher regression covering generated configuration, passthrough separators, and
+  prompt tokens that resemble command-line flags.
 
 ## 0.7.9 - 2026-08-10
 
