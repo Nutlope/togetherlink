@@ -6,7 +6,7 @@ import { GuideOgArtwork } from "./guide-og-artwork";
 export const SITE_URL = "https://togetherlink.vercel.app";
 const GITHUB_URL = "https://github.com/Nutlope/togetherlink";
 const TOGETHER_API_KEY_URL = "https://api.together.ai/settings/api-keys";
-export const INSTALL_COMMAND = "curl -fsSL https://togetherlink.vercel.app/install.sh | sh";
+export const INSTALL_COMMAND = "curl -fsSL https://togetherlink.vercel.app/install.sh | bash";
 
 export type Faq = {
   question: string;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # togetherlink installer.
 #
-#   curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+#   curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 #
 # Installs the togetherlink CLI as a Bun-target JS bundle at
 # ~/.togetherlink/bin/togetherlink.js, with a `togetherlink` wrapper script on

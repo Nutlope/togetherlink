@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ChatGPTMark, ClaudeMark, CodexMark, GrokMark } from "../components/harness-marks";
 
-const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | sh";
+const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | bash";
 const githubUrl = "https://github.com/Nutlope/togetherlink";
 const siteUrl = "https://togetherlink.vercel.app/";
 const pageTitle = "Use Together AI Models in Claude Code, Codex & ChatGPT";

@@ -18,7 +18,7 @@ This is the LLM-readable documentation file for the project. If you are an AI ag
 One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`, and `tpi` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
 
 ```
-curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 ```
 
 After install, restart your shell (or run the `export PATH=...` line it prints) so the commands are on PATH. The install:
@@ -239,7 +239,7 @@ The installed binary self-updates automatically in the background. The check is 
 To force a refresh, re-run the install one-liner:
 
 ```
-curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 ```
 
 You can check the installed version with `togetherlink --version` and compare it against the published manifest at https://togetherlink.vercel.app/latest.json.
@@ -275,7 +275,7 @@ togetherlink daemon stop
 - [GitHub](https://github.com/Nutlope/togetherlink): source repository and issues
 - [README](https://github.com/Nutlope/togetherlink#readme): human-readable project overview
 - [Website](https://togetherlink.vercel.app): landing page
-- [Install script](https://togetherlink.vercel.app/install.sh): one-command installer (`curl -fsSL https://togetherlink.vercel.app/install.sh | sh`)
+- [Install script](https://togetherlink.vercel.app/install.sh): one-command installer (`curl -fsSL https://togetherlink.vercel.app/install.sh | bash`)
 - [Version manifest](https://togetherlink.vercel.app/latest.json): current published version and release timestamp
 - [This LLM docs file](https://togetherlink.vercel.app/llms.txt): the file you are reading now
 - [Together AI API keys](https://api.together.ai/settings/api-keys): get a key to route traffic

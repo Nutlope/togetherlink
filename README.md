@@ -15,7 +15,7 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`, and `tpi` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
-curl -fsSL https://togetherlink.vercel.app/install.sh | sh
+curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 ```
 
 Then run `togetherlink` and pick the coding tool you want to start:
@@ -36,6 +36,16 @@ togetherlink hermes desktop
 togetherlink pi           # alias: tpi
 togetherlink opencode     # alias: topencode
 ```
+
+To pin a model for one run, put the TogetherLink flag before the harness name:
+
+```bash
+togetherlink --model zai-org/GLM-5.2 claude -p "task"
+togetherlink --model zai-org/GLM-5.2 codex exec "task"
+```
+
+Arguments after `claude`, `codex`, or another harness name belong to the underlying agent CLI, so
+TogetherLink does not consume model flags placed there.
 
 Hermes and Hermes Desktop receive a temporary standalone Together provider plugin for that launch. Existing Hermes sessions, skills, memories, plugins, and preferences remain available; TogetherLink does not persist the provider or replace the user's saved credentials.
 
