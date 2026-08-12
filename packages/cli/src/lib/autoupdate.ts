@@ -11,7 +11,8 @@
  * an update problem must never block or crash the user's actual command.
  */
 
-import { mkdir, writeFile, rename, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, writeFile, rename, stat, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { VERSION } from "./version.js";
@@ -63,7 +64,34 @@ function quoteForSh(value: string): string {
  * Add wrapper commands introduced after a user's original installation. Never
  * replace an existing launcher: it may be a deliberate local override.
  */
-export async function ensureInstalledWrappers(installDir = resolveInstallDir()): Promise<void> {
+async function findWritablePathDir(
+  binDir: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  if (process.platform === "win32") {
+    return undefined;
+  }
+  for (const candidate of (env.PATH ?? "").split(path.delimiter)) {
+    if (!candidate || path.resolve(candidate) === path.resolve(binDir)) {
+      continue;
+    }
+    try {
+      if (!(await stat(candidate)).isDirectory()) {
+        continue;
+      }
+      await access(candidate, constants.W_OK);
+      return candidate;
+    } catch {
+      // Keep looking for the next writable PATH directory.
+    }
+  }
+  return undefined;
+}
+
+export async function ensureInstalledWrappers(
+  installDir = resolveInstallDir(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
   const binDir = path.join(installDir, "bin");
   const bundle = quoteForSh(path.join(binDir, "togetherlink.js"));
   await mkdir(binDir, { recursive: true });
@@ -74,6 +102,22 @@ export async function ensureInstalledWrappers(installDir = resolveInstallDir()):
       const contents = `#!/usr/bin/env sh\nexec bun ${bundle}${harnessArg} "$@"\n`;
       try {
         await writeFile(path.join(binDir, name), contents, { flag: "wx", mode: 0o755 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+      }
+    }),
+  );
+
+  const linkDir = await findWritablePathDir(binDir, env);
+  if (!linkDir) {
+    return;
+  }
+  await Promise.all(
+    INSTALLED_WRAPPERS.map(async ([name]) => {
+      try {
+        await symlink(path.join(binDir, name), path.join(linkDir, name));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
           throw error;

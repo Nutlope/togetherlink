@@ -21,6 +21,8 @@ version 0.6.5; earlier release history remains available in Git.
 
 - Inserted TogetherLink's generated Codex `-c` overrides before a caller-provided `--` separator,
   preserving arbitrary prompt arguments while keeping the overrides parseable by Codex.
+- Backfilled installer-style PATH symlinks for wrapper commands added by auto-update, without
+  replacing existing user commands.
 
 ### Operations
 
