@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
 import { assert, assertCommandExists } from "./assert.js";
@@ -29,10 +29,10 @@ maybeDescribe("live Prime Agent RLM", () => {
   });
 
   test("a Together-backed parent delegates to a child and receives its reply", async () => {
-    const runDir = path.join(context.tmpDir, "prime-rlm");
+    // Vitest retries share beforeAll state, so each attempt needs isolated Prime transcripts.
+    const runDir = await mkdtemp(path.join(context.tmpDir, "prime-rlm-"));
     const sessionDir = path.join(runDir, "sessions");
     const childArtifact = path.join(runDir, "child-token.txt");
-    await mkdir(runDir, { recursive: true });
     const prompt = primeRlmPrompt(childArtifact);
     const result = await runCommand(
       context,
