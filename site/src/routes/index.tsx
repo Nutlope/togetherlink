@@ -6,9 +6,9 @@ import { ChatGPTMark, ClaudeMark, CodexMark, GrokMark } from "../components/harn
 const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | bash";
 const githubUrl = "https://github.com/Nutlope/togetherlink";
 const siteUrl = "https://togetherlink.vercel.app/";
-const pageTitle = "Use Together AI Models in Claude Code, Codex & ChatGPT";
+const pageTitle = "Use Together AI Models in Claude Code, Codex, Prime Agent & ChatGPT";
 const pageDescription =
-  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, and the ChatGPT desktop app with togetherlink.";
+  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, Prime Agent, and the ChatGPT desktop app with togetherlink.";
 const togetherReferralUrl =
   "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
@@ -138,7 +138,7 @@ const heroTools = [
 ];
 
 const heroProof: ProofItem[] = [
-  { value: "6", label: "integrations" },
+  { value: "8", label: "integrations" },
   { value: "1", label: "install command" },
   { value: "GitHub", label: "see the code", href: githubUrl, icon: <GitHubMark /> },
 ];
@@ -210,7 +210,7 @@ export const Route = createFileRoute("/")({
       {
         property: "og:image:alt",
         content:
-          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code",
+          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, Hermes, and Prime Agent",
       },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: pageTitle },
@@ -219,7 +219,7 @@ export const Route = createFileRoute("/")({
       {
         name: "twitter:image:alt",
         content:
-          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code",
+          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, Hermes, and Prime Agent",
       },
     ],
     links: [{ rel: "canonical", href: siteUrl }],

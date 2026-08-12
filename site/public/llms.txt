@@ -269,7 +269,7 @@ togetherlink daemon stop
 - **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
 - **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
 - **Grok web search or image generation is unavailable** — `tgrok` disables Grok's xAI-backed web search and Imagine image tools because Together's direct chat-completions route does not provide those xAI-specific API surfaces. Coding tools, workflows, image understanding through supported Together vision models, and Together model requests still work.
-- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Grok Build / Hermes / Pi Code setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
+- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Grok Build / Hermes / Pi Code / Prime Agent setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
 
 ## Links
 

@@ -13,12 +13,12 @@ export const Route = createRootRoute({
         content: "hw2T7bF1pTb1gIVdn0dudbJ-RdGyOkp6hYt8LH5kaeA",
       },
       {
-        title: "togetherlink - Together AI models in OpenCode, Claude Code, Codex & Pi Code",
+        title: "togetherlink - Together AI models in OpenCode, Claude Code, Codex & Prime Agent",
       },
       {
         name: "description",
         content:
-          "A single self-updating binary that routes OpenCode, Claude Code, Codex, and Pi Code through Together AI models.",
+          "A single self-updating binary that routes OpenCode, Claude Code, Codex, Pi Code, and Prime Agent through Together AI models.",
       },
     ],
     links: [

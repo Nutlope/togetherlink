@@ -35,6 +35,8 @@ version 0.6.5; earlier release history remains available in Git.
   installed service from the public daemon launcher.
 - Added a Codex launcher regression covering generated configuration, passthrough separators, and
   prompt tokens that resemble command-line flags.
+- Added Prime provider, native passthrough, concurrent endpoint-isolation, and installed-wrapper
+  regression coverage.
 
 ## 0.7.9 - 2026-08-10
 

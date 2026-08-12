@@ -22,7 +22,7 @@ export default defineHarness({
 
     const selectedModel = resolveCodexModel(ctx.main);
     const baseUrl = resolveTogetherBaseUrl();
-    const extensionPath = resolvePrimeProviderExtensionPath(ctx.home);
+    const extensionPath = resolvePrimeProviderExtensionPath(ctx.home, baseUrl);
     await writePrimeProviderExtension(extensionPath, baseUrl);
     const launch = buildPrimeLaunchSpec({
       selectedModel,

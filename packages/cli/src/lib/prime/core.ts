@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ModelDefinition } from "@togetherlink/models";
@@ -94,10 +95,12 @@ export function buildPrimeProviderExtensionSource(baseUrl = TOGETHER_BASE_URL): 
 
 export function resolvePrimeProviderExtensionPath(
   home: string,
+  baseUrl = TOGETHER_BASE_URL,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const togetherlinkRoot = env.TOGETHERLINK_HOME?.trim() || join(home, ".togetherlink");
-  return join(togetherlinkRoot, "prime-agent", "together-provider.js");
+  const endpointHash = createHash("sha256").update(baseUrl).digest("hex").slice(0, 12);
+  return join(togetherlinkRoot, "prime-agent", `together-provider-${endpointHash}.js`);
 }
 
 export async function writePrimeProviderExtension(
@@ -119,6 +122,10 @@ export function primeArgsWithoutTogetherlinkOverrides(args: string[]): string[] 
     const arg = args[index];
     if (arg === undefined) {
       continue;
+    }
+    if (arg === "--") {
+      sanitized.push(...args.slice(index));
+      break;
     }
     if (VALUE_FLAGS.has(arg)) {
       index += 1;

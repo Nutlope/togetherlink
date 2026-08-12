@@ -69,12 +69,15 @@ describe("Prime Agent harness", () => {
   test("writes a credential-free extension under TogetherLink's own home", async () => {
     const home = await mkdtemp(join(tmpdir(), "togetherlink-prime-home-"));
     cleanup.push(home);
-    const extensionPath = resolvePrimeProviderExtensionPath(home, {});
+    const extensionPath = resolvePrimeProviderExtensionPath(home, "https://api.together.ai/v1", {});
 
     await writePrimeProviderExtension(extensionPath, "https://api.together.ai/v1");
 
     const source = await readFile(extensionPath, "utf8");
-    expect(extensionPath).toBe(join(home, ".togetherlink", "prime-agent", "together-provider.js"));
+    expect(extensionPath).toContain(
+      join(home, ".togetherlink", "prime-agent", "together-provider-"),
+    );
+    expect(extensionPath).toMatch(/[a-f0-9]{12}\.js$/);
     expect(source).toBe(buildPrimeProviderExtensionSource("https://api.together.ai/v1"));
     expect(source).toContain(`pi.registerProvider("${PRIME_PROVIDER_ID}"`);
     expect(source).not.toContain("together-secret");
@@ -128,12 +131,37 @@ describe("Prime Agent harness", () => {
     });
   });
 
+  test("preserves prompt-like flags after Prime's native passthrough separator", () => {
+    const launch = buildPrimeLaunchSpec({
+      selectedModel: resolveCodexModel(KIMI_K3.id),
+      apiKey: "together-secret",
+      baseUrl: "https://api.together.ai/v1",
+      extensionPath: "/tmp/together-provider.js",
+      passthrough: ["--model", "ignored/override", "--", "--model", "literal prompt"],
+      env: {},
+    });
+
+    const separatorIndex = launch.args.indexOf("--");
+    expect(separatorIndex).toBeGreaterThan(0);
+    expect(launch.args.slice(separatorIndex + 1)).toEqual(["--model", "literal prompt"]);
+    expect(launch.args).not.toContain("ignored/override");
+  });
+
+  test("uses immutable provider extensions for concurrent base URLs", () => {
+    const home = "/users/example";
+    const first = resolvePrimeProviderExtensionPath(home, "https://first.example/v1", {});
+    const second = resolvePrimeProviderExtensionPath(home, "https://second.example/v1", {});
+
+    expect(first).not.toBe(second);
+    expect(resolvePrimeProviderExtensionPath(home, "https://first.example/v1", {})).toBe(first);
+  });
+
   test("honors an isolated TogetherLink home without changing Prime's home", () => {
     expect(
-      resolvePrimeProviderExtensionPath("/users/example", {
+      resolvePrimeProviderExtensionPath("/users/example", "https://api.together.ai/v1", {
         TOGETHERLINK_HOME: "/tmp/togetherlink-isolated",
         PRIME_AGENT_CODING_AGENT_DIR: "/users/example/.prime/agent",
       }),
-    ).toBe("/tmp/togetherlink-isolated/prime-agent/together-provider.js");
+    ).toContain("/tmp/togetherlink-isolated/prime-agent/together-provider-");
   });
 });
