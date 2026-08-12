@@ -44,7 +44,7 @@ export function defineHarness(impl: Harness): Harness {
  *   daemon's Together client, tracks cost via a CostTracker, and deregisters
  *   on exit. The lifecycle lives in `runProxiedSession` (proxied-session.ts).
  *
- * - **Spawned** — OpenCode, Grok, Pi, Hermes. `run` spawns the agent binary directly;
+ * - **Spawned** — OpenCode, Grok, Pi, Hermes, Prime. `run` spawns the agent binary directly;
  *   the binary talks to Together using inline config (OpenCode), a local
  *   metadata-only model catalog (Grok), or a models.json on disk (Pi). No
  *   inference proxy, no CostTracker, no keepalive.

@@ -21,22 +21,6 @@ type ProofItem = {
 
 const features = [
   {
-    title: "OpenCode",
-    command: "topencode",
-    tag: "100% supported",
-    tagTone: "live",
-    body: (
-      <>
-        OpenCode launches with Together Kimi K3 wired in - config injected only for that launch.
-        Close it and your OpenCode setup is exactly as it was, while sessions can still resume.
-      </>
-    ),
-    supportLabel: "Support",
-    supportValue: "100%",
-    icon: <OpenCodeMark />,
-    accent: undefined,
-  },
-  {
     title: "Claude Code",
     command: "tclaude",
     tag: "Beta",
@@ -62,22 +46,6 @@ const features = [
       </>
     ),
     icon: <CodexMark />,
-    accent: undefined,
-  },
-  {
-    title: "Pi Code",
-    command: "tpi",
-    tag: "100% supported",
-    tagTone: "live",
-    body: (
-      <>
-        Pi Code launches with Pi's official Together provider, a temporary Pi config directory, and
-        normal local session persistence.
-      </>
-    ),
-    supportLabel: "Support",
-    supportValue: "100%",
-    icon: <PiMark />,
     accent: undefined,
   },
   {
@@ -110,6 +78,52 @@ const features = [
     supportLabel: "Support",
     supportValue: "100%",
     icon: <HermesMark />,
+    accent: undefined,
+  },
+  {
+    title: "OpenCode",
+    command: "topencode",
+    tag: "100% supported",
+    tagTone: "live",
+    body: (
+      <>
+        OpenCode launches with Together Kimi K3 wired in - config injected only for that launch.
+        Close it and your OpenCode setup is exactly as it was, while sessions can still resume.
+      </>
+    ),
+    supportLabel: "Support",
+    supportValue: "100%",
+    icon: <OpenCodeMark />,
+    accent: undefined,
+  },
+  {
+    title: "Pi Code",
+    command: "tpi",
+    tag: "100% supported",
+    tagTone: "live",
+    body: (
+      <>
+        Pi Code launches with Pi's official Together provider, a temporary Pi config directory, and
+        normal local session persistence.
+      </>
+    ),
+    supportLabel: "Support",
+    supportValue: "100%",
+    icon: <PiMark />,
+    accent: undefined,
+  },
+  {
+    title: "Prime Agent",
+    command: "tprime",
+    tag: "Beta",
+    tagTone: "beta",
+    body: (
+      <>
+        Prime Agent launches with a generated Together provider extension and a runtime-only API
+        key. Your native Prime settings, extensions, and sessions stay intact.
+      </>
+    ),
+    icon: <PrimeMark />,
     accent: undefined,
   },
 ];
@@ -552,19 +566,21 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, <code>tgrok</code>, <code>thermes</code>, and <code>tpi</code>.
+          <code>tcodex</code>, <code>tgrok</code>, <code>thermes</code>, <code>tpi</code>, and{" "}
+          <code>tprime</code>.
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>, <code>tgrok</code>,
-          <code>thermes</code>, or <code>tpi</code>. Run <code>thermes desktop</code> for Hermes
-          Desktop. For the ChatGPT desktop app run <code>togetherlink chatgpt</code> (alpha), and
-          restore it with <code>togetherlink chatgpt --restore</code>. On first launch it asks once
-          for your Together API key - press Enter to skip and add it later.
+          <code>thermes</code>, <code>tpi</code>, or <code>tprime</code>. Run{" "}
+          <code>thermes desktop</code> for Hermes Desktop. For the ChatGPT desktop app run{" "}
+          <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
+          <code>togetherlink chatgpt --restore</code>. On first launch it asks once for your
+          Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change
           your mind? Just stop using it - no agent config was saved, so your subscriptions and your
-          OpenCode/Claude Code/Codex CLI/Grok Build/Hermes/Pi Code config are untouched.
+          OpenCode/Claude Code/Codex CLI/Grok Build/Hermes/Pi Code/Prime Agent config are untouched.
         </Step>
       </section>
 
@@ -659,6 +675,14 @@ function Home() {
             rel="noopener noreferrer"
           >
             Hermes
+          </a>
+          <a
+            className="transition-colors hover:text-ink"
+            href="https://github.com/PrimeIntellect-ai/prime-agent"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Prime Agent
           </a>
         </div>
         <p className="m-0 text-[13px]">{version}</p>
@@ -818,6 +842,21 @@ function PiMark() {
         d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
       />
       <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
+    </svg>
+  );
+}
+
+function PrimeMark() {
+  return (
+    <svg className="size-[28px]" viewBox="0 0 178 178" fill="none" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M123.322 84.093c-.192.006-.43.014-.74.014l-.018-.024c-.873.198-1.958.127-3.067.054-3.29-.216-6.799-.447-5.635 6.282.259 1.482-1.538 1.847-2.73 1.908-3.384.186-6.78.26-10.171.192-.641-.011-1.298-.551-1.89-1.039l-.302-.246c-.105-.086.29-1.204.494-1.216 3.308-.193 4.507-2.436 5.703-4.672.603-1.126 1.204-2.249 2.072-3.109 7.856-7.787 15.878-15.426 25.054-21.701.895-.611 1.989-1.173 2.73-.111.571.821.036 1.286-.512 1.763-.24.209-.482.42-.637.664-.554.879-1.538 1.527-2.514 2.172-1.92 1.265-3.82 2.517-2.408 5.48 1.225 2.565.129 3.02-1.555 3.719l-.069.029c-.72.302-1.458.576-2.194.85-1.568.584-3.134 1.167-4.537 2.015-1.408.852-2.081 2.513.222 3.495 5.033 2.143 18.064-1.278 20.608-5.996 2.377-4.415 5.931-7.689 9.481-10.961 1.992-1.836 3.984-3.672 5.767-5.707 3.844-4.385 8.344-8.194 12.846-12.005 2.239-1.895 4.478-3.79 6.637-5.756 1.624-1.482 2.297-3.434 1.026-5.564-1.267-2.119-3.416-2.403-5.435-1.927-13.309 3.131-26.166 7.355-37.585 15.241-18.23 12.592-36.491 25.141-54.9 37.467-6.275 4.205-10.073 2.149-12.166-5.132-4.65-16.167-11.468-30.266-31.057-32.458-7.157-.803-12.406 3.68-11.369 10.795.525 3.606.05 7.003-1.686 10.387-.383.747-.769 1.495-1.155 2.243-2.672 5.171-5.368 10.386-7.04 15.889-.14.46-.3.944-.465 1.443-1.491 4.506-3.386 10.233 5.659 10.55.37.012 1.081.945.994 1.29-.197.822-.599 1.797-1.241 2.273-8.671 6.391-15.797 14.129-18.86 24.597-1.55 5.286-.525 10.776 3.989 14.87 3.23 2.928 7.355 4.625 10.974 2.162 3.301-2.247 6.923-3.754 10.538-5.259 3.182-1.324 6.358-2.646 9.304-4.468.71-.439 1.573-.841 2.446-1.248 2.413-1.123 4.906-2.284 4.47-4.384-.685-3.291-4.162-6.342-7.058-8.738-2.872-2.377-10.19-18.341-9.319-22.176 1.219-5.371 3.964-10.021 6.712-14.675 2.346-3.973 4.694-7.949 6.096-12.38.58-1.828 2.803-2.829 4.946-2.1 1.455.493 1.207 1.828.977 3.071l-.019.103-3.854 21.528c-.272 1.532.203 2.755 1.79 3.063 3.057.599 2.989 1.976 1.612 4.342-1.464 2.507-1.668 5.57-.031 7.886 1.643 2.328 4.391 2.816 7.182 1.42 1.742-.864 3.094-.092 3.076 1.662-.112 9.369 3.81 7.256 8.584 3.168.439-.376 1.037-.584 1.615-.785l.312-.11 1.359-.483c8.986-3.188 17.961-6.372 23.034-15.573.392-.719 1.678-1.067 2.679-1.338l.168-.045c5.802-1.577 11.725-1.6 17.644-1.624 4.445-.018 8.888-.035 13.277-.711 4.329-.667 9.047-3.192 9.084-7.373.035-3.37-2.546-3.161-5.123-2.952-1.115.091-2.231.181-3.134-.018-.182-.039-.375-.032-.686-.021Z"
+      />
+      <path
+        fill="currentColor"
+        d="M55.133 131.294c-1.075 7.152 1.655 13.272 12.826 13.192h-.006c9.541-.389 20.337-6.164 30.884-13.549 6.965-4.879 12.987-10.024 16.89-17.626 2.872-5.588 1.395-10.072-2.933-13.993-1.908-1.729-3.73-1.921-5.867.166-7.584 7.424-17.026 11.475-26.722 15.551-2.47 1.039-5.284 1.558-8.118 2.08-7.551 1.393-15.243 2.811-16.954 14.179Z"
+      />
     </svg>
   );
 }

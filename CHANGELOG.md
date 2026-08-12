@@ -5,6 +5,11 @@ version 0.6.5; earlier release history remains available in Git.
 
 ## 0.7.10 - 2026-08-11
 
+### Added
+
+- Added Prime Agent beta support through `togetherlink prime` and the `tprime` shortcut, using a
+  generated credential-free provider extension so native Prime settings and sessions stay intact.
+
 ### Changed
 
 - Updated the documented installer command to invoke Bash explicitly, fixing installation on

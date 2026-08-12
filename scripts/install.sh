@@ -6,8 +6,8 @@
 # Installs the togetherlink CLI as a Bun-target JS bundle at
 # ~/.togetherlink/bin/togetherlink.js, with a `togetherlink` wrapper script on
 # PATH that runs it with `bun`. Installs Bun for the user if `bun` isn't on
-# PATH. Also installs `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`, and
-# `tpi` convenience wrappers.
+# PATH. Also installs `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`,
+# `tpi`, and `tprime` convenience wrappers.
 #
 # After install, the CLI prompts once for a Together API key on first use
 # (Enter skips — the key is optional). The CLI self-updates in the background.
@@ -66,7 +66,7 @@ exec bun "$BIN_DIR/togetherlink.js" "\$@"
 EOF
 chmod +x "$BIN_DIR/togetherlink"
 
-# Short aliases: tclaude / topencode / tcodex / tgrok / thermes / tpi
+# Short aliases: tclaude / topencode / tcodex / tgrok / thermes / tpi / tprime
 cat > "$BIN_DIR/tclaude" <<EOF
 #!/usr/bin/env sh
 exec bun "$BIN_DIR/togetherlink.js" claude "\$@"
@@ -103,7 +103,13 @@ exec bun "$BIN_DIR/togetherlink.js" pi "\$@"
 EOF
 chmod +x "$BIN_DIR/tpi"
 
-ok "Wrappers installed: togetherlink, tclaude, topencode, tcodex, tgrok, thermes, tpi → $BIN_DIR"
+cat > "$BIN_DIR/tprime" <<EOF
+#!/usr/bin/env sh
+exec bun "$BIN_DIR/togetherlink.js" prime "\$@"
+EOF
+chmod +x "$BIN_DIR/tprime"
+
+ok "Wrappers installed: togetherlink, tclaude, topencode, tcodex, tgrok, thermes, tpi, tprime → $BIN_DIR"
 
 # Remove old togetherlink-owned wrappers that used the upstream agent names.
 # Current installs must never shadow `claude`, `codex`, or `opencode`; users
@@ -117,7 +123,7 @@ remove_legacy_shadow_wrapper() {
   if [ -L "$path" ]; then
     target="$(readlink "$path" 2>/dev/null || true)"
     case "$target" in
-      "$BIN_DIR/tclaude"|"$BIN_DIR/tcodex"|"$BIN_DIR/topencode"|"$BIN_DIR/tgrok"|"$BIN_DIR/thermes"|"$BIN_DIR/tpi"|"$BIN_DIR/togetherlink"|"$BIN_DIR/togetherlink.js")
+      "$BIN_DIR/tclaude"|"$BIN_DIR/tcodex"|"$BIN_DIR/topencode"|"$BIN_DIR/tgrok"|"$BIN_DIR/thermes"|"$BIN_DIR/tpi"|"$BIN_DIR/tprime"|"$BIN_DIR/togetherlink"|"$BIN_DIR/togetherlink.js")
         rm -f "$path"
         ok "Removed old togetherlink shadow command: $path"
         ;;
@@ -193,6 +199,7 @@ if LINK_DIR="$(find_writable_path_dir)"; then
   install_link tgrok "$BIN_DIR/tgrok"
   install_link thermes "$BIN_DIR/thermes"
   install_link tpi "$BIN_DIR/tpi"
+  install_link tprime "$BIN_DIR/tprime"
   if [ "$links_changed" -gt 0 ]; then
     ok "Linked $links_changed command(s) into current PATH → $LINK_DIR"
   fi

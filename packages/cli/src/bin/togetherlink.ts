@@ -119,6 +119,7 @@ async function runInteractiveLauncher(): Promise<void> {
       { value: "grok", label: "Grok Build", hint: "tgrok" },
       { value: "opencode", label: "OpenCode", hint: "topencode" },
       { value: "pi", label: "Pi Code", hint: "tpi" },
+      { value: "prime", label: "Prime Agent", hint: "tprime" },
       { value: "hermes", label: "Hermes Agent", hint: "thermes" },
       { value: "configure", label: "Configure", hint: "API keys and detected tools" },
     ],
@@ -214,6 +215,7 @@ async function main() {
     "grok",
     "opencode",
     "pi",
+    "prime",
     "hermes",
   ]);
   if (DAEMON_REQUIRING_COMMANDS.has(command)) {

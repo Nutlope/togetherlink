@@ -8,6 +8,7 @@ const LOADERS: Partial<Record<HarnessId, () => Promise<{ default: Harness }>>> =
   [HARNESS.HERMES]: () => import("./harnesses/hermes.js"),
   [HARNESS.OPENCODE]: () => import("./harnesses/opencode.js"),
   [HARNESS.PI]: () => import("./harnesses/pi.js"),
+  [HARNESS.PRIME]: () => import("./harnesses/prime.js"),
 };
 
 export async function loadHarness(harness: HarnessId): Promise<Harness> {
