@@ -39,6 +39,8 @@ version 0.6.5; earlier release history remains available in Git.
   prompt tokens that resemble command-line flags.
 - Added Prime provider, native passthrough, concurrent endpoint-isolation, and installed-wrapper
   regression coverage.
+- Added an opt-in live Prime RLM lifecycle test covering a real recursive child, inherited Together
+  routing, child-to-parent messaging, persisted transcripts, and child usage attribution.
 
 ## 0.7.9 - 2026-08-10
 
