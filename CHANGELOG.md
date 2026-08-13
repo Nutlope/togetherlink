@@ -3,6 +3,37 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.14 - 2026-08-13
+
+### Added
+
+- Added alpha support for DeepSeek Harness through `togetherlink deepseek` and the `tdeepseek`
+  shortcut, using a temporary credential-free provider patch that leaves normal DSH settings
+  untouched.
+- Added opt-in installation of `@deepseek-ai/dsh` when—and only when—the user explicitly invokes
+  or selects DeepSeek Harness.
+
+### Changed
+
+- Hid DSH's native DeepSeek models when `DEEPSEEK_API_KEY` is absent, while keeping Together AI
+  models available and selected by default. Native and Together models remain available together
+  when the native key is present.
+- Added DeepSeek Harness to the website with its official fish mark, and gave Alpha, Beta, and 100%
+  Supported badges distinct visual status treatments.
+
+### Fixed
+
+- Prevented Codex from turning Together `length` finish reasons that stopped far below the requested
+  output budget into fatal `stream disconnected before completion` errors.
+- Unified Claude and Codex output budgeting so oversized input estimates cannot collapse a request
+  to a one-token output budget and cause repeatable truncation failures.
+
+### Tests
+
+- Added deterministic coverage for DeepSeek provider generation, native-model credential gating,
+  demand installation, wrapper registration, and launch isolation.
+- Added shared output-budget and short-length-stop regression coverage for Claude and Codex.
+
 ## 0.7.13 - 2026-08-13
 
 ### Fixed
