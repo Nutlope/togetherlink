@@ -12,7 +12,7 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tdroid`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | bash
@@ -31,6 +31,7 @@ togetherlink codex        # alias: tcodex
 togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (alias: codex-app)
 togetherlink claude       # alias: tclaude
 togetherlink deepseek     # alpha: DeepSeek Harness web UI (alias: tdeepseek)
+togetherlink droid        # Factory login required once (alias: tdroid)
 togetherlink grok         # alias: tgrok
 togetherlink hermes       # alias: thermes
 togetherlink hermes desktop
@@ -52,6 +53,8 @@ TogetherLink does not consume model flags placed there.
 Hermes and Hermes Desktop receive a temporary standalone Together provider plugin for that launch. Existing Hermes sessions, skills, memories, plugins, and preferences remain available; TogetherLink does not persist the provider or replace the user's saved credentials.
 
 Prime Agent receives a generated, credential-free Together provider extension activated only for the `tprime` launch. TogetherLink keeps that metadata under its own home so Prime's detached workers can recover, passes the API key as a runtime override, and leaves Prime's settings, skills, sessions, and `~/.prime/agent/models.json` untouched.
+
+Factory Droid receives a generated, credential-free custom-model catalog activated only for the `tdroid` launch. TogetherLink preserves Droid's normal home and cached Factory login, sends model requests to Together, disables Factory cloud session sync for that launch, and does not edit `~/.factory/settings.json`. The official Droid CLI still requires a one-time Factory browser login (or `FACTORY_API_KEY` for headless use).
 
 DeepSeek Harness support is alpha because upstream is still a developer preview. `tdeepseek` launches the official `dsh web` profile with a generated, credential-free `--patch` overlay and a runtime-only Together key. It does not rewrite `$DSH_HOME/cordis.patch.yml`, settings, credentials, or profiles.
 
@@ -85,6 +88,7 @@ togetherlink chatgpt [--model <model>] [--restore]  (alpha, alias: codex-app)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
 togetherlink deepseek [...]    (alpha, alias: tdeepseek)
+togetherlink droid [...]       (alias: tdroid; Factory login required)
 togetherlink grok [...]        (alias: tgrok)
 togetherlink hermes [...]      (alias: thermes)
 togetherlink hermes desktop [...]

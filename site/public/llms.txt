@@ -1,8 +1,8 @@
 # togetherlink
 
-> Use Together AI models in the coding-agent harnesses you already run — OpenCode, Claude Code, Codex CLI, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
+> Use Together AI models in the coding-agent harnesses you already run — OpenCode, Claude Code, Codex CLI, Factory Droid, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
 
-togetherlink is an MIT-licensed CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, `tprime`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
+togetherlink is an MIT-licensed CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tdeepseek`, `tdroid`, `tgrok`, `thermes`, `tpi`, `tprime`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, Factory Droid, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
 
 This is the LLM-readable documentation file for the project. If you are an AI agent asked to install, configure, or use togetherlink (headless or interactive), read this file first. It covers installation, configuration, every command, the available models, headless/agentic usage patterns, how to keep the tool up to date, and the routing architecture.
 
@@ -15,7 +15,7 @@ This is the LLM-readable documentation file for the project. If you are an AI ag
 
 ## Install
 
-One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
+One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tdroid`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
 
 ```
 curl -fsSL https://togetherlink.vercel.app/install.sh | bash
@@ -24,7 +24,7 @@ curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 After install, restart your shell (or run the `export PATH=...` line it prints) so the commands are on PATH. The install:
 
 - Downloads the self-contained JS bundle to `~/.togetherlink/bin/togetherlink.js`.
-- Writes shell wrappers (`togetherlink`, `tcodex`, `tclaude`, `topencode`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, `tprime`) that run the bundle with `bun`.
+- Writes shell wrappers (`togetherlink`, `tcodex`, `tclaude`, `topencode`, `tdeepseek`, `tdroid`, `tgrok`, `thermes`, `tpi`, `tprime`) that run the bundle with `bun`.
 - Links them into a writable directory on your PATH.
 - Demand-installs DeepSeek Harness only after `deepseek`/`tdeepseek` is explicitly selected or invoked. Other missing agent CLIs are not installed automatically; togetherlink prints their official install command and exits.
 
@@ -86,6 +86,7 @@ togetherlink hermes desktop [...] # Hermes Desktop
 togetherlink pi [...]           # alias: tpi      (Pi Code)
 togetherlink prime [...]        # alias: tprime   (Prime Agent)
 togetherlink opencode [...]     # alias: topencode (OpenCode)
+togetherlink droid [...]        # alias: tdroid (Factory login required once)
 
 togetherlink chatgpt [--model <model>] [--restore]   # alpha: ChatGPT Desktop (alias: codex-app)
 
@@ -168,7 +169,7 @@ Both wrappers spawn the agent pointed at the local Together proxy and pass your 
 If you are an orchestrating agent running inside Claude Code, Codex, or another CLI that has its own native subagent/delegation tool, prefer this pattern for non-trivial togetherlink work:
 
 1. Spawn a native subagent first.
-2. Tell that subagent to run the needed `togetherlink` command itself (`tcodex`, `tclaude`, `topencode`, `tgrok`, `thermes`, `tpi`, or `tprime`) with a tight task, explicit files, `< /dev/null`, and the guardrails below.
+2. Tell that subagent to run the needed `togetherlink` command itself (`tcodex`, `tclaude`, `topencode`, `tdroid`, `tgrok`, `thermes`, `tpi`, or `tprime`) with a tight task, explicit files, `< /dev/null`, and the guardrails below.
 3. Have the subagent wait for the delegated togetherlink run, inspect its result/diff, and report only the useful summary back to you.
 
 Do this instead of having the main orchestrating agent call `tcodex`/`tclaude` directly for every delegated edit. It keeps the main agent's context and inference budget focused on coordination/review, lets the native subagent own the details of launching and monitoring togetherlink, and works especially well when Claude Code delegates to a subagent that then uses Codex through `tcodex`.
@@ -252,7 +253,7 @@ There are two harness families behind the supported tools:
 
 - **Proxied harnesses — Claude Code, Codex CLI.** `tclaude` and `tcodex` spawn a shared local daemon and route the agent's `/v1/*` traffic through it. The daemon translates the agent's native wire format (Anthropic Messages for Claude, OpenAI Responses for Codex) to Together's chat-completions API and back. Per run: it resolves the model, ensures the daemon, registers a session with your token, prints a banner, spawns the agent pointed at the local proxy, tracks cost, and deregisters on exit. Nothing is written to your real agent config — close it and your setup is exactly as it was.
 
-- **Spawned harnesses — OpenCode, DeepSeek Harness, Grok Build, Hermes, Pi Code, Prime Agent.** `topencode`, `tdeepseek`, `tgrok`, `thermes` (including `thermes desktop`), `tpi`, and `tprime` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), a credential-free per-launch `--patch` overlay (DeepSeek Harness alpha), a local metadata-only model catalog plus temporary auth isolation (Grok), a temporary standalone provider plugin in a credential-isolated home overlay (Hermes), a temporary `models.json` (Pi), or a credential-free provider extension activated only for the TogetherLink launch (Prime Agent). DeepSeek Harness and Prime metadata remain under TogetherLink's own home; API keys are runtime-only, and the harnesses' normal user configuration is untouched. No inference proxy is involved.
+- **Spawned harnesses — OpenCode, Factory Droid, DeepSeek Harness, Grok Build, Hermes, Pi Code, Prime Agent.** `topencode`, `tdroid`, `tdeepseek`, `tgrok`, `thermes` (including `thermes desktop`), `tpi`, and `tprime` spawn the agent binary directly. The binary talks to Together itself, using inline config (OpenCode), a credential-free runtime `--settings` catalog while preserving cached Factory authentication (Droid), a credential-free per-launch `--patch` overlay (DeepSeek Harness alpha), a local metadata-only model catalog plus temporary auth isolation (Grok), a temporary standalone provider plugin in a credential-isolated home overlay (Hermes), a temporary `models.json` (Pi), or a credential-free provider extension activated only for the TogetherLink launch (Prime Agent). Droid cloud session sync is disabled for TogetherLink launches. Metadata remains under TogetherLink's own home; API keys are runtime-only, and the harnesses' normal user configuration is untouched. No inference proxy is involved. The official Droid CLI still requires a Factory login or `FACTORY_API_KEY`.
 
 The daemon is one persistent local process shared by all proxied sessions. If you ever need to stop it manually:
 
@@ -273,7 +274,7 @@ back. The next daemon-backed TogetherLink command, or the next login, starts it 
 - **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
 - **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
 - **Grok web search or image generation is unavailable** — `tgrok` disables Grok's xAI-backed web search and Imagine image tools because Together's direct chat-completions route does not provide those xAI-specific API surfaces. Coding tools, workflows, image understanding through supported Together vision models, and Together model requests still work.
-- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / DeepSeek Harness / Grok Build / Hermes / Pi Code / Prime Agent setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
+- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / Factory Droid / DeepSeek Harness / Grok Build / Hermes / Pi Code / Prime Agent setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
 
 ## Links
 

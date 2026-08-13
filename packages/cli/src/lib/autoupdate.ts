@@ -51,6 +51,7 @@ const INSTALLED_WRAPPERS = [
   ["topencode", "opencode"],
   ["tcodex", "codex"],
   ["tdeepseek", "deepseek"],
+  ["tdroid", "droid"],
   ["tgrok", "grok"],
   ["thermes", "hermes"],
   ["tpi", "pi"],

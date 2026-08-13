@@ -7,7 +7,14 @@ import {
   telemetryDisabledByEnvironment,
 } from "./telemetry.js";
 
-export type SpawnedSessionAgent = "deepseek" | "grok" | "hermes" | "opencode" | "pi" | "prime";
+export type SpawnedSessionAgent =
+  | "deepseek"
+  | "droid"
+  | "grok"
+  | "hermes"
+  | "opencode"
+  | "pi"
+  | "prime";
 
 export type SpawnedSessionResult = {
   status: number | null;

@@ -8,7 +8,7 @@ const githubUrl = "https://github.com/Nutlope/togetherlink";
 const siteUrl = "https://togetherlink.vercel.app/";
 const pageTitle = "Use Together AI Models in Claude Code, Codex, DeepSeek Harness & More";
 const pageDescription =
-  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, DeepSeek Harness, OpenCode, Prime Agent, and the ChatGPT desktop app with togetherlink.";
+  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, Factory Droid, DeepSeek Harness, OpenCode, Prime Agent, and the ChatGPT desktop app with togetherlink.";
 const togetherReferralUrl =
   "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
@@ -60,6 +60,21 @@ const features = [
       </>
     ),
     icon: <DeepSeekMark />,
+    accent: undefined,
+  },
+  {
+    title: "Factory Droid",
+    command: "tdroid",
+    tag: "Beta",
+    tagTone: "beta",
+    body: (
+      <>
+        Droid launches with a process-scoped Together model catalog while preserving your cached
+        Factory login. Cloud session sync is disabled for the launch; Factory authentication is
+        still required.
+      </>
+    ),
+    icon: <DroidMark />,
     accent: undefined,
   },
   {
@@ -152,7 +167,7 @@ const heroTools = [
 ];
 
 const heroProof: ProofItem[] = [
-  { value: "9", label: "integrations" },
+  { value: "10", label: "integrations" },
   { value: "1", label: "install command" },
   { value: "GitHub", label: "see the code", href: githubUrl, icon: <GitHubMark /> },
 ];
@@ -568,22 +583,23 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, <code>tdeepseek</code>, <code>tgrok</code>, <code>thermes</code>,{" "}
-          <code>tpi</code>, and <code>tprime</code>.
+          <code>tcodex</code>, <code>tdeepseek</code>, <code>tdroid</code>, <code>tgrok</code>,{" "}
+          <code>thermes</code>, <code>tpi</code>, and <code>tprime</code>.
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>,{" "}
-          <code>tdeepseek</code>, <code>tgrok</code>, <code>thermes</code>, <code>tpi</code>, or{" "}
-          <code>tprime</code>. Run <code>thermes desktop</code> for Hermes Desktop. For the ChatGPT
-          desktop app run <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
+          <code>tdeepseek</code>, <code>tdroid</code>, <code>tgrok</code>, <code>thermes</code>,{" "}
+          <code>tpi</code>, or <code>tprime</code>. Droid requires one Factory login. Run{" "}
+          <code>thermes desktop</code> for Hermes Desktop. For the ChatGPT desktop app run{" "}
+          <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
           <code>togetherlink chatgpt --restore</code>. On first launch it asks once for your
           Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change
           your mind? Just stop using it - no agent config was saved, so your subscriptions and your
-          OpenCode/Claude Code/Codex CLI/DeepSeek Harness/Grok Build/Hermes/Pi Code/Prime Agent
-          config are untouched.
+          OpenCode/Claude Code/Codex CLI/Factory Droid/DeepSeek Harness/Grok Build/Hermes/Pi
+          Code/Prime Agent config are untouched.
         </Step>
       </section>
 
@@ -638,6 +654,14 @@ function Home() {
           </a>
           <a className="transition-colors hover:text-ink" href="/llms.txt">
             LLM docs
+          </a>
+          <a
+            className="transition-colors hover:text-ink"
+            href="https://factory.ai/product/cli"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Factory Droid
           </a>
           <a
             className="transition-colors hover:text-ink"
@@ -830,6 +854,17 @@ function OpenCodeMark() {
       <path d="M180 240H60V120H180V240Z" fill="#CFCECD" />
       <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#211E1E" />
     </svg>
+  );
+}
+
+function DroidMark() {
+  return (
+    <span
+      className="inline-flex size-7 items-center justify-center rounded-lg bg-ink font-mono text-sm font-bold text-white"
+      aria-hidden="true"
+    >
+      D
+    </span>
   );
 }
 

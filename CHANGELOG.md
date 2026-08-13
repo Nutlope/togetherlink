@@ -3,6 +3,32 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.15 - 2026-08-13
+
+### Added
+
+- Added beta support for Factory Droid through `togetherlink droid` and the `tdroid` shortcut.
+  TogetherLink injects its curated Together AI catalog through Droid's process-scoped `--settings`
+  option without changing the user's normal Factory configuration.
+- Added Factory Droid to the interactive launcher, installer, self-update wrappers, website, and
+  LLM-readable documentation.
+
+### Changed
+
+- Disabled Factory cloud session sync for TogetherLink-launched Droid sessions while preserving
+  Droid's normal home, cached Factory login, local sessions, tools, skills, and preferences.
+- Clarified that the official Droid CLI still requires a one-time Factory login, or a
+  `FACTORY_API_KEY` for headless use, even though model inference and billing go through Together.
+
+### Tests
+
+- Added deterministic coverage for Droid registration, curated custom-model generation,
+  credential-free settings, runtime key injection, Factory auth preservation, argument isolation,
+  and the `tdroid` wrapper.
+- Verified the installed Droid CLI accepts the generated runtime settings and exposes its tool
+  catalog; a real model turn remains pending the required one-time Factory login on the test
+  machine.
+
 ## 0.7.14 - 2026-08-13
 
 ### Added

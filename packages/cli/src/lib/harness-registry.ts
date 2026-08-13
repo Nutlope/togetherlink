@@ -5,6 +5,7 @@ const LOADERS: Partial<Record<HarnessId, () => Promise<{ default: Harness }>>> =
   [HARNESS.CLAUDE]: () => import("./harnesses/claude.js"),
   [HARNESS.CODEX]: () => import("./harnesses/codex.js"),
   [HARNESS.DEEPSEEK]: () => import("./harnesses/deepseek.js"),
+  [HARNESS.DROID]: () => import("./harnesses/droid.js"),
   [HARNESS.GROK]: () => import("./harnesses/grok.js"),
   [HARNESS.HERMES]: () => import("./harnesses/hermes.js"),
   [HARNESS.OPENCODE]: () => import("./harnesses/opencode.js"),

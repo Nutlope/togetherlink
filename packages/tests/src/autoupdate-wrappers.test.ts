@@ -35,11 +35,16 @@ describe("autoupdate installed wrappers", () => {
     expect(await readFile(path.join(binDir, "tdeepseek"), "utf8")).toBe(
       `#!/usr/bin/env sh\nexec bun '${bundlePath}' deepseek "$@"\n`,
     );
+    expect(await readFile(path.join(binDir, "tdroid"), "utf8")).toBe(
+      `#!/usr/bin/env sh\nexec bun '${bundlePath}' droid "$@"\n`,
+    );
     if (process.platform !== "win32") {
       expect((await stat(path.join(binDir, "tprime"))).mode & 0o100).toBe(0o100);
       expect(await readlink(path.join(pathDir, "tprime"))).toBe(path.join(binDir, "tprime"));
       expect((await stat(path.join(binDir, "tdeepseek"))).mode & 0o100).toBe(0o100);
       expect(await readlink(path.join(pathDir, "tdeepseek"))).toBe(path.join(binDir, "tdeepseek"));
+      expect((await stat(path.join(binDir, "tdroid"))).mode & 0o100).toBe(0o100);
+      expect(await readlink(path.join(pathDir, "tdroid"))).toBe(path.join(binDir, "tdroid"));
     }
   });
 });
