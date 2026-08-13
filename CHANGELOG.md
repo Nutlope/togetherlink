@@ -3,6 +3,27 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.7.13 - 2026-08-13
+
+### Fixed
+
+- Reused Pi Code's managed `fd` and `rg` binaries across launches instead of re-downloading them on
+  every run. TogetherLink points `PI_CODING_AGENT_DIR` at a fresh temporary directory per launch,
+  which hid the tools Pi had already downloaded under `~/.pi/agent/bin`; the temporary directory is
+  now seeded from that location before launch, and any first-time download is persisted back so it
+  is reused on later runs.
+
+### Changed
+
+- Routed the root `pnpm test` script through Turbo with an explicit test task that declares the
+  live-test and Vitest environment variables, so test runs share Turbo's build orchestration and
+  caching.
+
+### Tests
+
+- Added deterministic coverage for seeding and persisting Pi Code's managed `fd`/`rg` binaries,
+  including never overwriting an existing user-managed binary.
+
 ## 0.7.12 - 2026-08-12
 
 ### Fixed

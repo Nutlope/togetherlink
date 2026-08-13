@@ -1,4 +1,12 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
@@ -75,6 +83,60 @@ function writePiModelsJson(agentDir: string, apiKey: string, baseUrl: string): v
   writeFileSync(join(agentDir, "models.json"), buildPiModelsJson(apiKey, baseUrl), "utf8");
 }
 
+// Pi resolves its managed tools (fd, rg) from "<agent dir>/bin". togetherlink
+// points PI_CODING_AGENT_DIR at a fresh temp dir per launch, so without seeding,
+// Pi would re-download fd on every run. Reuse the user's real ~/.pi/agent/bin
+// in both directions: copy existing tools into the temp dir before launch, and
+// persist anything Pi downloaded back to the real bin dir afterwards.
+const PI_MANAGED_TOOLS = ["fd", "fd.exe", "rg", "rg.exe"];
+
+export function seedPiManagedTools(agentDir: string, userBinDir: string): void {
+  if (!existsSync(userBinDir)) {
+    return;
+  }
+  const targetDir = join(agentDir, "bin");
+  for (const tool of PI_MANAGED_TOOLS) {
+    const source = join(userBinDir, tool);
+    if (!existsSync(source)) {
+      continue;
+    }
+    mkdirSync(targetDir, { recursive: true });
+    try {
+      copyFileSync(source, join(targetDir, tool));
+    } catch {
+      // best-effort; Pi falls back to downloading the tool
+    }
+  }
+}
+
+export function persistPiManagedTools(agentDir: string, userBinDir: string): void {
+  const tempBinDir = join(agentDir, "bin");
+  if (!existsSync(tempBinDir)) {
+    return;
+  }
+  let entries: string[];
+  try {
+    entries = readdirSync(tempBinDir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!PI_MANAGED_TOOLS.includes(entry)) {
+      continue;
+    }
+    const target = join(userBinDir, entry);
+    if (existsSync(target)) {
+      continue;
+    }
+    try {
+      mkdirSync(userBinDir, { recursive: true });
+      copyFileSync(join(tempBinDir, entry), target);
+    } catch {
+      // best-effort; the next launch simply re-downloads the tool
+    }
+  }
+}
+
 export default defineHarness({
   id: HARNESS.PI,
   label: "Pi Code",
@@ -89,11 +151,13 @@ export default defineHarness({
     }
 
     const agentDir = mkdtempSync(join(tmpdir(), "togetherlink-pi-"));
+    const userHome = ctx.home || homedir();
     const sessionDir =
-      process.env.PI_CODING_AGENT_SESSION_DIR ??
-      join(ctx.home || homedir(), ".pi", "agent", "sessions");
+      process.env.PI_CODING_AGENT_SESSION_DIR ?? join(userHome, ".pi", "agent", "sessions");
     const baseUrl = resolveTogetherBaseUrl();
     writePiModelsJson(agentDir, apiKey, baseUrl);
+    const userBinDir = join(userHome, ".pi", "agent", "bin");
+    seedPiManagedTools(agentDir, userBinDir);
     const selectedModel = resolveCodexModel(ctx.main);
     const args = [
       "--provider",
@@ -139,6 +203,7 @@ export default defineHarness({
     });
 
     try {
+      persistPiManagedTools(agentDir, userBinDir);
       rmSync(agentDir, { recursive: true, force: true });
     } catch {
       // best-effort cleanup

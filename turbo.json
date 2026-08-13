@@ -16,6 +16,19 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "test": {
+      "dependsOn": ["^build"],
+      "env": [
+        "TOGETHERLINK_LIVE_CODEX_RESUME",
+        "TOGETHERLINK_LIVE_SMOKE",
+        "TOGETHERLINK_LIVE_MODELS_CHECK",
+        "TOGETHERLINK_LIVE_PRIME_RLM",
+        "VITEST_FILE_PARALLELISM",
+        "VITEST_MAX_CONCURRENCY",
+        "VITEST_RETRY"
+      ],
+      "outputs": []
+    },
     "test:gauntlet:core": {
       "dependsOn": ["^build"],
       "inputs": [
