@@ -1,6 +1,6 @@
 {
   "name": "@togetherlink/cli",
-  "version": "0.7.13",
+  "version": "0.7.14",
   "description": "CLI for routing coding-agent harnesses through Together AI",
   "license": "MIT",
   "bin": {

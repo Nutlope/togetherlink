@@ -52,7 +52,7 @@ const features = [
     title: "DeepSeek Harness",
     command: "tdeepseek",
     tag: "Alpha",
-    tagTone: "beta",
+    tagTone: "alpha",
     body: (
       <>
         DeepSeek Harness launches its web UI with a temporary Together provider patch. If DSH is
@@ -442,16 +442,7 @@ function Home() {
               >
                 {feature.icon}
               </span>
-              <span
-                className="inline-flex items-center gap-1.5 rounded-md border border-transparent bg-code px-[9px] py-1 text-[11px] font-semibold tracking-[.05em] text-muted uppercase data-[tone=beta]:rotate-[-1.5deg] data-[tone=beta]:border-amber-300 data-[tone=beta]:bg-amber-50 data-[tone=beta]:text-amber-900 data-[tone=beta]:shadow-[0_1px_0_rgba(255,255,255,.85)_inset,0_1px_2px_rgba(146,64,14,.12)] data-[tone=dark]:bg-neutral-100 data-[tone=dark]:text-ink data-[tone=live]:bg-neutral-100 data-[tone=live]:text-ink"
-                data-tone={feature.tagTone}
-              >
-                <span
-                  className="size-1.5 rounded-full bg-faint data-[tone=beta]:bg-amber-500 data-[tone=dark]:bg-ink data-[tone=live]:bg-green-500"
-                  data-tone={feature.tagTone}
-                />
-                {feature.tag}
-              </span>
+              <StatusBadge tone={feature.tagTone} label={feature.tag} />
             </div>
             <h3 className="mt-3.5 mb-2 text-[17px] font-semibold text-ink">{feature.title}</h3>
             <p className="m-0 text-[14.5px] leading-normal text-muted [&_code]:text-ink">
@@ -499,10 +490,7 @@ function Home() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2.5">
                 <h2 className="m-0 text-[19px] font-semibold text-ink">ChatGPT Desktop App</h2>
-                <span className="inline-flex rotate-[-1.5deg] items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-[9px] py-1 text-[11px] font-semibold uppercase tracking-[.05em] text-amber-900 shadow-[0_1px_0_rgba(255,255,255,.85)_inset,0_1px_2px_rgba(146,64,14,.12)]">
-                  <span className="size-1.5 rounded-full bg-amber-500" />
-                  Alpha
-                </span>
+                <StatusBadge tone="alpha" label="Alpha" />
               </div>
               <p className="m-0 mt-1.5 text-[14.5px] leading-normal text-muted">
                 Also works with the ChatGPT desktop app. Unlike the per-run CLI wrappers above, this
@@ -841,6 +829,56 @@ function OpenCodeMark() {
     <svg className="h-7 w-[22px]" viewBox="0 0 240 300" fill="none" aria-hidden="true">
       <path d="M180 240H60V120H180V240Z" fill="#CFCECD" />
       <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#211E1E" />
+    </svg>
+  );
+}
+
+function StatusBadge({ tone, label }: { tone: string; label: string }) {
+  return (
+    <span
+      className="inline-flex min-h-7 items-center gap-1.5 rounded-md border px-[9px] py-1 text-[11px] font-semibold tracking-[.05em] uppercase shadow-[0_1px_0_rgba(255,255,255,.88)_inset] data-[tone=alpha]:rotate-[-1.5deg] data-[tone=alpha]:border-dashed data-[tone=alpha]:border-amber-400 data-[tone=alpha]:bg-[repeating-linear-gradient(135deg,#fffbeb_0,#fffbeb_5px,#fef3c7_5px,#fef3c7_10px)] data-[tone=alpha]:text-amber-950 data-[tone=beta]:border-indigo-200 data-[tone=beta]:bg-indigo-50 data-[tone=beta]:text-indigo-800 data-[tone=live]:border-emerald-200 data-[tone=live]:bg-emerald-50 data-[tone=live]:text-emerald-800"
+      data-tone={tone}
+    >
+      {tone === "alpha" ? <ConstructionMark /> : tone === "live" ? <SupportedMark /> : <BetaMark />}
+      {label}
+    </span>
+  );
+}
+
+function ConstructionMark() {
+  return (
+    <svg className="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="3" y="3" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.25" />
+      <path
+        d="m4 8 4-4m-3 8 7-7m-4 7 4-4"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function BetaMark() {
+  return (
+    <svg className="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M8 3a5 5 0 0 0 0 10V3Z" fill="currentColor" opacity=".28" />
+    </svg>
+  );
+}
+
+function SupportedMark() {
+  return (
+    <svg className="size-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.25" fill="currentColor" opacity=".14" />
+      <path
+        d="m5.25 8 1.75 1.75 3.75-4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
