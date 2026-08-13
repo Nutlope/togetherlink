@@ -14,6 +14,7 @@ import { maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
 import { maybeAutoInstallService } from "../lib/daemon/platform-auto-start.js";
+import { interactiveLauncherOptions } from "../lib/interactive-launcher-options.js";
 
 async function daemonStop(): Promise<void> {
   const { autoStartStatus, stopAutoStart } = await import("../lib/daemon/platform-auto-start.js");
@@ -119,24 +120,23 @@ async function runInteractiveLauncher(): Promise<void> {
   }
 
   const clack = await import("@clack/prompts");
-  const choice = await clack.select({
+  let choice = await clack.select({
     message: "What do you want to run?",
-    options: [
-      { value: "claude", label: "Claude Code", hint: "tclaude" },
-      { value: "codex", label: "Codex", hint: "tcodex" },
-      { value: "chatgpt", label: "ChatGPT Desktop", hint: "chatgpt" },
-      { value: "deepseek", label: "DeepSeek Harness (alpha)", hint: "tdeepseek" },
-      { value: "grok", label: "Grok Build", hint: "tgrok" },
-      { value: "opencode", label: "OpenCode", hint: "topencode" },
-      { value: "pi", label: "Pi Code", hint: "tpi" },
-      { value: "prime", label: "Prime Agent", hint: "tprime" },
-      { value: "hermes", label: "Hermes Agent", hint: "thermes" },
-      { value: "configure", label: "Configure", hint: "API keys and detected tools" },
-    ],
+    options: interactiveLauncherOptions(),
   });
   if (clack.isCancel(choice)) {
     clack.cancel("Cancelled.");
     return;
+  }
+  if (choice === "show-more") {
+    choice = await clack.select({
+      message: "What do you want to run?",
+      options: interactiveLauncherOptions(true),
+    });
+    if (clack.isCancel(choice)) {
+      clack.cancel("Cancelled.");
+      return;
+    }
   }
   if (choice === "configure") {
     await runConfigure();

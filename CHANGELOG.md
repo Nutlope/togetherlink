@@ -3,6 +3,17 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## Unreleased
+
+### Changed
+
+- Simplified the interactive launcher to show ChatGPT Desktop, Claude Code, Codex, OpenCode, Pi
+  Code, and Configure by default, with a Show more option that reveals the less common harnesses.
+
+### Tests
+
+- Added deterministic coverage for the collapsed and expanded interactive launcher choices.
+
 ## 0.7.14 - 2026-08-13
 
 ### Added
