@@ -7,6 +7,7 @@ import {
   jsonByteLength,
   trimPayloadMessages,
 } from "../context-fit.js";
+import { OUTPUT_SAFETY_TOKENS as CONTEXT_OUTPUT_SAFETY_TOKENS } from "../output-budget.js";
 
 // Re-export the shared primitives so existing importers (cost.ts,
 // translate-response.ts, codex/translate-request.ts) keep their import path.
@@ -31,7 +32,6 @@ type ContextBudgetOptions = {
 
 const CONTEXT_LENGTH_RETRY_FLOOR = 1;
 const CONTEXT_INPUT_SAFETY_TOKENS = 4096;
-const CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 const CLAUDE_CODE_DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 const DEFAULT_CLAUDE_NORMAL_MAX_OUTPUT_TOKENS = 28_000;
 

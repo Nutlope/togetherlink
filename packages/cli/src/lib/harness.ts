@@ -1,6 +1,7 @@
 export const HARNESS = {
   CLAUDE: "claude",
   CODEX: "codex",
+  DEEPSEEK: "deepseek",
   GROK: "grok",
   HERMES: "hermes",
   OPENCODE: "opencode",
@@ -13,6 +14,7 @@ export type HarnessId = (typeof HARNESS)[keyof typeof HARNESS];
 export const ALL_HARNESSES = [
   HARNESS.CLAUDE,
   HARNESS.CODEX,
+  HARNESS.DEEPSEEK,
   HARNESS.GROK,
   HARNESS.HERMES,
   HARNESS.OPENCODE,
@@ -24,6 +26,7 @@ export const ALL_HARNESSES = [
 export const HARNESS_BIN: Record<HarnessId, string> = {
   [HARNESS.CLAUDE]: "claude",
   [HARNESS.CODEX]: "codex",
+  [HARNESS.DEEPSEEK]: "dsh",
   [HARNESS.GROK]: "grok",
   [HARNESS.HERMES]: "hermes",
   [HARNESS.OPENCODE]: "opencode",
@@ -34,6 +37,7 @@ export const HARNESS_BIN: Record<HarnessId, string> = {
 export const HARNESS_LABEL: Record<HarnessId, string> = {
   [HARNESS.CLAUDE]: "Claude Code",
   [HARNESS.CODEX]: "Codex",
+  [HARNESS.DEEPSEEK]: "DeepSeek Harness (alpha)",
   [HARNESS.GROK]: "Grok Build",
   [HARNESS.HERMES]: "Hermes Agent",
   [HARNESS.OPENCODE]: "OpenCode",
@@ -49,6 +53,10 @@ export const HARNESS_INSTALL: Record<HarnessId, { command: string; url: string }
   [HARNESS.CODEX]: {
     command: "npm install -g @openai/codex",
     url: "https://github.com/openai/codex",
+  },
+  [HARNESS.DEEPSEEK]: {
+    command: "npm install -g @deepseek-ai/dsh",
+    url: "https://github.com/deepseek-ai/deepseek-harness",
   },
   [HARNESS.GROK]: {
     command: "curl -fsSL https://x.ai/cli/install.sh | bash",

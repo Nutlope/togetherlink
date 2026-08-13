@@ -1,5 +1,10 @@
 import { trimSearchText } from "../exa-search.js";
+import { stringifyUnknown } from "../json-format.js";
+import { isTruncationReal } from "../output-budget.js";
 import type { AnthropicContentBlock, AnthropicMessagesRequest } from "./wire-types.js";
+
+// Re-exported so existing importers of this module keep their import path.
+export { objectKeys, parseJsonOrEmpty } from "../json-format.js";
 
 export function stringifyAnthropicContent(content: AnthropicMessagesRequest["system"]): string {
   if (!content) {
@@ -12,10 +17,6 @@ export function stringifyAnthropicContent(content: AnthropicMessagesRequest["sys
     .filter((block): block is { type: "text"; text: string } => block.type === "text")
     .map((block) => block.text)
     .join("\n");
-}
-
-function stringifyUnknown(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value ?? "");
 }
 
 export function formatToolResultContent(content: unknown, isError?: boolean): string {
@@ -112,21 +113,12 @@ function stringField(record: Record<string, unknown>, key: string): string | und
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export function objectKeys(value: unknown): string[] | undefined {
-  return typeof value === "object" && value !== null ? Object.keys(value) : undefined;
-}
-
-export function parseJsonOrEmpty(value: string | undefined): unknown {
-  if (!value) {
-    return {};
-  }
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
-  }
-}
-
+/**
+ * Render a Together `finish_reason` as an Anthropic `stop_reason`. Whether a
+ * `length` stop is a real truncation is decided by the shared
+ * `isTruncationReal` so the Codex path stays in agreement; only the wire
+ * vocabulary is Claude-specific.
+ */
 export function mapStopReason(
   reason: string | null | undefined,
   usage?: { outputTokens?: number | undefined; requestedMaxTokens?: number | undefined },
@@ -135,31 +127,7 @@ export function mapStopReason(
     return "tool_use";
   }
   if (reason === "length") {
-    if (usage && isShortLengthStop(usage.outputTokens, usage.requestedMaxTokens)) {
-      return "end_turn";
-    }
-    return "max_tokens";
+    return isTruncationReal(reason, usage) ? "max_tokens" : "end_turn";
   }
   return "end_turn";
-}
-
-function isShortLengthStop(
-  outputTokens: number | undefined,
-  requestedMaxTokens: number | undefined,
-): boolean {
-  if (
-    typeof outputTokens !== "number" ||
-    !Number.isFinite(outputTokens) ||
-    typeof requestedMaxTokens !== "number" ||
-    !Number.isFinite(requestedMaxTokens)
-  ) {
-    return false;
-  }
-  const output = Math.max(0, Math.floor(outputTokens));
-  const requested = Math.max(1, Math.floor(requestedMaxTokens));
-  if (output >= requested) {
-    return false;
-  }
-  const nearRequested = output >= Math.floor(requested * 0.9) || requested - output <= 1024;
-  return !nearRequested;
 }

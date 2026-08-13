@@ -1,7 +1,7 @@
 {
   "name": "@togetherlink/cli",
   "version": "0.7.13",
-  "description": "CLI for routing Claude Code, OpenCode, Codex, Grok Build, Hermes, and Pi Code through Together AI",
+  "description": "CLI for routing coding-agent harnesses through Together AI",
   "license": "MIT",
   "bin": {
     "togetherlink": "./dist/bin/togetherlink.js"

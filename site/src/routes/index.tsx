@@ -6,9 +6,9 @@ import { ChatGPTMark, ClaudeMark, CodexMark, GrokMark } from "../components/harn
 const installCommand = "curl -fsSL https://togetherlink.vercel.app/install.sh | bash";
 const githubUrl = "https://github.com/Nutlope/togetherlink";
 const siteUrl = "https://togetherlink.vercel.app/";
-const pageTitle = "Use Together AI Models in Claude Code, Codex, Prime Agent & ChatGPT";
+const pageTitle = "Use Together AI Models in Claude Code, Codex, DeepSeek Harness & More";
 const pageDescription =
-  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, OpenCode, Prime Agent, and the ChatGPT desktop app with togetherlink.";
+  "Run Kimi K3 and other Together AI models in Claude Code, OpenAI Codex CLI, DeepSeek Harness, OpenCode, Prime Agent, and the ChatGPT desktop app with togetherlink.";
 const togetherReferralUrl =
   "https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app";
 
@@ -46,6 +46,20 @@ const features = [
       </>
     ),
     icon: <CodexMark />,
+    accent: undefined,
+  },
+  {
+    title: "DeepSeek Harness",
+    command: "tdeepseek",
+    tag: "Alpha",
+    tagTone: "beta",
+    body: (
+      <>
+        DeepSeek Harness launches its web UI with a temporary Together provider patch. If DSH is
+        missing, this explicit launch installs it first; normal DSH settings stay untouched.
+      </>
+    ),
+    icon: <DeepSeekMark />,
     accent: undefined,
   },
   {
@@ -138,7 +152,7 @@ const heroTools = [
 ];
 
 const heroProof: ProofItem[] = [
-  { value: "8", label: "integrations" },
+  { value: "9", label: "integrations" },
   { value: "1", label: "install command" },
   { value: "GitHub", label: "see the code", href: githubUrl, icon: <GitHubMark /> },
 ];
@@ -210,7 +224,7 @@ export const Route = createFileRoute("/")({
       {
         property: "og:image:alt",
         content:
-          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, Hermes, and Prime Agent",
+          "TogetherLink connecting OpenCode, Codex CLI, DeepSeek Harness, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, Hermes, and Prime Agent",
       },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: pageTitle },
@@ -219,7 +233,7 @@ export const Route = createFileRoute("/")({
       {
         name: "twitter:image:alt",
         content:
-          "TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, Hermes, and Prime Agent",
+          "TogetherLink connecting OpenCode, Codex CLI, DeepSeek Harness, Grok Build, Claude Code, ChatGPT Desktop, Pi Code, Hermes, and Prime Agent",
       },
     ],
     links: [{ rel: "canonical", href: siteUrl }],
@@ -566,21 +580,22 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, <code>tgrok</code>, <code>thermes</code>, <code>tpi</code>, and{" "}
-          <code>tprime</code>.
+          <code>tcodex</code>, <code>tdeepseek</code>, <code>tgrok</code>, <code>thermes</code>,{" "}
+          <code>tpi</code>, and <code>tprime</code>.
         </Step>
         <Step number="2">
-          Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>, <code>tgrok</code>,
-          <code>thermes</code>, <code>tpi</code>, or <code>tprime</code>. Run{" "}
-          <code>thermes desktop</code> for Hermes Desktop. For the ChatGPT desktop app run{" "}
-          <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
+          Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>,{" "}
+          <code>tdeepseek</code>, <code>tgrok</code>, <code>thermes</code>, <code>tpi</code>, or{" "}
+          <code>tprime</code>. Run <code>thermes desktop</code> for Hermes Desktop. For the ChatGPT
+          desktop app run <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
           <code>togetherlink chatgpt --restore</code>. On first launch it asks once for your
           Together API key - press Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change
           your mind? Just stop using it - no agent config was saved, so your subscriptions and your
-          OpenCode/Claude Code/Codex CLI/Grok Build/Hermes/Pi Code/Prime Agent config are untouched.
+          OpenCode/Claude Code/Codex CLI/DeepSeek Harness/Grok Build/Hermes/Pi Code/Prime Agent
+          config are untouched.
         </Step>
       </section>
 
@@ -659,6 +674,14 @@ function Home() {
             rel="noopener noreferrer"
           >
             Codex CLI
+          </a>
+          <a
+            className="transition-colors hover:text-ink"
+            href="https://github.com/deepseek-ai/deepseek-harness"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            DeepSeek Harness
           </a>
           <a
             className="transition-colors hover:text-ink"
@@ -818,6 +841,18 @@ function OpenCodeMark() {
     <svg className="h-7 w-[22px]" viewBox="0 0 240 300" fill="none" aria-hidden="true">
       <path d="M180 240H60V120H180V240Z" fill="#CFCECD" />
       <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#211E1E" />
+    </svg>
+  );
+}
+
+/** Official DeepSeek fish mark from deepseek-ai/deepseek-harness. */
+function DeepSeekMark() {
+  return (
+    <svg className="h-[24px] w-[33px]" viewBox="0 0 23.16 17.04" fill="none" aria-hidden="true">
+      <path
+        fill="#4D6BFE"
+        d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876.856163 16.5421.597155 16.4591.341647C16.4061.187643 16.3536.0301382 16.1761.00363739C15.9836-.0263635 15.9081.135141 15.8326.270145C15.5306.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028.923165 12.277.833162C12.5375.739159 12.3675.41615 11.5259.42015C10.6844.42365 9.91439.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C.0790928 5.4103-.222916 7.41536.146595 9.50642C.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z"
+      />
     </svg>
   );
 }

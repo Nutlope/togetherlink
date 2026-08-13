@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type ServerResponse } from "node:http";
 import { writeResponsesSse } from "./sse.js";
 import { parseJsonOrEmpty, stringifyUnknown } from "./content-format.js";
+import { isTruncationReal } from "../output-budget.js";
 import type { ExaSearchOutcome } from "../exa-search.js";
 import type {
   ChatResponse,
@@ -13,6 +14,11 @@ import type {
 
 type CodexResponseOptions = {
   modelId: string;
+  /**
+   * The `max_tokens` sent upstream, used to tell a real truncation from
+   * Together reporting `length` on a turn that stopped short of its budget.
+   */
+  requestedMaxTokens?: number | undefined;
 };
 
 export function toResponsesResponse(
@@ -23,10 +29,14 @@ export function toResponsesResponse(
   nativeSearchItems: Record<string, unknown>[] = [],
 ): Record<string, unknown> {
   const responseId = chatResponse.id ?? `resp_${randomUUID().replaceAll("-", "")}`;
-  // When the model hit max_tokens (finish_reason "length"), the response is
-  // truncated — emit status "incomplete" with incomplete_details so Codex
-  // knows the turn was cut short instead of silently completing.
-  const isLengthTruncated = chatResponse.choices?.[0]?.finish_reason === "length";
+  // Emit status "incomplete" only for a real truncation, so Codex knows the
+  // turn was cut short instead of silently completing. A spurious Together
+  // "length" must not land here: Codex treats every incomplete response as a
+  // fatal "stream disconnected before completion". See `isTruncationReal`.
+  const isLengthTruncated = isTruncationReal(chatResponse.choices?.[0]?.finish_reason, {
+    outputTokens: chatResponse.usage?.completion_tokens,
+    requestedMaxTokens: options.requestedMaxTokens,
+  });
   return {
     id: responseId,
     object: "response",

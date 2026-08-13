@@ -2642,13 +2642,14 @@ describe("Codex Responses proxy tool compatibility", () => {
         if (url.startsWith("http://127.0.0.1:")) {
           return realFetch(url, init);
         }
-        // Model says "I'll do this and then" — hits max_tokens after a few
-        // tokens. finish_reason "length" means the turn was TRUNCATED, not
-        // completed. The proxy must NOT silently emit status "completed".
+        // Model says "I'll do this and then" — and spends the whole requested
+        // budget doing it. finish_reason "length" with output at the cap means
+        // the turn was TRUNCATED, not completed. The proxy must NOT silently
+        // emit status "completed".
         return sseResponse([
           { choices: [{ delta: { content: "I'll do this and then" } }] },
           { choices: [{ finish_reason: "length", delta: {} }] },
-          { usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 } },
+          { usage: { prompt_tokens: 5, completion_tokens: 16, total_tokens: 21 } },
         ]);
       }),
     );
@@ -2656,6 +2657,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     const response = await postResponsesText({
       model: GLM_5_2.id,
       stream: true,
+      max_output_tokens: 16,
       input: [
         { type: "message", role: "user", content: [{ type: "input_text", text: "Do a lot." }] },
       ],
@@ -2687,13 +2689,14 @@ describe("Codex Responses proxy tool compatibility", () => {
         }
         return jsonResponse({
           choices: [{ message: { content: "I'll do this and" }, finish_reason: "length" }],
-          usage: { prompt_tokens: 5, completion_tokens: 6, total_tokens: 11 },
+          usage: { prompt_tokens: 5, completion_tokens: 16, total_tokens: 21 },
         });
       }),
     );
 
     const response = await postResponses({
       model: GLM_5_2.id,
+      max_output_tokens: 16,
       input: [
         { type: "message", role: "user", content: [{ type: "input_text", text: "Do a lot." }] },
       ],
@@ -2701,6 +2704,66 @@ describe("Codex Responses proxy tool compatibility", () => {
 
     expect(response.status).toBe("incomplete");
     expect(response.incomplete_details).toEqual({ reason: "max_output_tokens" });
+  });
+
+  // Together also reports `length` on turns that stopped nowhere near the
+  // budget we asked for. Codex renders any incomplete response as a fatal
+  // "stream disconnected before completion" and discards the turn — and since
+  // the same prompt reproduces the same stop, every retry fails identically
+  // and the thread jams. Only a stop that approached the budget is real.
+  test("completes normally when a length stop fell far short of the budget (streaming)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return sseResponse([
+          { choices: [{ delta: { content: "Let me check the current state." } }] },
+          { choices: [{ finish_reason: "length", delta: {} }] },
+          { usage: { prompt_tokens: 345_103, completion_tokens: 84, total_tokens: 345_187 } },
+        ]);
+      }),
+    );
+
+    const response = await postResponsesText({
+      model: GLM_5_2.id,
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Commit this." }] },
+      ],
+    });
+
+    expect(response).toContain('"response.completed"');
+    expect(response).not.toContain('"response.incomplete"');
+    expect(response).not.toContain("max_output_tokens");
+  });
+
+  test("completes normally when a length stop fell far short of the budget (non-streaming)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        return jsonResponse({
+          choices: [
+            { message: { content: "Let me check the current state." }, finish_reason: "length" },
+          ],
+          usage: { prompt_tokens: 345_103, completion_tokens: 84, total_tokens: 345_187 },
+        });
+      }),
+    );
+
+    const response = await postResponses({
+      model: GLM_5_2.id,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Commit this." }] },
+      ],
+    });
+
+    expect(response.status).toBe("completed");
+    expect(response.incomplete_details).toBeUndefined();
   });
 
   test("surfaces context overflow without mutating or retrying the request", async () => {

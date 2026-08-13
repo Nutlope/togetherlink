@@ -1,5 +1,9 @@
 import type { ModelDefinition } from "@togetherlink/models";
 import { type ContextTrimTelemetryInfo, sendTelemetryEvent } from "./telemetry.js";
+import {
+  MIN_PREFERRED_OUTPUT_TOKENS,
+  OUTPUT_SAFETY_TOKENS as CONTEXT_OUTPUT_SAFETY_TOKENS,
+} from "./output-budget.js";
 
 /**
  * Shared, wire-uniform reactive context-fit for the Together client.
@@ -11,20 +15,17 @@ import { type ContextTrimTelemetryInfo, sendTelemetryEvent } from "./telemetry.j
  * Together's *actual* reported input-token count each time (not an estimate),
  * so the loop is self-correcting and convergent.
  *
- * The proactive, estimator-based budget stays in `claude/context-budget.ts`;
- * this module is the reactive safety net that both harnesses reuse. See the
- * plan in `.claude/plans` for the full design.
+ * The proactive, estimator-based budget stays in `claude/context-budget.ts`,
+ * over the shared limits in `output-budget.ts`; this module is the reactive
+ * safety net that both harnesses reuse. See the plan in `.claude/plans` for
+ * the full design.
  */
 
 export const APPROX_CHARS_PER_TOKEN = 4;
 
 const CONTEXT_LENGTH_RETRY_FLOOR = 1;
-const CONTEXT_OUTPUT_SAFETY_TOKENS = 512;
 const CONTEXT_RETRY_TRIM_EXTRA_TOKENS = 512;
 const TRIM_PRESERVED_PREFIX_CHARS = 4096;
-/** Minimum output room worth preserving before we start trimming input. */
-const MIN_USEFUL_OUTPUT_TOKENS = 512;
-const MIN_PREFERRED_OUTPUT_TOKENS = 8000;
 /** Fraction of the original conversation whose loss triggers the loud alarm. */
 const HARD_WARN_DROPPED_FRACTION = 0.5;
 /** Upper bound on fit retries per request; the ladder converges well under this. */

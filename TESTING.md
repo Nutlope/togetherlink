@@ -475,6 +475,26 @@ curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
 
 This is intentionally a CI setup step, not something `togetherlink` does silently on a user's machine.
 
+## DeepSeek Harness alpha smoke
+
+Launch its web UI through TogetherLink. If `dsh` is missing, this explicit invocation installs the upstream developer preview before continuing:
+
+```bash
+tdeepseek
+```
+
+The banner should identify the alpha integration and DSH should serve its web UI on
+`http://127.0.0.1:3080`. To exercise argument passthrough without making a model request:
+
+```bash
+tdeepseek --port 4080
+```
+
+The generated provider overlay lives under `~/.togetherlink/deepseek-harness/`, contains no
+credential, and is activated only with DSH's `--patch` flag. The API key remains in the child
+process environment. No DSH installation happens unless the user selects or invokes the DeepSeek
+harness; other harnesses retain the existing install-instructions-only behavior.
+
 ## Tool Compatibility Audit
 
 The current Claude/Codex tool compatibility notes live in `packages/cli/src/lib/TOOL_COMPATIBILITY.md`. Update that file whenever a new CLI version starts sending a different tool catalog.

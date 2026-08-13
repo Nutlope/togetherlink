@@ -12,7 +12,7 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | bash
@@ -30,6 +30,7 @@ Or launch a tool directly:
 togetherlink codex        # alias: tcodex
 togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (alias: codex-app)
 togetherlink claude       # alias: tclaude
+togetherlink deepseek     # alpha: DeepSeek Harness web UI (alias: tdeepseek)
 togetherlink grok         # alias: tgrok
 togetherlink hermes       # alias: thermes
 togetherlink hermes desktop
@@ -52,6 +53,8 @@ Hermes and Hermes Desktop receive a temporary standalone Together provider plugi
 
 Prime Agent receives a generated, credential-free Together provider extension activated only for the `tprime` launch. TogetherLink keeps that metadata under its own home so Prime's detached workers can recover, passes the API key as a runtime override, and leaves Prime's settings, skills, sessions, and `~/.prime/agent/models.json` untouched.
 
+DeepSeek Harness support is alpha because upstream is still a developer preview. `tdeepseek` launches the official `dsh web` profile with a generated, credential-free `--patch` overlay and a runtime-only Together key. It does not rewrite `$DSH_HOME/cordis.patch.yml`, settings, credentials, or profiles.
+
 If no Together API key is configured yet, an interactive launch automatically runs `togetherlink configure` first. You can also run `togetherlink configure` directly, or set `TOGETHER_API_KEY`. The installed binary keeps itself up to date automatically from `togetherlink.vercel.app`.
 
 To route model requests through a compatible credential proxy, set `TOGETHER_BASE_URL` in the launcher environment. TogetherLink appends `/v1` when needed and uses `https://api.together.ai/v1` when it is unset:
@@ -64,7 +67,7 @@ togetherlink codex
 
 `TOGETHER_BASE_URL` applies to every coding harness and is intentionally not loaded from repository `.env` files.
 
-If the underlying agent CLI is missing, togetherlink does not install it automatically. It prints the official install command and docs link for the selected tool, then exits.
+If DeepSeek Harness is missing, invoking or selecting it installs the official `@deepseek-ai/dsh` package and then continues the launch. No installation happens during startup, configuration, detection, or self-update. Other missing agent CLIs are not installed automatically; togetherlink prints their official install command and docs link, then exits.
 
 To disable TogetherLink's anonymous analytics, set:
 
@@ -81,6 +84,7 @@ togetherlink configure
 togetherlink chatgpt [--model <model>] [--restore]  (alpha, alias: codex-app)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
+togetherlink deepseek [...]    (alpha, alias: tdeepseek)
 togetherlink grok [...]        (alias: tgrok)
 togetherlink hermes [...]      (alias: thermes)
 togetherlink hermes desktop [...]

@@ -326,7 +326,18 @@ export async function handleCodexProxyRequest(
   const { response: chatResponse, nativeSearchItems } = nativeToolResponse;
   recordUsage(chatResponse.usage, options, requestModel.definition);
   const responseBody = perf.spanSync("response_map", () =>
-    toResponsesResponse(chatResponse, body, options, toolTranslation, nativeSearchItems),
+    toResponsesResponse(
+      chatResponse,
+      body,
+      {
+        ...options,
+        ...(typeof translatedPayload.max_tokens === "number"
+          ? { requestedMaxTokens: translatedPayload.max_tokens }
+          : {}),
+      },
+      toolTranslation,
+      nativeSearchItems,
+    ),
   );
   writeJson(res, 200, responseBody);
   perf.end({ status: res.statusCode, stream: false });

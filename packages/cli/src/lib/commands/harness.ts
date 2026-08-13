@@ -1,7 +1,8 @@
 import os from "node:os";
 import { ALL_HARNESSES, HARNESS_LABEL, type HarnessId } from "../harness.js";
 import { loadHarness, isHarnessImplemented } from "../harness-registry.js";
-import { detectInstalledHarness, missingHarnessMessage } from "../detect.js";
+import { detectInstalledHarness } from "../detect.js";
+import { ensureHarnessInstalled } from "../install-harness.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
 
 export async function dispatchHarnessCommand(
@@ -24,7 +25,7 @@ export async function dispatchHarnessCommand(
     throw new Error(`Unknown command "${harnessName} ${verb}". Expected: run.`);
   }
   if (!detectInstalledHarness(harnessName).installed) {
-    throw new Error(missingHarnessMessage(harnessName));
+    await ensureHarnessInstalled(harnessName);
   }
 
   const ctx = { home: os.homedir(), ...flags };

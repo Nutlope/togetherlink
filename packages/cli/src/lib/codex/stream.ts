@@ -5,6 +5,7 @@ import type { CostTracker } from "../cost.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
+import { isTruncationReal } from "../output-budget.js";
 import { backoffMs, sleep } from "../together-retry.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import {
@@ -187,6 +188,8 @@ export async function streamResponseFromTogether(
     modelDefinition,
     toolTranslation,
     turn.finishReason,
+    [],
+    payloadMaxTokens(payload),
   );
 }
 
@@ -435,6 +438,7 @@ async function streamResponseWithNativeTools(
         toolTranslation,
         turn.finishReason,
         nativeSearchItems,
+        payloadMaxTokens(payload),
       );
     }
 
@@ -473,6 +477,7 @@ async function streamResponseWithNativeTools(
         toolTranslation,
         turn.finishReason,
         nativeSearchItems,
+        payloadMaxTokens(payload),
       );
     }
 
@@ -510,7 +515,19 @@ async function streamResponseWithNativeTools(
     toolTranslation,
     lastFinishReason,
     nativeSearchItems,
+    payloadMaxTokens(payload),
   );
+}
+
+/**
+ * The `max_tokens` we actually asked Together for. Needed to tell a real
+ * truncation from Together reporting `length` on a turn that stopped well
+ * short of its budget.
+ */
+function payloadMaxTokens(payload: Record<string, unknown>): number | undefined {
+  return typeof payload.max_tokens === "number" && Number.isFinite(payload.max_tokens)
+    ? payload.max_tokens
+    : undefined;
 }
 
 function clientDisconnectedResult(): StreamProxyResult {
@@ -697,6 +714,7 @@ function completeStreamResponse(
   toolTranslation: CodexToolTranslation,
   finishReason?: string | null,
   nativeSearchItems: Array<{ item: Record<string, unknown>; outputIndex: number }> = [],
+  requestedMaxTokens?: number | undefined,
 ): StreamProxyResult {
   completeOpenOutputItems(res, outputState);
   let outputIndex = outputState.nextOutputIndex;
@@ -718,12 +736,22 @@ function completeStreamResponse(
   if (usage) {
     recordUsage(usage, options, modelDefinition);
   }
-  // When the model hit max_tokens (finish_reason "length"), the response is
-  // truncated — emit status "incomplete" with incomplete_details so Codex
-  // knows the turn was cut short instead of silently treating it as a
-  // successful completion. This prevents the "model says one sentence then
-  // stops" bug where a truncated turn looked like a finished turn.
-  const isLengthTruncated = finishReason === "length";
+  // When the model really hit max_tokens, the response is truncated — emit
+  // status "incomplete" with incomplete_details so Codex knows the turn was
+  // cut short instead of silently treating it as a successful completion.
+  // This prevents the "model says one sentence then stops" bug where a
+  // truncated turn looked like a finished turn.
+  //
+  // Together also reports "length" on turns that stopped far short of the
+  // budget we asked for. Codex renders any incomplete response as a fatal
+  // "stream disconnected before completion" and discards the turn, and the
+  // same prompt reproduces the same spurious stop — so believing those jams
+  // a thread permanently. `isTruncationReal` is the shared arbiter the Claude
+  // path has always used for this.
+  const isLengthTruncated = isTruncationReal(finishReason, {
+    outputTokens: usage?.completion_tokens,
+    requestedMaxTokens,
+  });
   const terminalEvent = isLengthTruncated ? "response.incomplete" : "response.completed";
   // Reassemble the full output list in output_index order: reasoning, text,
   // any visible web_search_call items the proxy surfaced, then client tool

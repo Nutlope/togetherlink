@@ -23,6 +23,7 @@ Usage:
   togetherlink daemon uninstall  disable daemon auto-start at login (macOS/Linux)
   togetherlink daemon status     show auto-start service status
   togetherlink codex [...]       (alias: tcodex)
+  togetherlink deepseek [...]    (alpha, alias: tdeepseek)
   togetherlink grok [...]        (alias: tgrok)
   togetherlink hermes [...]      (alias: thermes)
   togetherlink hermes desktop [...]
@@ -31,7 +32,8 @@ Usage:
   togetherlink prime [...]       (alias: tprime)
   togetherlink opencode [...]    (alias: topencode)
 
-Extra args after codex/claude/grok/hermes/pi/prime/opencode are passed through.
+Extra args after codex/deepseek/claude/grok/hermes/pi/prime/opencode are passed through.
+DeepSeek Harness support is alpha and launches its web profile with ephemeral Together settings.
 ChatGPT App support is alpha; run \`togetherlink chatgpt --restore\` (alias: codex-app) to restore the previous desktop config.
 
 Docs: https://togetherlink.vercel.app/llms.txt
