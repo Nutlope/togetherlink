@@ -3,7 +3,6 @@ import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   GLM_5_2,
-  KIMI_K2_6,
   KIMI_K3,
   MINIMAX_M3,
   QWEN_3_7_MAX,
@@ -84,7 +83,7 @@ describe("Claude proxy compatibility API", () => {
     expect(tierModels).toEqual([
       GLM_5_2.anthropicAlias,
       `${KIMI_K3.anthropicAlias}[1m]`,
-      KIMI_K2_6.id,
+      MINIMAX_M3.id,
       EXPECTED_HAIKU_MODEL_ID,
     ]);
     expect(new Set(tierModels).size).toBe(tierModels.length);
@@ -130,14 +129,14 @@ describe("Claude proxy compatibility API", () => {
   test("keeps the custom row for a selected model not represented by a tier", () => {
     const env = buildClaudeEnv({
       apiKey: "test-together-key",
-      modelId: MINIMAX_M3.id,
-      modelName: MINIMAX_M3.name,
+      modelId: QWEN_3_7_MAX.id,
+      modelName: QWEN_3_7_MAX.name,
       proxyUrl: "http://127.0.0.1:7878/session/test",
       authToken: "local-token",
     });
 
-    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(MINIMAX_M3.id);
-    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBe(MINIMAX_M3.name);
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(`${QWEN_3_7_MAX.id}[1m]`);
+    expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBe(QWEN_3_7_MAX.name);
   });
 
   test("preserves a user-provided Claude Code max output token setting", () => {

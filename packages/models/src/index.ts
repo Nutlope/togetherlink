@@ -130,27 +130,6 @@ export const GLM_5_2: ModelDefinition = {
 export const DEFAULT_MODEL: ModelDefinition = KIMI_K3;
 
 /**
- * Kimi K2.6 — Moonshot's reasoning + vision model. Vision-capable,
- * so it can serve as a vision primary (images reach it directly, no subagent).
- * Pricing/context from Together changelog (June 2026); output limit per
- * models.dev. Kimi K3 is pinned to OpenCode's `@vision` subagent; K2.6 remains
- * selectable as a primary.
- */
-export const KIMI_K2_6: ModelDefinition = {
-  id: "moonshotai/Kimi-K2.6",
-  name: "Kimi K2.6",
-  anthropicAlias: null,
-  cost: { input: 1.2, output: 4.5, cache_read: 0.2 },
-  limit: { context: 262_144, output: 131_000 },
-  attachment: true,
-  reasoning: true,
-  temperature: true,
-  tool_call: true,
-  codexAutoCompactTokenLimit: 235_000,
-  modalities: { input: ["text", "image"], output: ["text"] },
-};
-
-/**
  * MiniMax M3 — newest MiniMax, vision-capable, 512K context, the cheapest
  * vision primary. Pricing from Together changelog (June 2026); output limit
  * (128K) per models.dev.
@@ -248,13 +227,7 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
  * Sources: Together changelog (ids/pricing/context, June 2026) +
  * models.dev (output limits). See per-model doc comments for specifics.
  */
-const CURATED_MODELS: readonly ModelDefinition[] = [
-  KIMI_K3,
-  GLM_5_2,
-  KIMI_K2_6,
-  MINIMAX_M3,
-  QWEN_3_7_MAX,
-];
+const CURATED_MODELS: readonly ModelDefinition[] = [KIMI_K3, GLM_5_2, MINIMAX_M3, QWEN_3_7_MAX];
 
 export const SELECTABLE_MODELS: readonly ModelDefinition[] = [
   DEFAULT_MODEL,

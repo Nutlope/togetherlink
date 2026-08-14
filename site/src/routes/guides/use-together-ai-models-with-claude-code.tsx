@@ -44,7 +44,7 @@ const faqs: Faq[] = [
   {
     question: "How do I change the Together model used by Claude Code?",
     answer:
-      "Place --model and the exact Together model ID before claude. For example: togetherlink --model moonshotai/Kimi-K2.6 claude.",
+      "Place --model and the exact Together model ID before claude. For example: togetherlink --model MiniMaxAI/MiniMax-M3 claude.",
   },
   {
     question: "Can I use Claude Code's non-interactive -p mode?",
@@ -269,10 +269,6 @@ function TogetherClaudeGuide() {
             go after it.
           </p>
           <div className="mt-6 space-y-4">
-            <CommandBlock
-              command="togetherlink --model moonshotai/Kimi-K2.6 claude"
-              label="Interactive session on Kimi K2.6"
-            />
             <CommandBlock
               command="togetherlink --model MiniMaxAI/MiniMax-M3 claude"
               label="Interactive session on MiniMax M3"

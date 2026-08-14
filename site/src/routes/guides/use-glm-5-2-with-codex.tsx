@@ -46,7 +46,7 @@ const faqs: Faq[] = [
   {
     question: "Does GLM 5.2 support images in this setup?",
     answer:
-      "GLM 5.2 is text-only in TogetherLink's current model catalog. Choose a vision-capable Together model such as Kimi K2.6 when your task needs image input.",
+      "GLM 5.2 is text-only in TogetherLink's current model catalog. Choose a vision-capable Together model such as Kimi K3 when your task needs image input.",
   },
 ];
 
