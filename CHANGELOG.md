@@ -3,6 +3,20 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.1 - 2026-08-14
+
+### Changed
+
+- Removed the retired `moonshotai/Kimi-K2.6` model from the shared catalog, harness model choices,
+  and user-facing guidance.
+- Updated Claude Code's model-tier fallback so requests that previously selected Kimi K2.6 now
+  use MiniMax M3.
+
+### Tests
+
+- Added regression coverage to keep Kimi K2.6 out of the selectable model catalog and updated
+  model-resolution, Claude, Codex, harness, and telemetry expectations.
+
 ## 0.8.0 - 2026-08-14
 
 ### Changed
