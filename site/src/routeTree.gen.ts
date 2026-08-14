@@ -17,6 +17,7 @@ import { Route as GuidesUseTogetherAiModelsWithClaudeCodeRouteImport } from './r
 import { Route as GuidesUseTogetherAiModelsWithChatgptDesktopRouteImport } from './routes/guides/use-together-ai-models-with-chatgpt-desktop'
 import { Route as GuidesUseGlm52WithGrokBuildRouteImport } from './routes/guides/use-glm-5-2-with-grok-build'
 import { Route as GuidesUseGlm52WithCodexRouteImport } from './routes/guides/use-glm-5-2-with-codex'
+import { Route as DashboardCliUsageRouteImport } from './routes/dashboard_.cli-usage'
 import { Route as ApiTelemetryRouteImport } from './routes/api/telemetry'
 import { Route as ApiOgRouteImport } from './routes/api/og'
 
@@ -64,6 +65,11 @@ const GuidesUseGlm52WithCodexRoute = GuidesUseGlm52WithCodexRouteImport.update({
   path: '/guides/use-glm-5-2-with-codex',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardCliUsageRoute = DashboardCliUsageRouteImport.update({
+  id: '/dashboard_/cli-usage',
+  path: '/dashboard/cli-usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTelemetryRoute = ApiTelemetryRouteImport.update({
   id: '/api/telemetry',
   path: '/api/telemetry',
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/api/og': typeof ApiOgRoute
   '/api/telemetry': typeof ApiTelemetryRoute
+  '/dashboard/cli-usage': typeof DashboardCliUsageRoute
   '/guides/use-glm-5-2-with-codex': typeof GuidesUseGlm52WithCodexRoute
   '/guides/use-glm-5-2-with-grok-build': typeof GuidesUseGlm52WithGrokBuildRoute
   '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/api/og': typeof ApiOgRoute
   '/api/telemetry': typeof ApiTelemetryRoute
+  '/dashboard/cli-usage': typeof DashboardCliUsageRoute
   '/guides/use-glm-5-2-with-codex': typeof GuidesUseGlm52WithCodexRoute
   '/guides/use-glm-5-2-with-grok-build': typeof GuidesUseGlm52WithGrokBuildRoute
   '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/api/og': typeof ApiOgRoute
   '/api/telemetry': typeof ApiTelemetryRoute
+  '/dashboard_/cli-usage': typeof DashboardCliUsageRoute
   '/guides/use-glm-5-2-with-codex': typeof GuidesUseGlm52WithCodexRoute
   '/guides/use-glm-5-2-with-grok-build': typeof GuidesUseGlm52WithGrokBuildRoute
   '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/api/og'
     | '/api/telemetry'
+    | '/dashboard/cli-usage'
     | '/guides/use-glm-5-2-with-codex'
     | '/guides/use-glm-5-2-with-grok-build'
     | '/guides/use-together-ai-models-with-chatgpt-desktop'
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/api/og'
     | '/api/telemetry'
+    | '/dashboard/cli-usage'
     | '/guides/use-glm-5-2-with-codex'
     | '/guides/use-glm-5-2-with-grok-build'
     | '/guides/use-together-ai-models-with-chatgpt-desktop'
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/api/og'
     | '/api/telemetry'
+    | '/dashboard_/cli-usage'
     | '/guides/use-glm-5-2-with-codex'
     | '/guides/use-glm-5-2-with-grok-build'
     | '/guides/use-together-ai-models-with-chatgpt-desktop'
@@ -156,6 +168,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   ApiOgRoute: typeof ApiOgRoute
   ApiTelemetryRoute: typeof ApiTelemetryRoute
+  DashboardCliUsageRoute: typeof DashboardCliUsageRoute
   GuidesUseGlm52WithCodexRoute: typeof GuidesUseGlm52WithCodexRoute
   GuidesUseGlm52WithGrokBuildRoute: typeof GuidesUseGlm52WithGrokBuildRoute
   GuidesUseTogetherAiModelsWithChatgptDesktopRoute: typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
@@ -222,6 +235,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuidesUseGlm52WithCodexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard_/cli-usage': {
+      id: '/dashboard_/cli-usage'
+      path: '/dashboard/cli-usage'
+      fullPath: '/dashboard/cli-usage'
+      preLoaderRoute: typeof DashboardCliUsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/telemetry': {
       id: '/api/telemetry'
       path: '/api/telemetry'
@@ -244,6 +264,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   ApiOgRoute: ApiOgRoute,
   ApiTelemetryRoute: ApiTelemetryRoute,
+  DashboardCliUsageRoute: DashboardCliUsageRoute,
   GuidesUseGlm52WithCodexRoute: GuidesUseGlm52WithCodexRoute,
   GuidesUseGlm52WithGrokBuildRoute: GuidesUseGlm52WithGrokBuildRoute,
   GuidesUseTogetherAiModelsWithChatgptDesktopRoute:

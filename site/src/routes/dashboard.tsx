@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useSession } from "@tanstack/react-start/server";
 import { ConvexHttpClient } from "convex/browser";
@@ -310,8 +310,16 @@ function DashboardRoute() {
 
   return (
     <div className="mx-auto max-w-7xl px-6 pb-32 pt-10">
-      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="font-mono text-lg font-semibold text-ink">togetherlink analytics</h1>
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="font-mono text-lg font-semibold text-ink">togetherlink analytics</h1>
+          <Link
+            to="/dashboard/cli-usage"
+            className="inline-flex min-h-10 items-center rounded-md px-3 text-xs font-medium text-muted transition-[background-color,color,scale] duration-150 ease-out hover:bg-code hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96]"
+          >
+            CLI adoption →
+          </Link>
+        </div>
         <RefreshStatus refreshing={refreshing} lastUpdated={lastUpdated} />
       </header>
 

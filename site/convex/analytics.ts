@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { summarizeCliUsage } from "./cliUsageActivity";
 import { groupUniqueUsersByLatestCountry, summarizeLifecycleActivity } from "./dashboardActivity";
 import { filterDashboardEvents } from "./dashboardFilters";
 
@@ -99,6 +100,34 @@ function eventHasUsage(event: {
     Boolean(event.usageByModel?.length)
   );
 }
+
+export const getCliUsageSummary = query({
+  args: {
+    range: v.union(v.literal("24h"), v.literal("7d")),
+    latestVersion: v.string(),
+    excludedInstallIds: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const since = Date.now() - (args.range === "24h" ? DAY_MS : 7 * DAY_MS);
+    const hiddenInstallIds = new Set(
+      (args.excludedInstallIds ?? []).map((installId) => installId.trim()).filter(Boolean),
+    );
+    const events = await ctx.db
+      .query("telemetryEvents")
+      .withIndex("by_receivedAt", (query) => query.gte("receivedAt", since))
+      .collect();
+    const visibleEvents = filterDashboardEvents(events, {
+      since,
+      excludedInstallIds: hiddenInstallIds,
+    });
+
+    return {
+      range: args.range,
+      since,
+      ...summarizeCliUsage(visibleEvents, args.latestVersion.trim()),
+    };
+  },
+});
 
 export const getDashboardSummary = query({
   args: {
