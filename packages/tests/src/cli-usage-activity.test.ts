@@ -1,7 +1,21 @@
 import { describe, expect, test } from "vitest";
-import { summarizeCliUsage, versionStatus } from "../../../site/convex/cliUsageActivity.js";
+import {
+  cliUsageRangeStart,
+  summarizeCliUsage,
+  versionStatus,
+} from "../../../site/convex/cliUsageActivity.js";
 
 describe("CLI usage activity", () => {
+  test("calculates bounded and lifetime query windows", () => {
+    const now = Date.UTC(2026, 7, 14);
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    expect(cliUsageRangeStart("24h", now)).toBe(now - dayMs);
+    expect(cliUsageRangeStart("7d", now)).toBe(now - 7 * dayMs);
+    expect(cliUsageRangeStart("30d", now)).toBe(now - 30 * dayMs);
+    expect(cliUsageRangeStart("lifetime", now)).toBe(Number.NEGATIVE_INFINITY);
+  });
+
   test("classifies release adoption without treating newer builds as outdated", () => {
     expect(versionStatus("0.7.14", "0.7.14")).toBe("latest");
     expect(versionStatus("0.7.14-dev.1", "0.7.14")).toBe("newer");

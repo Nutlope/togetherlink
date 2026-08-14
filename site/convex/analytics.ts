@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { summarizeCliUsage } from "./cliUsageActivity";
+import { cliUsageRangeStart, summarizeCliUsage } from "./cliUsageActivity";
 import {
   dashboardAuthorizationValidator,
   requireDashboardAuthorization,
@@ -108,13 +108,13 @@ function eventHasUsage(event: {
 export const getCliUsageSummary = query({
   args: {
     authorization: dashboardAuthorizationValidator,
-    range: v.union(v.literal("24h"), v.literal("7d")),
+    range: v.union(v.literal("24h"), v.literal("7d"), v.literal("30d"), v.literal("lifetime")),
     latestVersion: v.string(),
     excludedInstallIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     await requireDashboardAuthorization("cli-usage-summary", args.authorization);
-    const since = Date.now() - (args.range === "24h" ? DAY_MS : 7 * DAY_MS);
+    const since = cliUsageRangeStart(args.range);
     const hiddenInstallIds = new Set(
       (args.excludedInstallIds ?? []).map((installId) => installId.trim()).filter(Boolean),
     );

@@ -11,6 +11,15 @@ export type CliUsageEvent = {
 };
 
 export type VersionStatus = "latest" | "newer" | "outdated" | "unknown";
+export type CliUsageRange = "24h" | "7d" | "30d" | "lifetime";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function cliUsageRangeStart(range: CliUsageRange, now = Date.now()): number {
+  if (range === "lifetime") return Number.NEGATIVE_INFINITY;
+  const days = range === "24h" ? 1 : range === "7d" ? 7 : 30;
+  return now - days * DAY_MS;
+}
 
 function normalizeAgent(agent: string | undefined): string {
   return agent === "codex-app" ? "chatgpt" : (agent ?? "unknown");

@@ -7,7 +7,7 @@ import { api } from "../../convex/_generated/api";
 import { parseInstallIdList } from "../../convex/dashboardFilters";
 import { createDashboardQueryAuthorization } from "../lib/dashboard-query-authorization";
 
-type CliUsageRange = "24h" | "7d";
+type CliUsageRange = "24h" | "7d" | "30d" | "lifetime";
 type CliUsageFilters = {
   range: CliUsageRange;
   latestVersion: string;
@@ -21,6 +21,12 @@ const ADOPTION_COLORS = {
   newer: "#2563eb",
   outdated: "#d97706",
   unknown: "#94a3b8",
+};
+const RANGE_LABELS: Record<CliUsageRange, string> = {
+  "24h": "Last 24 hours",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  lifetime: "Lifetime",
 };
 
 async function dashboardSession() {
@@ -465,7 +471,7 @@ function FilterBar({
       role="group"
       aria-label="CLI usage filters"
     >
-      {(["24h", "7d"] as const).map((option) => (
+      {(["24h", "7d", "30d", "lifetime"] as const).map((option) => (
         <button
           key={option}
           type="button"
@@ -473,7 +479,7 @@ function FilterBar({
           aria-pressed={range === option}
           className={`min-h-10 rounded-lg px-4 text-xs font-medium tabular-nums transition-[background-color,color,box-shadow,scale] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink active:scale-[0.96] ${range === option ? "bg-white text-ink shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.08)]" : "text-muted hover:text-ink"}`}
         >
-          {option === "24h" ? "Last 24 hours" : "Last 7 days"}
+          {RANGE_LABELS[option]}
         </button>
       ))}
       <span className="mx-1 h-6 w-px bg-line-strong" aria-hidden="true" />
@@ -540,7 +546,7 @@ function compactPieItems(items: PieItem[]): PieItem[] {
 }
 
 function rangeLabel(range: CliUsageRange): string {
-  return range === "24h" ? "Last 24 hours" : "Last 7 days";
+  return RANGE_LABELS[range];
 }
 
 function formatNumber(value: number): string {
