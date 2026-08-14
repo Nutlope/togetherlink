@@ -125,11 +125,9 @@ Serverless prices below are in USD per 1 million tokens and come from Together's
 | --- | --- | ---: | ---: | ---: |
 | Kimi K3 (default) | `moonshotai/Kimi-K3` | $3.00 | $15.00 | $0.30 |
 | GLM 5.2 | `zai-org/GLM-5.2` | $1.40 | $4.40 | $0.26 |
-| Kimi K2.7 Code | `moonshotai/Kimi-K2.7-Code` | $0.95 | $4.00 | $0.19 |
 | Kimi K2.6 | `moonshotai/Kimi-K2.6` | $1.20 | $4.50 | $0.20 |
 | MiniMax M3 | `MiniMaxAI/MiniMax-M3` | $0.30 | $1.20 | $0.06 |
 | Qwen 3.7 Max | `Qwen/Qwen3.7-Max` | $1.25 | $3.75 | $0.125 |
-| DeepSeek V4 Pro | `deepseek-ai/DeepSeek-V4-Pro` | $1.74 | $3.48 | $0.20 |
 
 ### Selecting a model (flag order matters)
 
@@ -138,7 +136,7 @@ Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togethe
 ```
 togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
 togetherlink --model moonshotai/Kimi-K2.6 claude -p "task"
-togetherlink --main together-kimi-k2-7-code claude -p "task"   # Claude matches alias OR id
+togetherlink --main together-glm-5-2 claude -p "task"   # Claude matches alias OR id
 ```
 
 Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (Kimi K3), not the model you asked for. Always use the long form with the flag first.
@@ -147,13 +145,11 @@ Capabilities:
 
 - `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
 - `zai-org/GLM-5.2` — GLM 5.2. Text-only, 512K context, reasoning.
-- `moonshotai/Kimi-K2.7-Code` — Kimi K2.7 Code. Vision-capable, also used as the vision subagent.
 - `moonshotai/Kimi-K2.6` — Kimi K2.6. Vision, 256K context, reasoning.
 - `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.
 - `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context.
-- `deepseek-ai/DeepSeek-V4-Pro` — DeepSeek V4 Pro. Text-only, 512K context, long-context reasoning.
 
-Vision-capable models accept image attachments directly; text-only models (GLM 5.2, DeepSeek V4 Pro) route images to a vision subagent automatically.
+Vision-capable models accept image attachments directly; the text-only GLM 5.2 model routes images to the Kimi K3 vision subagent automatically.
 
 ## Headless & agentic usage
 

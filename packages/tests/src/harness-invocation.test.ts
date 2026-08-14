@@ -78,10 +78,10 @@ describe("harness invocation parsing", () => {
   });
 
   test("parses codex-app model and restore flags before dispatch", () => {
-    const parsed = parseArgs(["codex-app", "--model", "moonshotai/Kimi-K2.7-Code", "--restore"]);
+    const parsed = parseArgs(["codex-app", "--model", "zai-org/GLM-5.2", "--restore"]);
 
     expect(parsed.positional).toEqual(["codex-app"]);
-    expect(parsed.flags.main).toBe("moonshotai/Kimi-K2.7-Code");
+    expect(parsed.flags.main).toBe("zai-org/GLM-5.2");
     expect(parsed.flags.restore).toBe(true);
   });
 

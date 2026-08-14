@@ -4,7 +4,7 @@ import {
   GLM_5_2_ANTHROPIC_CAPABILITIES,
   KIMI_K3,
   KIMI_K3_ANTHROPIC_CAPABILITIES,
-  KIMI_K2_7_CODE,
+  QWEN_3_5_9B,
   SELECTABLE_MODELS,
   resolveModelByKeys,
   type ModelDefinition,
@@ -26,7 +26,7 @@ export type ClaudeModelSelection = {
   definition: ModelDefinition;
 };
 
-export const CLAUDE_HAIKU_MODEL = KIMI_K2_7_CODE;
+export const CLAUDE_HAIKU_MODEL = QWEN_3_5_9B;
 export const CLAUDE_HAIKU_MODEL_SELECTION: ClaudeModelSelection = {
   alias: CLAUDE_HAIKU_MODEL.anthropicAlias ?? CLAUDE_HAIKU_MODEL.id,
   definition: CLAUDE_HAIKU_MODEL,
