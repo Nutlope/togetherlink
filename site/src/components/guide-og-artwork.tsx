@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 import { guideOgContent, type GuideOgKey } from "../lib/guide-og";
-import { ClaudeMark, CodexMark, GrokMark } from "./harness-marks";
+import { ClaudeMark, CodexMark, DeepSeekMark, GrokMark, PrimeMark } from "./harness-marks";
 
 export function GuideOgArtwork({
   guide,
@@ -93,6 +93,12 @@ export function GuideOgArtwork({
         <GrokMark x="890" y="226" width="122" height="122" />
       ) : content.harness === "chatgpt" ? (
         <image href="/chatgpt-icon.png" x="890" y="226" width="122" height="122" />
+      ) : content.harness === "prime" ? (
+        <PrimeMark className="" x="890" y="226" width="122" height="122" />
+      ) : content.harness === "hermes" ? (
+        <image href="/hermes-icon.png" x="890" y="226" width="122" height="122" />
+      ) : content.harness === "deepseek" ? (
+        <DeepSeekMark className="" x="875" y="242" width="152" height="90" />
       ) : (
         <CodexMark x="879" y="215" width="144" height="144" />
       )}
@@ -101,7 +107,7 @@ export function GuideOgArtwork({
         y="449"
         fill="#0a0a0a"
         fontFamily="Arial, Helvetica, sans-serif"
-        fontSize="26"
+        fontSize={content.harnessLabel.length > 20 ? 19 : 26}
         fontWeight="700"
         letterSpacing="-.8"
         textAnchor="middle"

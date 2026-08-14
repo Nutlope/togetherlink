@@ -1,7 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ImageResponse } from "@vercel/og";
 import { Buffer } from "node:buffer";
-import { ClaudeMark, CodexMark, GrokMark } from "../../components/harness-marks";
+import {
+  ClaudeMark,
+  CodexMark,
+  DeepSeekMark,
+  GrokMark,
+  PrimeMark,
+} from "../../components/harness-marks";
 import { guideOgContent, isGuideOgKey } from "../../lib/guide-og";
 
 export const Route = createFileRoute("/api/og")({
@@ -20,6 +26,10 @@ export const Route = createFileRoute("/api/og")({
         const chatGptIcon =
           content.harness === "chatgpt"
             ? await loadImageDataUrl(new URL("/chatgpt-icon.png", requestUrl))
+            : "";
+        const hermesIcon =
+          content.harness === "hermes"
+            ? await loadImageDataUrl(new URL("/hermes-icon.png", requestUrl))
             : "";
         return new ImageResponse(
           <div
@@ -163,6 +173,12 @@ export const Route = createFileRoute("/api/og")({
                     <GrokMark style={{ height: 122, width: 122 }} />
                   ) : content.harness === "chatgpt" ? (
                     <img src={chatGptIcon} style={{ borderRadius: 27, height: 122, width: 122 }} />
+                  ) : content.harness === "prime" ? (
+                    <PrimeMark style={{ height: 122, width: 122 }} />
+                  ) : content.harness === "hermes" ? (
+                    <img src={hermesIcon} style={{ borderRadius: 27, height: 122, width: 122 }} />
+                  ) : content.harness === "deepseek" ? (
+                    <DeepSeekMark style={{ height: 90, width: 152 }} />
                   ) : (
                     <CodexMark style={{ height: 144, width: 144 }} />
                   )}
@@ -170,7 +186,7 @@ export const Route = createFileRoute("/api/og")({
                 <span
                   style={{
                     display: "flex",
-                    fontSize: 26,
+                    fontSize: content.harnessLabel.length > 20 ? 19 : 26,
                     fontWeight: 700,
                     letterSpacing: "-.8px",
                     marginTop: 23,

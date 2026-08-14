@@ -62,7 +62,7 @@ const guide = defineGuide({
   ogKey: "together-claude",
   ogAlt: "Claude Code routed through TogetherLink to open models on Together AI",
   datePublished: "2026-07-20T12:00:00+02:00",
-  dateModified: "2026-07-21T12:00:00+02:00",
+  dateModified: "2026-08-14T12:00:00+02:00",
   faqs,
 });
 
@@ -159,7 +159,9 @@ function TogetherClaudeGuide() {
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-faint">
             The installer also adds <code className="text-ink">tcodex</code>,{" "}
-            <code className="text-ink">tgrok</code>, <code className="text-ink">tpi</code>, and{" "}
+            <code className="text-ink">tgrok</code>, <code className="text-ink">thermes</code>,{" "}
+            <code className="text-ink">tpi</code>, <code className="text-ink">tprime</code>,{" "}
+            <code className="text-ink">tdeepseek</code>, and{" "}
             <code className="text-ink">topencode</code>. Use the full{" "}
             <code className="text-ink">togetherlink claude</code> command in scripts when you want
             the target tool to be explicit. Put <code className="text-ink">--model</code> before the
@@ -279,6 +281,25 @@ function TogetherClaudeGuide() {
               }
               label="One-shot GLM 5.2 prompt"
             />
+          </div>
+          <div className="mt-7 border-t border-line-strong">
+            {[
+              ["Kimi K3", "moonshotai/Kimi-K3", "Default · vision · 1M context"],
+              ["GLM 5.2", "zai-org/GLM-5.2", "Text · 512K context"],
+              ["MiniMax M3", "MiniMaxAI/MiniMax-M3", "Vision · 512K context"],
+              ["Qwen 3.7 Max", "Qwen/Qwen3.7-Max", "Vision · 1M context"],
+            ].map(([name, id, note]) => (
+              <div
+                key={id}
+                className="grid gap-2 border-b border-line-strong py-4 sm:grid-cols-[150px_1fr]"
+              >
+                <span className="text-[14px] font-semibold">{name}</span>
+                <div>
+                  <code className="text-[12px] text-ink">{id}</code>
+                  <p className="m-0 mt-1 text-[13px] text-muted">{note}</p>
+                </div>
+              </div>
+            ))}
           </div>
           <div className="mt-7 grid gap-4 sm:grid-cols-2">
             <div className="border-l-2 border-emerald-500 py-1 pl-4">

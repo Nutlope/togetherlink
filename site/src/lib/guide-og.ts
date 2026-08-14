@@ -1,4 +1,4 @@
-const GUIDE_OG_VERSION = "7";
+const GUIDE_OG_VERSION = "8";
 
 export const guideOgContent = {
   "glm-codex": {
@@ -70,6 +70,48 @@ export const guideOgContent = {
     accent: "#e34d13",
     panelBorder: "#e5e7eb",
     tint: "#f4f4f3",
+  },
+  "together-prime": {
+    eyebrow: "Persistent agents, Together models",
+    title: "Run Prime Agent on Together AI Models",
+    titleLines: ["Run Prime Agent on", "Together AI models"],
+    titleSize: 58,
+    harness: "prime",
+    harnessLabel: "Prime Agent",
+    command: "tprime",
+    model: "4 open models",
+    protocol: "Chat Completions",
+    accent: "#6d4aff",
+    panelBorder: "#e3ddff",
+    tint: "#f3f0ff",
+  },
+  "together-hermes": {
+    eyebrow: "Terminal and desktop",
+    title: "Use Together AI Models in Hermes Agent and Hermes Desktop",
+    titleLines: ["Use Together AI models in", "Hermes Agent + Hermes Desktop"],
+    titleSize: 42,
+    harness: "hermes",
+    harnessLabel: "Hermes Agent + Hermes Desktop",
+    command: "thermes",
+    model: "4 open models",
+    protocol: "Chat Completions",
+    accent: "#b45a1e",
+    panelBorder: "#eddccc",
+    tint: "#faf2e9",
+  },
+  "together-deepseek": {
+    eyebrow: "Alpha provider patch",
+    title: "Try DeepSeek Harness with Together AI Models",
+    titleLines: ["Try DeepSeek Harness", "with Together AI models"],
+    titleSize: 54,
+    harness: "deepseek",
+    harnessLabel: "DeepSeek Harness",
+    command: "tdeepseek",
+    model: "4 open models",
+    protocol: "Chat Completions",
+    accent: "#3867e8",
+    panelBorder: "#d8e2fa",
+    tint: "#edf3ff",
   },
 } as const;
 

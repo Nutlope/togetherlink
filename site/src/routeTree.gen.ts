@@ -12,6 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GuidesIndexRouteImport } from './routes/guides/index'
+import { Route as GuidesUseTogetherAiModelsWithPrimeAgentRouteImport } from './routes/guides/use-together-ai-models-with-prime-agent'
+import { Route as GuidesUseTogetherAiModelsWithHermesAgentRouteImport } from './routes/guides/use-together-ai-models-with-hermes-agent'
+import { Route as GuidesUseTogetherAiModelsWithDeepseekHarnessRouteImport } from './routes/guides/use-together-ai-models-with-deepseek-harness'
 import { Route as GuidesUseTogetherAiModelsWithCodexRouteImport } from './routes/guides/use-together-ai-models-with-codex'
 import { Route as GuidesUseTogetherAiModelsWithClaudeCodeRouteImport } from './routes/guides/use-together-ai-models-with-claude-code'
 import { Route as GuidesUseTogetherAiModelsWithChatgptDesktopRouteImport } from './routes/guides/use-together-ai-models-with-chatgpt-desktop'
@@ -36,6 +39,24 @@ const GuidesIndexRoute = GuidesIndexRouteImport.update({
   path: '/guides/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuidesUseTogetherAiModelsWithPrimeAgentRoute =
+  GuidesUseTogetherAiModelsWithPrimeAgentRouteImport.update({
+    id: '/guides/use-together-ai-models-with-prime-agent',
+    path: '/guides/use-together-ai-models-with-prime-agent',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GuidesUseTogetherAiModelsWithHermesAgentRoute =
+  GuidesUseTogetherAiModelsWithHermesAgentRouteImport.update({
+    id: '/guides/use-together-ai-models-with-hermes-agent',
+    path: '/guides/use-together-ai-models-with-hermes-agent',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const GuidesUseTogetherAiModelsWithDeepseekHarnessRoute =
+  GuidesUseTogetherAiModelsWithDeepseekHarnessRouteImport.update({
+    id: '/guides/use-together-ai-models-with-deepseek-harness',
+    path: '/guides/use-together-ai-models-with-deepseek-harness',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const GuidesUseTogetherAiModelsWithCodexRoute =
   GuidesUseTogetherAiModelsWithCodexRouteImport.update({
     id: '/guides/use-together-ai-models-with-codex',
@@ -92,6 +113,9 @@ export interface FileRoutesByFullPath {
   '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
   '/guides/use-together-ai-models-with-claude-code': typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
   '/guides/use-together-ai-models-with-codex': typeof GuidesUseTogetherAiModelsWithCodexRoute
+  '/guides/use-together-ai-models-with-deepseek-harness': typeof GuidesUseTogetherAiModelsWithDeepseekHarnessRoute
+  '/guides/use-together-ai-models-with-hermes-agent': typeof GuidesUseTogetherAiModelsWithHermesAgentRoute
+  '/guides/use-together-ai-models-with-prime-agent': typeof GuidesUseTogetherAiModelsWithPrimeAgentRoute
   '/guides/': typeof GuidesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -105,6 +129,9 @@ export interface FileRoutesByTo {
   '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
   '/guides/use-together-ai-models-with-claude-code': typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
   '/guides/use-together-ai-models-with-codex': typeof GuidesUseTogetherAiModelsWithCodexRoute
+  '/guides/use-together-ai-models-with-deepseek-harness': typeof GuidesUseTogetherAiModelsWithDeepseekHarnessRoute
+  '/guides/use-together-ai-models-with-hermes-agent': typeof GuidesUseTogetherAiModelsWithHermesAgentRoute
+  '/guides/use-together-ai-models-with-prime-agent': typeof GuidesUseTogetherAiModelsWithPrimeAgentRoute
   '/guides': typeof GuidesIndexRoute
 }
 export interface FileRoutesById {
@@ -119,6 +146,9 @@ export interface FileRoutesById {
   '/guides/use-together-ai-models-with-chatgpt-desktop': typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
   '/guides/use-together-ai-models-with-claude-code': typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
   '/guides/use-together-ai-models-with-codex': typeof GuidesUseTogetherAiModelsWithCodexRoute
+  '/guides/use-together-ai-models-with-deepseek-harness': typeof GuidesUseTogetherAiModelsWithDeepseekHarnessRoute
+  '/guides/use-together-ai-models-with-hermes-agent': typeof GuidesUseTogetherAiModelsWithHermesAgentRoute
+  '/guides/use-together-ai-models-with-prime-agent': typeof GuidesUseTogetherAiModelsWithPrimeAgentRoute
   '/guides/': typeof GuidesIndexRoute
 }
 export interface FileRouteTypes {
@@ -134,6 +164,9 @@ export interface FileRouteTypes {
     | '/guides/use-together-ai-models-with-chatgpt-desktop'
     | '/guides/use-together-ai-models-with-claude-code'
     | '/guides/use-together-ai-models-with-codex'
+    | '/guides/use-together-ai-models-with-deepseek-harness'
+    | '/guides/use-together-ai-models-with-hermes-agent'
+    | '/guides/use-together-ai-models-with-prime-agent'
     | '/guides/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -147,6 +180,9 @@ export interface FileRouteTypes {
     | '/guides/use-together-ai-models-with-chatgpt-desktop'
     | '/guides/use-together-ai-models-with-claude-code'
     | '/guides/use-together-ai-models-with-codex'
+    | '/guides/use-together-ai-models-with-deepseek-harness'
+    | '/guides/use-together-ai-models-with-hermes-agent'
+    | '/guides/use-together-ai-models-with-prime-agent'
     | '/guides'
   id:
     | '__root__'
@@ -160,6 +196,9 @@ export interface FileRouteTypes {
     | '/guides/use-together-ai-models-with-chatgpt-desktop'
     | '/guides/use-together-ai-models-with-claude-code'
     | '/guides/use-together-ai-models-with-codex'
+    | '/guides/use-together-ai-models-with-deepseek-harness'
+    | '/guides/use-together-ai-models-with-hermes-agent'
+    | '/guides/use-together-ai-models-with-prime-agent'
     | '/guides/'
   fileRoutesById: FileRoutesById
 }
@@ -174,6 +213,9 @@ export interface RootRouteChildren {
   GuidesUseTogetherAiModelsWithChatgptDesktopRoute: typeof GuidesUseTogetherAiModelsWithChatgptDesktopRoute
   GuidesUseTogetherAiModelsWithClaudeCodeRoute: typeof GuidesUseTogetherAiModelsWithClaudeCodeRoute
   GuidesUseTogetherAiModelsWithCodexRoute: typeof GuidesUseTogetherAiModelsWithCodexRoute
+  GuidesUseTogetherAiModelsWithDeepseekHarnessRoute: typeof GuidesUseTogetherAiModelsWithDeepseekHarnessRoute
+  GuidesUseTogetherAiModelsWithHermesAgentRoute: typeof GuidesUseTogetherAiModelsWithHermesAgentRoute
+  GuidesUseTogetherAiModelsWithPrimeAgentRoute: typeof GuidesUseTogetherAiModelsWithPrimeAgentRoute
   GuidesIndexRoute: typeof GuidesIndexRoute
 }
 
@@ -198,6 +240,27 @@ declare module '@tanstack/react-router' {
       path: '/guides'
       fullPath: '/guides/'
       preLoaderRoute: typeof GuidesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-together-ai-models-with-prime-agent': {
+      id: '/guides/use-together-ai-models-with-prime-agent'
+      path: '/guides/use-together-ai-models-with-prime-agent'
+      fullPath: '/guides/use-together-ai-models-with-prime-agent'
+      preLoaderRoute: typeof GuidesUseTogetherAiModelsWithPrimeAgentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-together-ai-models-with-hermes-agent': {
+      id: '/guides/use-together-ai-models-with-hermes-agent'
+      path: '/guides/use-together-ai-models-with-hermes-agent'
+      fullPath: '/guides/use-together-ai-models-with-hermes-agent'
+      preLoaderRoute: typeof GuidesUseTogetherAiModelsWithHermesAgentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/use-together-ai-models-with-deepseek-harness': {
+      id: '/guides/use-together-ai-models-with-deepseek-harness'
+      path: '/guides/use-together-ai-models-with-deepseek-harness'
+      fullPath: '/guides/use-together-ai-models-with-deepseek-harness'
+      preLoaderRoute: typeof GuidesUseTogetherAiModelsWithDeepseekHarnessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/guides/use-together-ai-models-with-codex': {
@@ -273,6 +336,12 @@ const rootRouteChildren: RootRouteChildren = {
     GuidesUseTogetherAiModelsWithClaudeCodeRoute,
   GuidesUseTogetherAiModelsWithCodexRoute:
     GuidesUseTogetherAiModelsWithCodexRoute,
+  GuidesUseTogetherAiModelsWithDeepseekHarnessRoute:
+    GuidesUseTogetherAiModelsWithDeepseekHarnessRoute,
+  GuidesUseTogetherAiModelsWithHermesAgentRoute:
+    GuidesUseTogetherAiModelsWithHermesAgentRoute,
+  GuidesUseTogetherAiModelsWithPrimeAgentRoute:
+    GuidesUseTogetherAiModelsWithPrimeAgentRoute,
   GuidesIndexRoute: GuidesIndexRoute,
 }
 export const routeTree = rootRouteImport

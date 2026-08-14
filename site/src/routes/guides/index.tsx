@@ -3,15 +3,39 @@ import { GuideCover, type GuideCoverVariant, GuideShell, SITE_URL } from "../../
 
 const title = "TogetherLink guides for open models and coding tools";
 const description =
-  "Practical guides for using open models from Together AI in Codex CLI, Grok Build, ChatGPT Desktop, and Claude Code.";
+  "Practical guides for using open models from Together AI in Codex, Claude Code, Prime Agent, Hermes Agent, Hermes Desktop, DeepSeek Harness, Grok Build, and ChatGPT Desktop.";
 
 const guides = [
+  {
+    href: "/guides/use-together-ai-models-with-prime-agent",
+    cover: "together-prime" as GuideCoverVariant,
+    title: "Run Prime Agent on Together AI models",
+    description:
+      "Keep Prime's persistent REPL, subagents, and long-running sessions while using the four curated Together models.",
+    meta: "Prime Agent · direct provider · 8 min",
+  },
+  {
+    href: "/guides/use-together-ai-models-with-hermes-agent",
+    cover: "together-hermes" as GuideCoverVariant,
+    title: "Use Together AI models in Hermes Agent and Hermes Desktop",
+    description:
+      "Launch Hermes through an isolated provider overlay while preserving sessions, skills, memory, preferences, and desktop support.",
+    meta: "Hermes Agent + Hermes Desktop · 9 min",
+  },
+  {
+    href: "/guides/use-together-ai-models-with-deepseek-harness",
+    cover: "together-deepseek" as GuideCoverVariant,
+    title: "Try DeepSeek Harness with Together AI models",
+    description:
+      "Open DSH's developer-preview web UI with a credential-free Together provider patch and explicit alpha guidance.",
+    meta: "DeepSeek Harness · alpha · 7 min",
+  },
   {
     href: "/guides/use-together-ai-models-with-codex",
     cover: "together-codex" as GuideCoverVariant,
     title: "Run open models in Codex CLI without replacing your config",
     description:
-      "Connect Codex to Together AI, choose between six current open models, and keep provider and model settings scoped to each run.",
+      "Connect Codex to Together AI, choose between four current open models, and keep provider and model settings scoped to each run.",
     meta: "Codex CLI · model picker · 10 min",
   },
   {

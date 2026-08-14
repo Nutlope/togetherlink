@@ -296,7 +296,7 @@ export function NumberedStep({
       <span className="inline-flex size-9 items-center justify-center rounded-[10px] bg-code font-mono text-[13px] font-semibold text-ink shadow-[inset_0_0_0_1px_rgba(229,231,235,.95),inset_0_1px_0_rgba(255,255,255,.72)]">
         {number}
       </span>
-      <div>
+      <div className="min-w-0">
         <h3 className="m-0 text-[18px] font-semibold">{title}</h3>
         <div className="mt-2 text-[15px] leading-relaxed text-muted [&_code]:text-ink">
           {children}
