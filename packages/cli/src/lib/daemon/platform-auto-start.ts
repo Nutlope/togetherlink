@@ -34,7 +34,9 @@ export async function installAutoStart(): Promise<{ installed: boolean; message:
   if (isLinux()) {
     return installSystemdService();
   }
-  throw new Error("Auto-start is only supported on macOS and Linux.");
+  throw new Error(
+    "Auto-start is only supported on macOS and Linux; portable process mode is used elsewhere.",
+  );
 }
 
 export async function uninstallAutoStart(): Promise<{ removed: boolean; message: string }> {
@@ -44,7 +46,9 @@ export async function uninstallAutoStart(): Promise<{ removed: boolean; message:
   if (isLinux()) {
     return uninstallSystemdService();
   }
-  throw new Error("Auto-start is only supported on macOS and Linux.");
+  throw new Error(
+    "Auto-start is only supported on macOS and Linux; portable process mode is used elsewhere.",
+  );
 }
 
 export async function startAutoStart(): Promise<boolean> {
@@ -80,7 +84,8 @@ export async function autoStartStatus(): Promise<AutoStartStatus> {
   }
   return {
     installed: false,
-    message: "Auto-start is only supported on macOS and Linux.",
+    message:
+      "Auto-start is not available on this platform. TogetherLink will use portable process mode.",
   };
 }
 

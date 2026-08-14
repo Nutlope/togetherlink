@@ -1,23 +1,55 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, rm } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+
+const childProcess = vi.hoisted(() => ({
+  execFile: vi.fn(),
+}));
+
+const takeover = vi.hoisted(() => ({
+  stop: vi.fn(),
+  wait: vi.fn(),
+}));
+
+vi.mock("node:child_process", () => ({
+  execFile: childProcess.execFile,
+}));
+
+vi.mock("../../cli/src/lib/daemon/takeover.js", () => ({
+  stopLegacyDaemonForTakeover: takeover.stop,
+  waitForManagedDaemonReady: takeover.wait,
+}));
+
 import {
   generateLaunchdPlist,
+  installLaunchdDaemon,
   isMacOS,
   launchdPath,
   launchdPlistPath,
+  launchdStatus,
 } from "../../cli/src/lib/daemon/launchd.js";
 
 describe("launchd plist generation", () => {
-  const tempHome = path.join(os.tmpdir(), `togetherlink-launchd-test-${process.pid}`);
+  const tempHome = path.join(realpathSync(os.tmpdir()), `togetherlink-launchd-test-${process.pid}`);
+  const togetherlinkHome = path.join(tempHome, ".togetherlink");
+  const originalArgv = [...process.argv];
 
   beforeEach(async () => {
     await mkdir(tempHome, { recursive: true });
-    vi.stubEnv("TOGETHERLINK_HOME", tempHome);
+    vi.spyOn(os, "homedir").mockReturnValue(tempHome);
+    vi.stubEnv("TOGETHERLINK_HOME", togetherlinkHome);
+    childProcess.execFile.mockReset();
+    takeover.stop.mockReset();
+    takeover.stop.mockResolvedValue({ stopped: false });
+    takeover.wait.mockReset();
+    takeover.wait.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
+    process.argv.splice(0, process.argv.length, ...originalArgv);
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await rm(tempHome, { recursive: true, force: true });
   });
@@ -33,10 +65,10 @@ describe("launchd plist generation", () => {
     expect(plist).toContain("<key>EnvironmentVariables</key>");
     expect(plist).toContain("<key>TOGETHERLINK_SUPERVISED</key>");
     expect(plist).toContain("<string>1</string>");
-    expect(plist).toContain(`<string>${tempHome}</string>`);
+    expect(plist).toContain(`<string>${togetherlinkHome}</string>`);
     expect(plist).toContain(`<string>${runtime}</string>`);
-    expect(plist).toContain(`<string>${tempHome}/bin/togetherlink.js</string>`);
-    expect(plist).not.toContain(`<string>${tempHome}/bin/togetherlink</string>`);
+    expect(plist).toContain(`<string>${togetherlinkHome}/bin/togetherlink.js</string>`);
+    expect(plist).not.toContain(`<string>${togetherlinkHome}/bin/togetherlink</string>`);
     expect(plist).toContain("daemon</string>");
     expect(plist).toContain("serve</string>");
   });
@@ -61,6 +93,71 @@ describe("launchd plist generation", () => {
     expect(launchdPlistPath()).toBe(
       path.join(os.homedir(), "Library", "LaunchAgents", "com.togetherlink.daemon.plist"),
     );
+  });
+
+  test("does not leave a plist when the launchd user session is unavailable", async () => {
+    const bundle = path.join(togetherlinkHome, "bin", "togetherlink.js");
+    await mkdir(path.dirname(bundle), { recursive: true });
+    await writeFile(bundle, "// test bundle\n");
+    process.argv[1] = bundle;
+    childProcess.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _options: { encoding: string },
+        callback: (error: NodeJS.ErrnoException, stdout: string, stderr: string) => void,
+      ) => callback(new Error("Could not find domain for user"), "", ""),
+    );
+
+    await expect(installLaunchdDaemon()).resolves.toMatchObject({
+      installed: false,
+      message: expect.stringMatching(/launchd user session is unavailable/i),
+    });
+    await expect(readFile(launchdPlistPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("ignores a stale plist when the launchd user session is unavailable", async () => {
+    const plist = launchdPlistPath();
+    await mkdir(path.dirname(plist), { recursive: true });
+    await writeFile(plist, "stale plist\n");
+    childProcess.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _options: { encoding: string },
+        callback: (error: NodeJS.ErrnoException, stdout: string, stderr: string) => void,
+      ) => callback(new Error("Could not find domain for user"), "", ""),
+    );
+
+    await expect(launchdStatus()).resolves.toEqual({
+      installed: false,
+      message:
+        "A launchd user session is unavailable in this macOS environment. TogetherLink will use portable process mode.",
+    });
+  });
+
+  test("rolls back the plist when launchd installation fails after probing", async () => {
+    const bundle = path.join(togetherlinkHome, "bin", "togetherlink.js");
+    await mkdir(path.dirname(bundle), { recursive: true });
+    await writeFile(bundle, "// test bundle\n");
+    process.argv[1] = bundle;
+    childProcess.execFile.mockImplementation(
+      (
+        _file: string,
+        args: string[],
+        _options: { encoding: string },
+        callback: (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void,
+      ) => {
+        if (args.includes("bootstrap")) {
+          callback(new Error("launchd session ended"), "", "launchd session ended");
+          return;
+        }
+        callback(null, "", "");
+      },
+    );
+
+    await expect(installLaunchdDaemon()).rejects.toThrow("launchd session ended");
+    await expect(readFile(launchdPlistPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("isMacOS reflects the current platform", () => {

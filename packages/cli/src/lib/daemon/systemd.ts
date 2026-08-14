@@ -115,6 +115,44 @@ function promisifiedExecFile(
 }
 
 /**
+ * Linux does not imply a usable systemd user manager. Containers, CI workers,
+ * devcontainers, WSL sessions, and minimal distributions may have no
+ * `systemctl` binary or no user bus. Probe the capability before creating any
+ * service files or stopping an existing daemon.
+ */
+async function systemdUserSessionAvailable(): Promise<boolean> {
+  try {
+    await promisifiedExecFile("systemctl", ["--user", "show-environment"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function rollbackSystemdService(svcPath: string): Promise<void> {
+  for (const args of [
+    ["--user", "stop", SYSTEMD_SERVICE_NAME],
+    ["--user", "disable", SYSTEMD_SERVICE_NAME],
+  ]) {
+    try {
+      await promisifiedExecFile("systemctl", args);
+    } catch {
+      // Best effort: the user manager may have disappeared after the probe.
+    }
+  }
+  try {
+    await unlink(svcPath);
+  } catch {
+    // The service file may already have been removed externally.
+  }
+  try {
+    await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
+  } catch {
+    // Nothing else can be cleaned up without a usable user manager.
+  }
+}
+
+/**
  * One-time migration: install the systemd user service for existing Linux users
  * the first time they run the installed bundle. It is silent, non-blocking,
  * and skipped when already installed or when running the daemon itself.
@@ -142,11 +180,6 @@ export async function maybeAutoInstallSystemdService(): Promise<boolean> {
 
 export async function installSystemdService(): Promise<{ installed: boolean; message: string }> {
   assertLinux();
-  const svcPath = servicePath();
-  const svcDir = systemdUserDir();
-  await mkdir(svcDir, { recursive: true });
-  await mkdir(path.join(togetherlinkHome(), "logs"), { recursive: true });
-
   if (!(await runningFromBundle())) {
     const argv1 = process.argv[1] ?? "unknown";
     return {
@@ -157,28 +190,47 @@ export async function installSystemdService(): Promise<{ installed: boolean; mes
     };
   }
 
+  if (!(await systemdUserSessionAvailable())) {
+    return {
+      installed: false,
+      message:
+        "A systemd user session is unavailable in this Linux environment. " +
+        "TogetherLink will start its daemon automatically in portable process mode when needed.",
+    };
+  }
+
+  const svcPath = servicePath();
+  const svcDir = systemdUserDir();
+  await mkdir(svcDir, { recursive: true });
+  await mkdir(path.join(togetherlinkHome(), "logs"), { recursive: true });
+
   const unit = generateSystemdUnit();
   await writeFile(svcPath, unit, { mode: 0o644 });
   try {
-    await promisifiedExecFile("systemctl", ["--user", "stop", SYSTEMD_SERVICE_NAME]);
-  } catch {
-    // The legacy daemon may not have been systemd-managed.
-  }
-  await stopLegacyDaemonForTakeover();
-  await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
-  await promisifiedExecFile("systemctl", ["--user", "enable", SYSTEMD_SERVICE_NAME]);
-  await promisifiedExecFile("systemctl", ["--user", "start", SYSTEMD_SERVICE_NAME]);
-  await waitForManagedDaemonReady();
-  await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
-  for (const staleSentinel of [
-    ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
-    path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
-  ]) {
     try {
-      await unlink(staleSentinel);
+      await promisifiedExecFile("systemctl", ["--user", "stop", SYSTEMD_SERVICE_NAME]);
     } catch {
-      // ignore
+      // The legacy daemon may not have been systemd-managed.
     }
+    await stopLegacyDaemonForTakeover();
+    await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
+    await promisifiedExecFile("systemctl", ["--user", "enable", SYSTEMD_SERVICE_NAME]);
+    await promisifiedExecFile("systemctl", ["--user", "start", SYSTEMD_SERVICE_NAME]);
+    await waitForManagedDaemonReady();
+    await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
+    for (const staleSentinel of [
+      ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
+      path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
+    ]) {
+      try {
+        await unlink(staleSentinel);
+      } catch {
+        // ignore
+      }
+    }
+  } catch (error) {
+    await rollbackSystemdService(svcPath);
+    throw error;
   }
 
   return {
@@ -252,6 +304,15 @@ export type SystemdStatus =
 
 export async function systemdStatus(): Promise<SystemdStatus> {
   assertLinux();
+  if (!(await systemdUserSessionAvailable())) {
+    return {
+      installed: false,
+      message:
+        "A systemd user session is unavailable in this Linux environment. " +
+        "TogetherLink will use portable process mode.",
+    };
+  }
+
   const svcPath = servicePath();
   const installed = await readFile(svcPath, "utf8")
     .then(() => true)

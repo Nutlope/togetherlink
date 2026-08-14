@@ -187,6 +187,28 @@ function promisifiedExecFile(
   });
 }
 
+async function launchdUserSessionAvailable(): Promise<boolean> {
+  try {
+    await promisifiedExecFile("launchctl", ["print", launchctlDomain()]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function rollbackLaunchdDaemon(plistDest: string, domain: string): Promise<void> {
+  try {
+    await promisifiedExecFile("launchctl", ["bootout", domain, plistDest]);
+  } catch {
+    // Best effort: the launchd user domain may have disappeared after probing.
+  }
+  try {
+    await unlink(plistDest);
+  } catch {
+    // The plist may already have been removed externally.
+  }
+}
+
 /**
  * One-time migration: install the launchd agent for existing macOS users the
  * first time they run the installed bundle. It is silent, non-blocking, and
@@ -220,12 +242,6 @@ export async function maybeAutoInstallLaunchdDaemon(): Promise<boolean> {
  */
 export async function installLaunchdDaemon(): Promise<{ installed: boolean; message: string }> {
   assertMacOS();
-  const plistDest = plistPath();
-  const agentsDir = launchAgentsDir();
-  const domain = launchctlDomain();
-  await mkdir(agentsDir, { recursive: true });
-  await mkdir(path.join(togetherlinkHome(), "logs"), { recursive: true });
-
   if (!(await runningFromBundle())) {
     const argv1 = process.argv[1] ?? "unknown";
     return {
@@ -236,34 +252,54 @@ export async function installLaunchdDaemon(): Promise<{ installed: boolean; mess
     };
   }
 
+  if (!(await launchdUserSessionAvailable())) {
+    return {
+      installed: false,
+      message:
+        "A launchd user session is unavailable in this macOS environment. " +
+        "TogetherLink will start its daemon automatically in portable process mode when needed.",
+    };
+  }
+
+  const plistDest = plistPath();
+  const agentsDir = launchAgentsDir();
+  const domain = launchctlDomain();
+  await mkdir(agentsDir, { recursive: true });
+  await mkdir(path.join(togetherlinkHome(), "logs"), { recursive: true });
+
   const plistContent = generateLaunchdPlist();
   await writeFile(plistDest, plistContent, { mode: 0o644 });
 
-  // Best-effort bootout of any previous registration before bootstrapping.
   try {
-    await promisifiedExecFile("launchctl", ["bootout", domain, plistDest]);
-  } catch {
-    // ignore — may not have been loaded
-  }
-
-  // The legacy CLI spawned a detached daemon before launchd existed. It may
-  // still own port 7878 even after bootout, causing the new launchd job to
-  // exit cleanly and leave no supervisor. Explicitly transfer ownership.
-  await stopLegacyDaemonForTakeover();
-
-  await promisifiedExecFile("launchctl", ["bootstrap", domain, plistDest]);
-  await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
-  await waitForManagedDaemonReady();
-  await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
-  for (const staleSentinel of [
-    ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
-    path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
-  ]) {
+    // Best-effort bootout of any previous registration before bootstrapping.
     try {
-      await unlink(staleSentinel);
+      await promisifiedExecFile("launchctl", ["bootout", domain, plistDest]);
     } catch {
-      // ignore
+      // ignore — may not have been loaded
     }
+
+    // The legacy CLI spawned a detached daemon before launchd existed. It may
+    // still own port 7878 even after bootout, causing the new launchd job to
+    // exit cleanly and leave no supervisor. Explicitly transfer ownership.
+    await stopLegacyDaemonForTakeover();
+
+    await promisifiedExecFile("launchctl", ["bootstrap", domain, plistDest]);
+    await promisifiedExecFile("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`]);
+    await waitForManagedDaemonReady();
+    await writeFile(autoInstallSentinelPath(), new Date().toISOString(), { mode: 0o600 });
+    for (const staleSentinel of [
+      ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
+      path.join(togetherlinkHome(), LEGACY_AUTO_INSTALL_SENTINEL),
+    ]) {
+      try {
+        await unlink(staleSentinel);
+      } catch {
+        // ignore
+      }
+    }
+  } catch (error) {
+    await rollbackLaunchdDaemon(plistDest, domain);
+    throw error;
   }
 
   return {
@@ -342,6 +378,15 @@ export type LaunchdStatus =
  */
 export async function launchdStatus(): Promise<LaunchdStatus> {
   assertMacOS();
+  if (!(await launchdUserSessionAvailable())) {
+    return {
+      installed: false,
+      message:
+        "A launchd user session is unavailable in this macOS environment. " +
+        "TogetherLink will use portable process mode.",
+    };
+  }
+
   const plistDest = plistPath();
   const domain = launchctlDomain();
 

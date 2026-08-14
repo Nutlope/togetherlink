@@ -308,8 +308,18 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
     if (debug) {
       process.stderr.write(`[togetherlink daemon] ${signal} — shutting down.\n`);
     }
+    // Stop accepting new work, but keep the process alive until every request
+    // that already has a socket finishes. Exiting immediately here severs all
+    // active Codex/Claude streams during a launchd/systemd service refresh and
+    // makes the client report a low-level localhost transport failure.
+    server.keepAliveTimeout = 1;
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Do not let idle keep-alive sockets consume launchd's exit window.
+      // Active requests are deliberately left alone and keep draining.
+      server.closeIdleConnections();
+    });
     activeSessions.closeStore();
-    server.close();
     try {
       await unlink(daemonPidPath());
     } catch {

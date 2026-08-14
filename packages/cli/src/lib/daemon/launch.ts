@@ -129,7 +129,9 @@ async function startInstalledSupervisor(): Promise<SupervisorStartResult> {
   if (!(await runningFromBundle())) {
     return { installed: false };
   }
-  const { autoStartStatus, startAutoStart } = await import("./platform-auto-start.js");
+  const { autoStartStatus, maybeAutoInstallService, startAutoStart } =
+    await import("./platform-auto-start.js");
+  await maybeAutoInstallService();
   const status = await autoStartStatus();
   if (!status.installed) {
     return { installed: false };
