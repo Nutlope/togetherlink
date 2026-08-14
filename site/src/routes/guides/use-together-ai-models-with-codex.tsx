@@ -23,12 +23,7 @@ const models = [
   {
     name: "GLM 5.2",
     id: "zai-org/GLM-5.2",
-    note: "Text coding model with a 262K context window.",
-  },
-  {
-    name: "Kimi K2.7 Code",
-    id: "moonshotai/Kimi-K2.7-Code",
-    note: "Coding-focused model with vision input and a 262K context window.",
+    note: "Text coding model with a 512K context window.",
   },
   {
     name: "Kimi K2.6",
@@ -44,11 +39,6 @@ const models = [
     name: "Qwen 3.7 Max",
     id: "Qwen/Qwen3.7-Max",
     note: "Vision-capable model with a 1M context window.",
-  },
-  {
-    name: "DeepSeek V4 Pro",
-    id: "deepseek-ai/DeepSeek-V4-Pro",
-    note: "Text reasoning model with a 512K context window.",
   },
 ];
 
@@ -94,7 +84,7 @@ const guide = defineGuide({
   ogKey: "together-codex",
   ogAlt: "Together AI models in Codex CLI with TogetherLink",
   datePublished: "2026-07-20T12:00:00+02:00",
-  dateModified: "2026-07-21T12:00:00+02:00",
+  dateModified: "2026-08-14T12:00:00+02:00",
   faqs,
 });
 

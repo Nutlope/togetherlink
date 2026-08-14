@@ -130,11 +130,11 @@ export const GLM_5_2: ModelDefinition = {
 export const DEFAULT_MODEL: ModelDefinition = KIMI_K3;
 
 /**
- * Kimi K2.6 — Moonshot's newest reasoning + vision flagship. Vision-capable,
+ * Kimi K2.6 — Moonshot's reasoning + vision model. Vision-capable,
  * so it can serve as a vision primary (images reach it directly, no subagent).
  * Pricing/context from Together changelog (June 2026); output limit per
- * models.dev. Pinned to the OpenCode `@vision` subagent is the older K2.7-Code
- * (below) — kept there for stability; K2.6 is selectable as a primary.
+ * models.dev. Kimi K3 is pinned to OpenCode's `@vision` subagent; K2.6 remains
+ * selectable as a primary.
  */
 export const KIMI_K2_6: ModelDefinition = {
   id: "moonshotai/Kimi-K2.6",
@@ -189,25 +189,6 @@ export const QWEN_3_7_MAX: ModelDefinition = {
 };
 
 /**
- * DeepSeek V4 Pro — newest DeepSeek, long-context (512K) reasoning. Text-only
- * on Together (not in the vision models table). Pricing is the post-June-9-2026
- * reduction ($1.74/$3.48); output limit (384K) per models.dev.
- */
-export const DEEPSEEK_V4_PRO: ModelDefinition = {
-  id: "deepseek-ai/DeepSeek-V4-Pro",
-  name: "DeepSeek V4 Pro",
-  anthropicAlias: null,
-  cost: { input: 1.74, output: 3.48, cache_read: 0.2 },
-  limit: { context: 512_000, output: 384_000 },
-  attachment: false,
-  reasoning: true,
-  temperature: true,
-  tool_call: true,
-  codexAutoCompactTokenLimit: 450_000,
-  modalities: { input: ["text"], output: ["text"] },
-};
-
-/**
  * Capabilities string Claude Code reads from ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES.
  * Mirrors what GLM-5.2 supports on Together: adjustable reasoning effort
  * (incl. xhigh/max), thinking, adaptive thinking, and interleaved thinking.
@@ -217,24 +198,6 @@ export const GLM_5_2_ANTHROPIC_CAPABILITIES =
 
 /** Claude Code capabilities verified for Kimi K3 on Together. */
 export const KIMI_K3_ANTHROPIC_CAPABILITIES = "effort,max_effort,thinking,interleaved_thinking";
-
-/**
- * Kimi K2.7 Code — Moonshot's coding-focused model. Used as OpenCode's
- * `@vision` subagent primary and as an optional Claude Code backend.
- */
-export const KIMI_K2_7_CODE: ModelDefinition = {
-  id: "moonshotai/Kimi-K2.7-Code",
-  name: "Kimi K2.7 Code",
-  anthropicAlias: "together-kimi-k2-7-code",
-  cost: { input: 0.95, output: 4.0, cache_read: 0.19 },
-  limit: { context: 262_144, output: 131_072 },
-  attachment: true,
-  reasoning: true,
-  temperature: true,
-  tool_call: true,
-  codexAutoCompactTokenLimit: 235_000,
-  modalities: { input: ["text", "image"], output: ["text"] },
-};
 
 /**
  * Qwen3.5 9B — small, cheap, vision-capable fallback for image description.
@@ -259,7 +222,7 @@ export const QWEN_3_5_9B: ModelDefinition = {
  * take a single model. Reasoning is always disabled on these calls
  * (perception, not reasoning) — handled by callers, not encoded here.
  */
-export const VISION_MODELS: readonly ModelDefinition[] = [KIMI_K2_7_CODE, QWEN_3_5_9B];
+export const VISION_MODELS: readonly ModelDefinition[] = [KIMI_K3, QWEN_3_5_9B];
 
 /** Primary vision model (first in VISION_MODELS). */
 export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
@@ -288,11 +251,9 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
 const CURATED_MODELS: readonly ModelDefinition[] = [
   KIMI_K3,
   GLM_5_2,
-  VISION_PRIMARY, // moonshotai/Kimi-K2.7-Code — also the @vision subagent model
   KIMI_K2_6,
   MINIMAX_M3,
   QWEN_3_7_MAX,
-  DEEPSEEK_V4_PRO,
 ];
 
 export const SELECTABLE_MODELS: readonly ModelDefinition[] = [

@@ -24,10 +24,16 @@ export type TestDaemon = {
   /** The daemon's isolated TOGETHERLINK_HOME. */
   home: string;
   stderr: () => string;
+  isRunning: () => boolean;
+  signal: (signal: NodeJS.Signals) => void;
+  waitForExit: () => Promise<void>;
   stop: () => Promise<void>;
 };
 
-export async function startTestDaemon(context: TestContext): Promise<TestDaemon> {
+export async function startTestDaemon(
+  context: TestContext,
+  envOverrides: NodeJS.ProcessEnv = {},
+): Promise<TestDaemon> {
   const port = await findOpenPort();
   const home = await mkdtemp(path.join(context.tmpDir, "daemon-home-"));
   let stderr = "";
@@ -38,6 +44,7 @@ export async function startTestDaemon(context: TestContext): Promise<TestDaemon>
       TOGETHERLINK_DEBUG: "1",
       TOGETHERLINK_HOME: home,
       TOGETHERLINK_PORT: String(port),
+      ...envOverrides,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -57,9 +64,20 @@ export async function startTestDaemon(context: TestContext): Promise<TestDaemon>
           url,
           home,
           stderr: () => stderr,
+          isRunning: () => child.exitCode === null,
+          signal: (signal) => {
+            child.kill(signal);
+          },
+          waitForExit: async () => {
+            if (child.exitCode === null) {
+              await new Promise((resolve) => child.once("exit", resolve));
+            }
+          },
           stop: async () => {
-            child.kill("SIGTERM");
-            await new Promise((resolve) => child.once("exit", resolve));
+            if (child.exitCode === null) {
+              child.kill("SIGTERM");
+              await new Promise((resolve) => child.once("exit", resolve));
+            }
             await rm(home, { recursive: true, force: true });
           },
         };

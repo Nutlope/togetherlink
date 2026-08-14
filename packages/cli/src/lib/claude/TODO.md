@@ -83,7 +83,7 @@ How it works now (in `proxy.ts` + `vision.ts`):
 
 - `resolveImageBlocks` runs before each `/v1/messages` call. It walks every message's `content` (and the system array), finds `image` and `url` blocks, describes each with a vision model, and replaces the block in place with a `text` block holding the description. GLM-5.2 then reasons over the description rather than the pixels.
 - Vision models are **fixed, not user-configurable** — curated for the best experience, with automatic failover from primary to fallback:
-  - Primary: `moonshotai/Kimi-K2.7-Code`.
+  - Primary: `moonshotai/Kimi-K3`.
   - Fallback: `Qwen/Qwen3.5-9B`, used if Kimi errors.
 - Reasoning is disabled on the vision sub-call (`reasoning: { enabled: false }`, `temperature: 0.6`) because image description is a perception task.
 - Descriptions are cached by image hash (per-process), so the same image recurring in conversation history across turns is described once and not re-billed.

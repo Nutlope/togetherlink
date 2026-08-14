@@ -308,8 +308,35 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
     if (debug) {
       process.stderr.write(`[togetherlink daemon] ${signal} — shutting down.\n`);
     }
+    // Stop accepting new work, but keep the process alive until every request
+    // that already has a socket finishes. Exiting immediately here severs all
+    // active Codex/Claude streams during a launchd/systemd service refresh and
+    // makes the client report a low-level localhost transport failure.
+    server.keepAliveTimeout = 1;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceClose);
+        resolve();
+      };
+      const forceClose = setTimeout(() => {
+        if (debug) {
+          process.stderr.write(
+            "[togetherlink daemon] shutdown grace period expired; closing active connections.\n",
+          );
+        }
+        server.closeAllConnections();
+        finish();
+      }, daemonShutdownGraceMs());
+      forceClose.unref();
+      server.close(finish);
+      // Do not let idle keep-alive sockets consume launchd's exit window.
+      // Active requests are deliberately left alone and keep draining.
+      server.closeIdleConnections();
+    });
     activeSessions.closeStore();
-    server.close();
     try {
       await unlink(daemonPidPath());
     } catch {
@@ -323,6 +350,11 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
   // Keep the process alive for the lifetime of the server. `server.listen`
   // already does this, but be explicit: the daemon must never fall through.
   await once(server, "close");
+}
+
+function daemonShutdownGraceMs(): number {
+  const configured = Number.parseInt(process.env.TOGETHERLINK_SHUTDOWN_GRACE_MS ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : 10_000;
 }
 
 type DaemonRequestOptions = {

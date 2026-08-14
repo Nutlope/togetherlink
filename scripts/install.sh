@@ -254,8 +254,10 @@ if PATH="$BIN_DIR:$PATH" togetherlink --version >/dev/null 2>&1; then
   PATH="$BIN_DIR:$PATH" togetherlink __telemetry-install-completed >/dev/null 2>&1 || true
 fi
 
-# On macOS (launchd) or Linux (systemd), install the user service so the shared
-# proxy daemon starts automatically at login and survives restarts.
+# On macOS or Linux with a usable user supervisor, install the service so the
+# shared proxy daemon starts automatically at login and survives restarts.
+# Containers, CI, headless sessions, and minimal distributions fall back to
+# portable process mode automatically on the first daemon-backed command.
 if [ "$(uname -s)" = "Darwin" ] || [ "$(uname -s)" = "Linux" ]; then
   platform=$(uname -s)
   case "$platform" in
@@ -265,7 +267,7 @@ if [ "$(uname -s)" = "Darwin" ] || [ "$(uname -s)" = "Linux" ]; then
   if PATH="$BIN_DIR:$PATH" togetherlink daemon install >/dev/null 2>&1; then
     ok "Installed $service_name: the TogetherLink daemon will start at login."
   else
-    info "Auto-start service not installed; the daemon will need to be started manually."
+    info "OS auto-start unavailable; TogetherLink will start its daemon automatically when needed."
   fi
 fi
 

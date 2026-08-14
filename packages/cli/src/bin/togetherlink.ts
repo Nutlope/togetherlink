@@ -13,7 +13,6 @@ import {
 import { forceSelfUpdate, maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
-import { maybeAutoInstallService } from "../lib/daemon/platform-auto-start.js";
 import { interactiveLauncherOptions } from "../lib/interactive-launcher-options.js";
 
 async function daemonStop(): Promise<void> {
@@ -229,29 +228,6 @@ async function main() {
   if (command === "whoami") {
     process.stdout.write(`${await getInstallId()}\n`);
     return;
-  }
-
-  // One-time migration: install the launchd/systemd agent for existing
-  // installed bundles. Run only for commands that actually use the shared
-  // daemon (harnesses + chatgpt), so read-only commands, configure and telemetry
-  // stay side-effect free.
-  const DAEMON_REQUIRING_COMMANDS = new Set([
-    "chatgpt",
-    "codex-app",
-    "claude",
-    "codex",
-    "deepseek",
-    "grok",
-    "opencode",
-    "pi",
-    "prime",
-    "hermes",
-  ]);
-  if (DAEMON_REQUIRING_COMMANDS.has(command)) {
-    const serviceAutoInstalled = await maybeAutoInstallService();
-    if (serviceAutoInstalled) {
-      console.log("Enabled TogetherLink daemon auto-start at login.");
-    }
   }
 
   if (command === "configure") {

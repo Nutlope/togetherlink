@@ -7,17 +7,17 @@ prompt is one unified instruction that lets the model self-select by its own
 runtime capabilities, so it stays correct even if the user switches models
 mid-session:
 
-- Vision-capable primary models (Kimi K3, Kimi K2.6, Kimi K2.7-Code, MiniMax
-  M3, Qwen 3.7 Max): OpenCode sends the image directly to the model. This is the
+- Vision-capable primary models (Kimi K3, Kimi K2.6, MiniMax M3, Qwen 3.7 Max):
+  OpenCode sends the image directly to the model. This is the
   working path for images.
-- Text-only primary models (GLM-5.2, DeepSeek V4 Pro): OpenCode strips the image
+- Text-only primary models (GLM-5.2): OpenCode strips the image
   bytes before they reach the model. The model tells the user plainly that it
   cannot see images, and that they should switch to a vision-capable model via
   `/models` (Kimi K2.6, MiniMax M3, or Qwen 3.7 Max) and re-send the image.
 
 ### The `@vision` subagent and clipboard images
 
-A `@vision` subagent is still registered and pinned to Kimi-K2.7-Code, but it
+A `@vision` subagent is still registered and pinned to Kimi K3, but it
 does not work for clipboard-pasted images today: OpenCode has an open bug
 ([#25553][oc-25553]) where an image attached with `@vision` is not forwarded to
 the subagent. The subagent only errors with `"this model does not support image
@@ -53,21 +53,19 @@ config field to hide it, so it stays visible. With only `togetherai` enabled,
 there is nothing else active to connect to; connecting another provider would
 also be a no-op against this config's intent.
 
-So `/models` shows only the 7 curated flagships. Each model's display name
+So `/models` shows only the 5 curated flagships. Each model's display name
 carries a short tip because OpenCode model entries have no separate description
 field. The provider label stays the full `Together AI`, and the model names are
 kept short so the per-line provider suffix OpenCode appends does not push them
 past the picker's truncation width.
 
-| Model id                      | Vision | Use case                                |
-| ----------------------------- | ------ | --------------------------------------- |
-| `moonshotai/Kimi-K3`          | Yes    | default coding model, 1M context        |
-| `zai-org/GLM-5.2`             | No     | agentic coding (text-only)              |
-| `moonshotai/Kimi-K2.6`        | Yes    | reasoning + vision                      |
-| `moonshotai/Kimi-K2.7-Code`   | Yes    | code; also the `@vision` subagent model |
-| `MiniMaxAI/MiniMax-M3`        | Yes    | cheapest vision, 512K context           |
-| `Qwen/Qwen3.7-Max`            | Yes    | strongest Qwen, 1M context              |
-| `deepseek-ai/DeepSeek-V4-Pro` | No     | long-context reasoning (512K)           |
+| Model id               | Vision | Use case                         |
+| ---------------------- | ------ | -------------------------------- |
+| `moonshotai/Kimi-K3`   | Yes    | default coding model, 1M context |
+| `zai-org/GLM-5.2`      | No     | agentic coding (text-only)       |
+| `moonshotai/Kimi-K2.6` | Yes    | reasoning + vision               |
+| `MiniMaxAI/MiniMax-M3` | Yes    | cheapest vision, 512K context    |
+| `Qwen/Qwen3.7-Max`     | Yes    | strongest Qwen, 1M context       |
 
 That's all users see in `/models`. The curated set lives in
 [`@togetherlink/models`](../../../../models/src/index.ts) (`SELECTABLE_MODELS`).

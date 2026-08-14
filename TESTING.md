@@ -140,7 +140,7 @@ Codex App support is an alpha feature. Unlike `togetherlink codex`, it persisten
 export TOGETHER_API_KEY="..."
 
 pnpm -F @togetherlink/cli exec togetherlink codex-app
-pnpm -F @togetherlink/cli exec togetherlink codex-app --model moonshotai/Kimi-K2.7-Code
+pnpm -F @togetherlink/cli exec togetherlink codex-app --model zai-org/GLM-5.2
 ```
 
 Restore the previous Codex config:
@@ -343,7 +343,7 @@ try {
     clientInfo: {
       name: "togetherlink-debug",
       title: "Togetherlink Debug",
-      version: "0.7.15",
+      version: "0.8.0",
     },
     capabilities: {
       experimentalApi: true,

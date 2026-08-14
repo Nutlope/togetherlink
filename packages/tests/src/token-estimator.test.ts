@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { KIMI_K2_7_CODE } from "../../models/src/index.js";
+import { KIMI_K3 } from "../../models/src/index.js";
 import type { ModelDefinition } from "../../models/src/index.js";
 import { CostTracker } from "../../cli/src/lib/cost.js";
 import { applyEstimatedContextBudget } from "../../cli/src/lib/claude/context-budget.js";
@@ -138,7 +138,7 @@ describe("CostTracker self-calibrating token estimator", () => {
     // Vision sub-call must not perturb the estimator (it goes through
     // addVisionUsage, never addUsage). We verify by recording vision usage and
     // confirming the ratio is unchanged.
-    tracker.addVisionUsage(KIMI_K2_7_CODE.id, 500, 5);
+    tracker.addVisionUsage(KIMI_K3.id, 500, 5);
     // Estimator unchanged — still ratio 4.
     expect(tracker.tokenEstimator.estimate(8000)).toBe(2000);
   });

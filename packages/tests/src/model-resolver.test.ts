@@ -2,13 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MODEL,
   GLM_5_2,
+  KIMI_K2_6,
   KIMI_K3,
-  KIMI_K2_7_CODE,
+  MINIMAX_M3,
+  QWEN_3_5_9B,
   SELECTABLE_MODELS,
+  VISION_MODELS,
+  VISION_PRIMARY,
   resolveModelByKeys,
   type ModelDefinition,
 } from "@togetherlink/models";
-import { claudeModelCapabilities, resolveClaudeModel } from "../../cli/src/lib/claude/defaults.js";
+import {
+  CLAUDE_HAIKU_MODEL,
+  claudeModelCapabilities,
+  resolveClaudeModel,
+} from "../../cli/src/lib/claude/defaults.js";
 import { togetherReasoningEffort } from "../../cli/src/lib/claude/translate-request.js";
 import { CODEX_DEFAULT_MODEL, resolveCodexModel } from "../../cli/src/lib/codex/defaults.js";
 import { OPENCODE_DEFAULT_MODEL } from "../../cli/src/lib/opencode/defaults.js";
@@ -42,8 +50,8 @@ describe("resolveModelByKeys", () => {
 
   it("matches by id", () => {
     expect(
-      resolveModelByKeys(SELECTABLE_MODELS, KIMI_K2_7_CODE.id, aliasAndId, DEFAULT_MODEL.id)?.id,
-    ).toBe(KIMI_K2_7_CODE.id);
+      resolveModelByKeys(SELECTABLE_MODELS, KIMI_K2_6.id, aliasAndId, DEFAULT_MODEL.id)?.id,
+    ).toBe(KIMI_K2_6.id);
   });
 
   it("matches by alias", () => {
@@ -104,7 +112,7 @@ describe("shared harness default", () => {
     expect(claudeModelCapabilities(KIMI_K3)).toBe(
       "effort,max_effort,thinking,interleaved_thinking",
     );
-    expect(claudeModelCapabilities(KIMI_K2_7_CODE)).toBeUndefined();
+    expect(claudeModelCapabilities(MINIMAX_M3)).toBeUndefined();
   });
 
   it("derives Claude reasoning efforts from shared model metadata", () => {
@@ -125,5 +133,19 @@ describe("shared harness default", () => {
       limit: { context: 512_000, output: 164_000 },
       codexAutoCompactTokenLimit: 460_000,
     });
+  });
+});
+
+describe("vision model migration", () => {
+  it("uses Kimi K3 as the primary vision model with a small fallback", () => {
+    expect(VISION_PRIMARY).toBe(KIMI_K3);
+    expect(VISION_MODELS).toEqual([KIMI_K3, QWEN_3_5_9B]);
+    expect(CLAUDE_HAIKU_MODEL).toBe(QWEN_3_5_9B);
+  });
+
+  it("does not expose models scheduled for serverless removal", () => {
+    const modelIds = SELECTABLE_MODELS.map((model) => model.id);
+    expect(modelIds).not.toContain("moonshotai/Kimi-K2.7-Code");
+    expect(modelIds).not.toContain("deepseek-ai/DeepSeek-V4-Pro");
   });
 });

@@ -5,7 +5,6 @@ import {
   GLM_5_2,
   KIMI_K2_6,
   KIMI_K3,
-  KIMI_K2_7_CODE,
   MINIMAX_M3,
   QWEN_3_7_MAX,
   SELECTABLE_MODELS,

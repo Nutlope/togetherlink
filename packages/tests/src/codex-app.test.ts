@@ -82,7 +82,7 @@ describe("Codex App alpha config", () => {
       catalogPath: "/tmp/old.json",
     });
     const second = buildCodexAppConfig(first, {
-      modelId: "moonshotai/Kimi-K2.7-Code",
+      modelId: "moonshotai/Kimi-K3",
       providerId: "togetherlink_codex_app",
       providerName: "Togetherlink",
       baseUrl: "http://127.0.0.1:7878/session/new/v1",
@@ -93,7 +93,7 @@ describe("Codex App alpha config", () => {
     expect(second.match(/>>> togetherlink codex-app alpha >>>/g)).toHaveLength(1);
     expect(second).not.toContain("/tmp/old.json");
     expect(second).not.toContain("/session/old/v1");
-    expect(second).toContain('model = "moonshotai/Kimi-K2.7-Code"');
+    expect(second).toContain('model = "moonshotai/Kimi-K3"');
     expect(second).not.toContain("model_provider =");
     expect(second.match(/approval_policy = "on-request"/g)).toHaveLength(1);
     expect(second.match(/sandbox_mode = "workspace-write"/g)).toHaveLength(1);

@@ -76,7 +76,7 @@ export function buildOpencodeConfigJson({
 } = {}): OpencodeConfig {
   // Register every curated flagship (the full set /models shows) with their
   // real metadata + tip-bearing display names. The `@vision` subagent's model
-  // (Kimi-K2.7-Code) is part of this set, so it's covered too.
+  // (Kimi K3) is part of this set, so it's covered too.
   const models = { ...OPENCODE_MODEL_ENTRIES };
 
   const provider: OpencodeProviderConfig = {
@@ -107,7 +107,7 @@ export function buildOpencodeConfigJson({
     },
     // Slash form: provider/model. The selected model is the primary; sub-agents
     // without an explicit model inherit it automatically. The `vision` subagent
-    // explicitly pins a vision-capable Together model (Kimi-K2.7-Code) so a
+    // explicitly pins a vision-capable Together model (Kimi K3) so a
     // text-only primary can still describe pasted images. To add more
     // sub-agents later, add entries under `agent`.
     model: `${OPENCODE_PROVIDER_ID}/${modelId}`,

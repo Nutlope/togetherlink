@@ -3,6 +3,38 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.0 - 2026-08-14
+
+### Changed
+
+- Promoted `moonshotai/Kimi-K3` to the shared primary vision model for Claude Code, OpenCode, and
+  Grok image-description routing.
+- Kept `Qwen/Qwen3.5-9B` as the automatic vision fallback and made it Claude Code's lightweight
+  Haiku-tier model.
+- Removed Kimi K2.7 Code and DeepSeek V4 Pro from the curated serverless model choices ahead of
+  their scheduled retirement.
+- Moved daemon auto-start selection into the daemon bootstrap path so direct harnesses do not
+  probe or install an unused OS supervisor.
+
+### Fixed
+
+- Made daemon startup automatic in Docker, devcontainers, CI, headless sessions, minimal Linux,
+  and platforms without launchd/systemd by falling back to portable process mode.
+- Probed launchd and systemd user-session capabilities with bounded output and timeouts before
+  installation, ignored or removed stale service files when the supervisor is unavailable, and
+  rolled back partially installed services.
+- Drained active HTTP requests during supervised daemon shutdown so service refreshes do not sever
+  in-flight Claude or Codex streams, with a deadline that force-closes stuck connections.
+- Replaced the installer's manual-start guidance with the correct automatic portable-mode behavior.
+
+### Tests
+
+- Added deterministic coverage for unavailable, slow, and failing launchd/systemd sessions, stale
+  service files, portable and Windows runtime paths, automatic daemon bootstrap, and bounded
+  graceful shutdown.
+- Verified the bundled CLI in clean Docker and stale-service upgrade scenarios without manual
+  sentinel files, service removal, or daemon startup.
+
 ## 0.7.15 - 2026-08-14
 
 ### Added
