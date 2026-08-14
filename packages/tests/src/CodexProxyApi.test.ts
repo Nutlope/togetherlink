@@ -2266,7 +2266,7 @@ describe("Codex Responses proxy tool compatibility", () => {
     });
 
     // Together silently caps omitted max_tokens at 2048, which truncates
-    // long-reasoning models (Kimi K2.6/K2.7) mid-turn; the proxy must always
+    // long-reasoning models mid-turn; the proxy must always
     // send an explicit budget. A tiny input leaves the full output limit free.
     expect(requests[0]?.max_tokens).toBe(GLM_5_2.limit.output);
 

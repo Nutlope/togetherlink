@@ -26,11 +26,6 @@ const models = [
     note: "Text coding model with a 512K context window.",
   },
   {
-    name: "Kimi K2.6",
-    id: "moonshotai/Kimi-K2.6",
-    note: "Reasoning model with vision input and a 262K context window.",
-  },
-  {
     name: "MiniMax M3",
     id: "MiniMaxAI/MiniMax-M3",
     note: "Vision-capable model with a 512K context window.",
@@ -56,7 +51,7 @@ const faqs: Faq[] = [
   {
     question: "Where does the --model flag go?",
     answer:
-      "Put TogetherLink's --model flag before codex: togetherlink --model moonshotai/Kimi-K2.6 codex. Other Codex arguments go after codex.",
+      "Put TogetherLink's --model flag before codex: togetherlink --model MiniMaxAI/MiniMax-M3 codex. Other Codex arguments go after codex.",
   },
   {
     question: "Will this overwrite ~/.codex/config.toml?",
@@ -316,8 +311,8 @@ function TogetherCodexGuide() {
           </div>
           <div className="mt-6">
             <CommandBlock
-              command="togetherlink --model moonshotai/Kimi-K2.6 codex"
-              label="Example: switch to Kimi K2.6"
+              command="togetherlink --model MiniMaxAI/MiniMax-M3 codex"
+              label="Example: switch to MiniMax M3"
             />
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-faint">

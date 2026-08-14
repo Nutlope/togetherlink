@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MODEL,
   GLM_5_2,
-  KIMI_K2_6,
   KIMI_K3,
   MINIMAX_M3,
   QWEN_3_5_9B,
@@ -50,8 +49,8 @@ describe("resolveModelByKeys", () => {
 
   it("matches by id", () => {
     expect(
-      resolveModelByKeys(SELECTABLE_MODELS, KIMI_K2_6.id, aliasAndId, DEFAULT_MODEL.id)?.id,
-    ).toBe(KIMI_K2_6.id);
+      resolveModelByKeys(SELECTABLE_MODELS, MINIMAX_M3.id, aliasAndId, DEFAULT_MODEL.id)?.id,
+    ).toBe(MINIMAX_M3.id);
   });
 
   it("matches by alias", () => {
@@ -145,6 +144,7 @@ describe("vision model migration", () => {
 
   it("does not expose models scheduled for serverless removal", () => {
     const modelIds = SELECTABLE_MODELS.map((model) => model.id);
+    expect(modelIds).not.toContain("moonshotai/Kimi-K2.6");
     expect(modelIds).not.toContain("moonshotai/Kimi-K2.7-Code");
     expect(modelIds).not.toContain("deepseek-ai/DeepSeek-V4-Pro");
   });

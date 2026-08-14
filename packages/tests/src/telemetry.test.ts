@@ -118,7 +118,7 @@ describe("context trim alarm (telemetry + stderr)", () => {
 
     emitContextTrimAlarm({
       path: "retry",
-      model: "moonshotai/Kimi-K2.6",
+      model: "test/context-model",
       trimmedChars: 9001,
       inputTokens:
         parseTogetherContextLengthInputTokens(
@@ -130,7 +130,7 @@ describe("context trim alarm (telemetry + stderr)", () => {
     // The stderr warning is always-on (not debug-gated) and single-line.
     const written = stderrWrite.mock.calls.map((c: unknown[]) => String(c[0])).join("");
     expect(written).toContain("togetherlink: trimmed 9001 chars");
-    expect(written).toContain("moonshotai/Kimi-K2.6");
+    expect(written).toContain("test/context-model");
     expect(written).toContain("(retry path)");
     expect(written).toContain("if you see this often, report it");
 
@@ -140,7 +140,7 @@ describe("context trim alarm (telemetry + stderr)", () => {
     expect(body.event).toBe("context_trim");
     expect(body.contextTrim).toEqual({
       path: "retry",
-      model: "moonshotai/Kimi-K2.6",
+      model: "test/context-model",
       trimmedChars: 9001,
       inputTokens: 258001,
       contextWindow: 262144,

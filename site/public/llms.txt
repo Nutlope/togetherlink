@@ -125,17 +125,16 @@ Serverless prices below are in USD per 1 million tokens and come from Together's
 | --- | --- | ---: | ---: | ---: |
 | Kimi K3 (default) | `moonshotai/Kimi-K3` | $3.00 | $15.00 | $0.30 |
 | GLM 5.2 | `zai-org/GLM-5.2` | $1.40 | $4.40 | $0.26 |
-| Kimi K2.6 | `moonshotai/Kimi-K2.6` | $1.20 | $4.50 | $0.20 |
 | MiniMax M3 | `MiniMaxAI/MiniMax-M3` | $0.30 | $1.20 | $0.06 |
 | Qwen 3.7 Max | `Qwen/Qwen3.7-Max` | $1.25 | $3.75 | $0.125 |
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.8.0):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.8.1):
 
 ```
-togetherlink --model moonshotai/Kimi-K2.6 codex exec "task"
-togetherlink --model moonshotai/Kimi-K2.6 claude -p "task"
+togetherlink --model MiniMaxAI/MiniMax-M3 codex exec "task"
+togetherlink --model MiniMaxAI/MiniMax-M3 claude -p "task"
 togetherlink --main together-glm-5-2 claude -p "task"   # Claude matches alias OR id
 ```
 
@@ -145,7 +144,6 @@ Capabilities:
 
 - `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
 - `zai-org/GLM-5.2` — GLM 5.2. Text-only, 512K context, reasoning.
-- `moonshotai/Kimi-K2.6` — Kimi K2.6. Vision, 256K context, reasoning.
 - `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.
 - `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context.
 
