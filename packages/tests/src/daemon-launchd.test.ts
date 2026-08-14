@@ -116,6 +116,26 @@ describe("launchd plist generation", () => {
     await expect(readFile(launchdPlistPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  test("probes launchd with a bounded user-domain query and timeout", async () => {
+    childProcess.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _options: { encoding: string },
+        callback: (error: NodeJS.ErrnoException, stdout: string, stderr: string) => void,
+      ) => callback(new Error("unavailable"), "", ""),
+    );
+
+    await launchdStatus();
+
+    expect(childProcess.execFile).toHaveBeenCalledWith(
+      "launchctl",
+      ["print-disabled", expect.stringMatching(/^gui\/\d+$/)],
+      expect.objectContaining({ timeout: 3_000, maxBuffer: 256 * 1024 }),
+      expect.any(Function),
+    );
+  });
+
   test("ignores a stale plist when the launchd user session is unavailable", async () => {
     const plist = launchdPlistPath();
     await mkdir(path.dirname(plist), { recursive: true });

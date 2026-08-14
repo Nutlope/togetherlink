@@ -30,7 +30,10 @@ export type TestDaemon = {
   stop: () => Promise<void>;
 };
 
-export async function startTestDaemon(context: TestContext): Promise<TestDaemon> {
+export async function startTestDaemon(
+  context: TestContext,
+  envOverrides: NodeJS.ProcessEnv = {},
+): Promise<TestDaemon> {
   const port = await findOpenPort();
   const home = await mkdtemp(path.join(context.tmpDir, "daemon-home-"));
   let stderr = "";
@@ -41,6 +44,7 @@ export async function startTestDaemon(context: TestContext): Promise<TestDaemon>
       TOGETHERLINK_DEBUG: "1",
       TOGETHERLINK_HOME: home,
       TOGETHERLINK_PORT: String(port),
+      ...envOverrides,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

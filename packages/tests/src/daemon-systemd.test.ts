@@ -28,6 +28,7 @@ import {
   isLinux,
   systemdServicePath,
   systemdStatus,
+  uninstallSystemdService,
 } from "../../cli/src/lib/daemon/systemd.js";
 
 describe("systemd unit generation", () => {
@@ -133,6 +134,43 @@ describe("systemd unit generation", () => {
       message:
         "A systemd user session is unavailable in this Linux environment. TogetherLink will use portable process mode.",
     });
+  });
+
+  test("bounds the systemd user-session capability probe", async () => {
+    childProcess.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _options: { encoding: string },
+        callback: (error: NodeJS.ErrnoException, stdout: string, stderr: string) => void,
+      ) => callback(new Error("unavailable"), "", ""),
+    );
+
+    await systemdStatus();
+
+    expect(childProcess.execFile).toHaveBeenCalledWith(
+      "systemctl",
+      ["--user", "show-environment"],
+      expect.objectContaining({ timeout: 3_000 }),
+      expect.any(Function),
+    );
+  });
+
+  test("removes a stale service file when the systemd user session is unavailable", async () => {
+    const service = systemdServicePath();
+    await mkdir(path.dirname(service), { recursive: true });
+    await writeFile(service, "[Service]\nExecStart=false\n");
+    childProcess.execFile.mockImplementation(
+      (
+        _file: string,
+        _args: string[],
+        _options: { encoding: string },
+        callback: (error: NodeJS.ErrnoException, stdout: string, stderr: string) => void,
+      ) => callback(new Error("Failed to connect to bus"), "", ""),
+    );
+
+    await expect(uninstallSystemdService()).resolves.toMatchObject({ removed: true });
+    await expect(readFile(service, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("rolls back the service file when systemd installation fails after probing", async () => {

@@ -101,9 +101,10 @@ export function generateSystemdUnit(overrides?: {
 function promisifiedExecFile(
   file: string,
   args: string[],
+  options: { timeout?: number; maxBuffer?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { encoding: "utf8" }, (err, stdout, stderr) => {
+    execFile(file, args, { encoding: "utf8", ...options }, (err, stdout, stderr) => {
       if (err) {
         Object.assign(err, { stdout, stderr });
         reject(err as Error & { stdout: string; stderr: string });
@@ -122,7 +123,7 @@ function promisifiedExecFile(
  */
 async function systemdUserSessionAvailable(): Promise<boolean> {
   try {
-    await promisifiedExecFile("systemctl", ["--user", "show-environment"]);
+    await promisifiedExecFile("systemctl", ["--user", "show-environment"], { timeout: 3_000 });
     return true;
   } catch {
     return false;
@@ -253,6 +254,17 @@ export async function uninstallSystemdService(): Promise<{ removed: boolean; mes
     };
   }
 
+  if (!(await systemdUserSessionAvailable())) {
+    await unlink(svcPath);
+    await removeAutoInstallSentinels();
+    return {
+      removed: true,
+      message:
+        `Removed stale systemd user service: ${svcPath}\n` +
+        "The systemd user session is unavailable, so no running service could be stopped.",
+    };
+  }
+
   let stopped = false;
   try {
     await promisifiedExecFile("systemctl", ["--user", "stop", SYSTEMD_SERVICE_NAME]);
@@ -278,6 +290,17 @@ export async function uninstallSystemdService(): Promise<{ removed: boolean; mes
   }
 
   await unlink(svcPath);
+  await removeAutoInstallSentinels();
+
+  await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
+
+  return {
+    removed: true,
+    message: `Removed systemd user service: ${svcPath}\nThe TogetherLink daemon will no longer start automatically at login.`,
+  };
+}
+
+async function removeAutoInstallSentinels(): Promise<void> {
   for (const sentinel of [
     autoInstallSentinelPath(),
     ...PREVIOUS_AUTO_INSTALL_SENTINELS.map((name) => path.join(togetherlinkHome(), name)),
@@ -289,13 +312,6 @@ export async function uninstallSystemdService(): Promise<{ removed: boolean; mes
       // ignore
     }
   }
-
-  await promisifiedExecFile("systemctl", ["--user", "daemon-reload"]);
-
-  return {
-    removed: true,
-    message: `Removed systemd user service: ${svcPath}\nThe TogetherLink daemon will no longer start automatically at login.`,
-  };
 }
 
 export type SystemdStatus =

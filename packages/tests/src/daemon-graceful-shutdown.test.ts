@@ -60,4 +60,43 @@ describe("daemon graceful shutdown", () => {
       await daemon.stop();
     }
   });
+
+  test("force-closes a stuck request after the shutdown grace period", async () => {
+    const daemon = await startTestDaemon(context, { TOGETHERLINK_SHUTDOWN_GRACE_MS: "100" });
+    const request = http.request(`${daemon.url}/internal/sessions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": "2",
+      },
+    });
+    request.on("error", () => {});
+
+    await new Promise<void>((resolve, reject) => {
+      request.once("socket", (socket) => {
+        if (socket.readyState === "open") {
+          resolve();
+          return;
+        }
+        socket.once("connect", resolve);
+        socket.once("error", reject);
+      });
+    });
+    request.write("{");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    daemon.signal("SIGTERM");
+
+    try {
+      await Promise.race([
+        daemon.waitForExit(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("daemon did not honor shutdown deadline")), 2_000),
+        ),
+      ]);
+      expect(daemon.isRunning()).toBe(false);
+    } finally {
+      request.destroy();
+      await daemon.stop();
+    }
+  });
 });

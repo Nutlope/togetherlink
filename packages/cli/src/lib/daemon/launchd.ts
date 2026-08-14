@@ -174,9 +174,10 @@ export function generateLaunchdPlist(overrides?: {
 function promisifiedExecFile(
   file: string,
   args: string[],
+  options: { timeout?: number; maxBuffer?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { encoding: "utf8" }, (err, stdout, stderr) => {
+    execFile(file, args, { encoding: "utf8", ...options }, (err, stdout, stderr) => {
       if (err) {
         Object.assign(err, { stdout, stderr });
         reject(err as Error & { stdout: string; stderr: string });
@@ -189,7 +190,13 @@ function promisifiedExecFile(
 
 async function launchdUserSessionAvailable(): Promise<boolean> {
   try {
-    await promisifiedExecFile("launchctl", ["print", launchctlDomain()]);
+    // `print gui/$UID` dumps the entire domain and can exceed Node's default
+    // output buffer on busy Macs. `print-disabled` is a bounded query against
+    // the same user domain and is sufficient to prove the capability exists.
+    await promisifiedExecFile("launchctl", ["print-disabled", launchctlDomain()], {
+      timeout: 3_000,
+      maxBuffer: 256 * 1024,
+    });
     return true;
   } catch {
     return false;
