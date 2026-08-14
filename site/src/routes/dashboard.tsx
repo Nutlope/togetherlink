@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import WorldMap, { regions, type ISOCode } from "react-svg-worldmap";
 import { api } from "../../convex/_generated/api";
 import { parseInstallIdList } from "../../convex/dashboardFilters";
+import { createDashboardQueryAuthorization } from "../lib/dashboard-query-authorization";
 
 type DashboardSummary = Awaited<ReturnType<typeof fetchSummary>>;
 type DashboardData = NonNullable<DashboardSummary>;
@@ -61,7 +62,9 @@ async function fetchSummary(filters: DashboardFilters) {
     throw new Error("Internal user IDs are not configured");
   }
   const client = new ConvexHttpClient(url);
+  const authorization = await createDashboardQueryAuthorization("dashboard-summary");
   return client.query(api.analytics.getDashboardSummary, {
+    authorization,
     ...queryFilters,
     ...(hideInternal ? { excludedInstallIds: internalInstallIds } : {}),
   });
@@ -186,7 +189,8 @@ const saveInstallNickname = createServerFn({ method: "POST" })
     }
 
     const client = new ConvexHttpClient(url);
-    return client.mutation(api.analytics.setInstallNickname, payload);
+    const authorization = await createDashboardQueryAuthorization("set-install-nickname");
+    return client.mutation(api.analytics.setInstallNickname, { authorization, ...payload });
   });
 
 export const Route = createFileRoute("/dashboard")({

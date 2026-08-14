@@ -1,6 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { summarizeCliUsage } from "./cliUsageActivity";
+import {
+  dashboardAuthorizationValidator,
+  requireDashboardAuthorization,
+} from "./dashboardAuthorization";
 import { groupUniqueUsersByLatestCountry, summarizeLifecycleActivity } from "./dashboardActivity";
 import { filterDashboardEvents } from "./dashboardFilters";
 
@@ -103,11 +107,13 @@ function eventHasUsage(event: {
 
 export const getCliUsageSummary = query({
   args: {
+    authorization: dashboardAuthorizationValidator,
     range: v.union(v.literal("24h"), v.literal("7d")),
     latestVersion: v.string(),
     excludedInstallIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    await requireDashboardAuthorization("cli-usage-summary", args.authorization);
     const since = Date.now() - (args.range === "24h" ? DAY_MS : 7 * DAY_MS);
     const hiddenInstallIds = new Set(
       (args.excludedInstallIds ?? []).map((installId) => installId.trim()).filter(Boolean),
@@ -131,6 +137,7 @@ export const getCliUsageSummary = query({
 
 export const getDashboardSummary = query({
   args: {
+    authorization: dashboardAuthorizationValidator,
     range: v.optional(
       v.union(v.literal("24h"), v.literal("7d"), v.literal("30d"), v.literal("lifetime")),
     ),
@@ -139,6 +146,7 @@ export const getDashboardSummary = query({
     excludedInstallIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    await requireDashboardAuthorization("dashboard-summary", args.authorization);
     const range = args.range ?? "30d";
     const excludedInstallId = args.excludedInstallId?.trim() || undefined;
     const hiddenInstallIds = new Set(
@@ -565,10 +573,12 @@ export const getDashboardSummary = query({
 
 export const setInstallNickname = mutation({
   args: {
+    authorization: dashboardAuthorizationValidator,
     installId: v.string(),
     nickname: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireDashboardAuthorization("set-install-nickname", args.authorization);
     const installId = args.installId.trim();
     const nickname = args.nickname.trim();
     if (!installId) {

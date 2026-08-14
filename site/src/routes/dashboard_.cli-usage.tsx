@@ -5,6 +5,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import { parseInstallIdList } from "../../convex/dashboardFilters";
+import { createDashboardQueryAuthorization } from "../lib/dashboard-query-authorization";
 
 type CliUsageRange = "24h" | "7d";
 type CliUsageFilters = {
@@ -52,7 +53,9 @@ async function fetchCliUsageSummary(filters: CliUsageFilters) {
     throw new Error("Internal user IDs are not configured");
   }
   const client = new ConvexHttpClient(url);
+  const authorization = await createDashboardQueryAuthorization("cli-usage-summary");
   return client.query(api.analytics.getCliUsageSummary, {
+    authorization,
     ...queryFilters,
     ...(hideInternal ? { excludedInstallIds: internalInstallIds } : {}),
   });
