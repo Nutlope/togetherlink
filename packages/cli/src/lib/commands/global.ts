@@ -17,6 +17,7 @@ export function printHelp() {
 
 Usage:
   togetherlink configure
+  togetherlink update           update to the latest release
   togetherlink whoami
   togetherlink chatgpt [--model <model>] [--restore]  (alpha)
   togetherlink daemon install    enable daemon auto-start at login (macOS/Linux)

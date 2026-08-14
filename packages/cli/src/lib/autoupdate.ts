@@ -7,8 +7,9 @@
  * Each startup also fills in wrapper commands added since the original install.
  *
  * The running process keeps the old inode, so the *next* invocation is the new
- * version — we never hot-swap mid-execution. Every failure path is swallowed:
- * an update problem must never block or crash the user's actual command.
+ * version — we never hot-swap mid-execution. Background-update failures are
+ * swallowed so they never block the user's actual command; explicit update
+ * requests surface failures instead.
  */
 
 import { constants } from "node:fs";
@@ -29,6 +30,11 @@ const OVERALL_TIMEOUT_MS = 10_000;
 const FETCH_TIMEOUT_MS = 5_000;
 
 type Manifest = { version: string; url?: string };
+
+export type SelfUpdateResult =
+  | { status: "updated"; version: string }
+  | { status: "up-to-date"; version: string }
+  | { status: "not-installed"; version: string };
 
 /**
  * Where the install lives. `TOGETHERLINK_HOME` (when set) is the `.togetherlink`
@@ -251,6 +257,34 @@ async function downloadTo(url: string, dest: string): Promise<void> {
   const tmp = `${dest}.new-${process.pid}`;
   await writeFile(tmp, buf, { mode: 0o644 });
   await rename(tmp, dest);
+}
+
+/**
+ * Check immediately for the latest release and install it when available.
+ * Unlike the background updater, this bypasses the throttle and surfaces
+ * network/download failures to the caller because the user explicitly asked
+ * for an update.
+ */
+export async function forceSelfUpdate(): Promise<SelfUpdateResult> {
+  if (!isInstalledBundle()) {
+    return { status: "not-installed", version: VERSION };
+  }
+  try {
+    await ensureInstalledWrappers();
+  } catch {
+    // Wrapper repair is best-effort and should not prevent the bundle update.
+  }
+
+  const manifest = await withTimeout(fetchManifest(), OVERALL_TIMEOUT_MS);
+  if (!isNewer(manifest.version, VERSION)) {
+    return { status: "up-to-date", version: VERSION };
+  }
+
+  const dest = installedBundlePath();
+  const url = manifest.url ?? `${UPDATE_ORIGIN}/togetherlink.js`;
+  await downloadTo(url, dest);
+  await touchThrottle();
+  return { status: "updated", version: manifest.version };
 }
 
 /**

@@ -10,7 +10,7 @@ import {
   resolveStoredExaApiKey,
   resolveStoredApiKey,
 } from "../lib/global-config.js";
-import { maybeSelfUpdate } from "../lib/autoupdate.js";
+import { forceSelfUpdate, maybeSelfUpdate } from "../lib/autoupdate.js";
 import { getInstallId, sendTelemetryEvent } from "../lib/telemetry.js";
 import { VERSION } from "../lib/version.js";
 import { maybeAutoInstallService } from "../lib/daemon/platform-auto-start.js";
@@ -163,6 +163,24 @@ function isInteractive(): boolean {
 }
 
 async function main() {
+  // An explicit update must bypass the background updater's hourly throttle
+  // and report failures. Keep it before project .env loading so a repository
+  // cannot redirect the update manifest or install directory.
+  if (process.argv[2] === "update") {
+    const result = await forceSelfUpdate();
+    if (result.status === "not-installed") {
+      throw new Error(
+        "This copy is not managed by the TogetherLink installer and cannot self-update.",
+      );
+    }
+    if (result.status === "up-to-date") {
+      console.log(`togetherlink v${result.version} is already the latest version.`);
+      return;
+    }
+    console.log(`togetherlink: updated to v${result.version}.`);
+    return;
+  }
+
   // Self-update first (throttled, bounded, never throws). Placed before arg
   // parsing so even `togetherlink help` keeps an install current, but it's a
   // no-op unless this is the installed bundle and the throttle window passed.

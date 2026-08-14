@@ -1,8 +1,8 @@
 import { mkdtemp, mkdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
-import { ensureInstalledWrappers } from "../../cli/src/lib/autoupdate.js";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { ensureInstalledWrappers, forceSelfUpdate } from "../../cli/src/lib/autoupdate.js";
 
 describe("autoupdate installed wrappers", () => {
   const cleanup: string[] = [];
@@ -40,6 +40,49 @@ describe("autoupdate installed wrappers", () => {
       expect(await readlink(path.join(pathDir, "tprime"))).toBe(path.join(binDir, "tprime"));
       expect((await stat(path.join(binDir, "tdeepseek"))).mode & 0o100).toBe(0o100);
       expect(await readlink(path.join(pathDir, "tdeepseek"))).toBe(path.join(binDir, "tdeepseek"));
+    }
+  });
+
+  test("force update bypasses the throttle and replaces an older installed bundle", async () => {
+    const installDir = await mkdtemp(path.join(tmpdir(), "togetherlink-force-update-"));
+    cleanup.push(installDir);
+    const binDir = path.join(installDir, "bin");
+    const bundlePath = path.join(binDir, "togetherlink.js");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(bundlePath, "old bundle");
+    await writeFile(path.join(installDir, ".update-check"), "");
+
+    const originalArgv1 = process.argv[1];
+    const originalHome = process.env.TOGETHERLINK_HOME;
+    const originalPath = process.env.PATH;
+    process.argv[1] = bundlePath;
+    process.env.TOGETHERLINK_HOME = installDir;
+    process.env.PATH = binDir;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ version: "99.0.0", url: "https://example.test/togetherlink.js" }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("new bundle", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(forceSelfUpdate()).resolves.toEqual({
+        status: "updated",
+        version: "99.0.0",
+      });
+      expect(await readFile(bundlePath, "utf8")).toBe("new bundle");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      process.argv[1] = originalArgv1;
+      if (originalHome === undefined) delete process.env.TOGETHERLINK_HOME;
+      else process.env.TOGETHERLINK_HOME = originalHome;
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      vi.unstubAllGlobals();
     }
   });
 });

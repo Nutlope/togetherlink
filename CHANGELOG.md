@@ -3,7 +3,12 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
-## Unreleased
+## 0.7.15 - 2026-08-14
+
+### Added
+
+- Added `togetherlink update` to immediately check for and install the latest release, bypassing
+  the background updater's hourly throttle while preserving active proxy sessions.
 
 ### Changed
 
@@ -13,6 +18,7 @@ version 0.6.5; earlier release history remains available in Git.
 ### Tests
 
 - Added deterministic coverage for the collapsed and expanded interactive launcher choices.
+- Added deterministic coverage for forced bundle updates and throttle bypass behavior.
 
 ## 0.7.14 - 2026-08-13
 
