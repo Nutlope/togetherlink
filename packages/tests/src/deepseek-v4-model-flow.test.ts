@@ -16,13 +16,15 @@ describe("DeepSeek V4 Flash curated model flow", () => {
     expect(resolveClaudeModel(MODEL_ID).definition).toBe(DEEPSEEK_V4_FLASH);
     expect(resolveCodexModel(MODEL_ID).definition).toBe(DEEPSEEK_V4_FLASH);
     expect(CLAUDE_SUPPORTED_MODELS.map((model) => model.definition.id)).toContain(MODEL_ID);
-    expect(codexModelCatalog().models).toContainEqual(
+    const codexModels = codexModelCatalog().models;
+    expect(codexModels).toContainEqual(
       expect.objectContaining({
         slug: MODEL_ID,
         context_window: 1_048_576,
         input_modalities: ["text"],
       }),
     );
+    expect(codexModels.at(-1)?.slug).toBe(MODEL_ID);
   });
 
   test("appears in every generated direct-harness model catalog", () => {
@@ -37,10 +39,13 @@ describe("DeepSeek V4 Flash curated model flow", () => {
         reasoningEfforts: { low: "low", high: "high", max: "max" },
       }),
     );
+    expect(deepseekModels.at(-1)?.id).toBe(MODEL_ID);
 
-    expect(buildGrokModelCatalog().data).toContainEqual(
+    const grokModels = buildGrokModelCatalog().data;
+    expect(grokModels).toContainEqual(
       expect.objectContaining({ id: MODEL_ID, context_window: 1_048_576 }),
     );
+    expect(grokModels.at(-1)?.id).toBe(MODEL_ID);
 
     const opencode = buildOpencodeConfigJson({ modelId: MODEL_ID });
     const opencodeProvider = opencode.provider?.togetherai as
@@ -53,6 +58,7 @@ describe("DeepSeek V4 Flash curated model flow", () => {
       limit: { context: 1_048_576, output: 393_216 },
     });
     expect(opencodeProvider?.whitelist).toContain(MODEL_ID);
+    expect(opencodeProvider?.whitelist?.at(-1)).toBe(MODEL_ID);
 
     const piConfig = JSON.parse(buildPiModelsJson("test-key")) as {
       providers: { together: { models: Array<{ id: string }> } };
@@ -60,8 +66,10 @@ describe("DeepSeek V4 Flash curated model flow", () => {
     expect(piConfig.providers.together.models).toContainEqual(
       expect.objectContaining({ id: MODEL_ID }),
     );
+    expect(piConfig.providers.together.models.at(-1)?.id).toBe(MODEL_ID);
 
-    expect(buildPrimeProviderConfig().models).toContainEqual(
+    const primeModels = buildPrimeProviderConfig().models;
+    expect(primeModels).toContainEqual(
       expect.objectContaining({
         id: MODEL_ID,
         contextWindow: 1_048_576,
@@ -69,5 +77,6 @@ describe("DeepSeek V4 Flash curated model flow", () => {
         input: ["text"],
       }),
     );
+    expect(primeModels.at(-1)?.id).toBe(MODEL_ID);
   });
 });

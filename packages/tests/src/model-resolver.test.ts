@@ -85,6 +85,7 @@ describe("resolveModelByKeys", () => {
 describe("shared harness default", () => {
   it("exposes DeepSeek V4 Flash with verified Together and DeepSeek metadata", () => {
     expect(SELECTABLE_MODELS).toContain(DEEPSEEK_V4_FLASH);
+    expect(SELECTABLE_MODELS.at(-1)).toBe(DEEPSEEK_V4_FLASH);
     expect(DEEPSEEK_V4_FLASH).toMatchObject({
       id: "deepseek-ai/DeepSeek-V4-Flash-0731",
       name: "DeepSeek V4 Flash 0731",

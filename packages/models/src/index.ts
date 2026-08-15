@@ -258,10 +258,10 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
  */
 const CURATED_MODELS: readonly ModelDefinition[] = [
   KIMI_K3,
-  DEEPSEEK_V4_FLASH,
   GLM_5_2,
   MINIMAX_M3,
   QWEN_3_7_MAX,
+  DEEPSEEK_V4_FLASH,
 ];
 
 export const SELECTABLE_MODELS: readonly ModelDefinition[] = [

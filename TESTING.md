@@ -87,8 +87,8 @@ Pick a backend for one launch:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink --main together-glm-5-2 claude
 pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k3 claude
-pnpm -F @togetherlink/cli exec togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 claude
 pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
+pnpm -F @togetherlink/cli exec togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 claude
 ```
 
 ### Grok Build
