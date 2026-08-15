@@ -11,7 +11,7 @@ const guides = [
     cover: "together-prime" as GuideCoverVariant,
     title: "Run Prime Agent on Together AI models",
     description:
-      "Keep Prime's persistent REPL, subagents, and long-running sessions while using the four curated Together models.",
+      "Keep Prime's persistent REPL, subagents, and long-running sessions while using the five curated Together models.",
     meta: "Prime Agent · direct provider · 8 min",
   },
   {
@@ -35,7 +35,7 @@ const guides = [
     cover: "together-codex" as GuideCoverVariant,
     title: "Run open models in Codex CLI without replacing your config",
     description:
-      "Connect Codex to Together AI, choose between four current open models, and keep provider and model settings scoped to each run.",
+      "Connect Codex to Together AI, choose between five curated open models, and keep provider and model settings scoped to each run.",
     meta: "Codex CLI · model picker · 10 min",
   },
   {

@@ -87,7 +87,7 @@ Pick a backend for one launch:
 ```bash
 pnpm -F @togetherlink/cli exec togetherlink --main together-glm-5-2 claude
 pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k3 claude
-pnpm -F @togetherlink/cli exec togetherlink --main together-kimi-k2-7-code claude
+pnpm -F @togetherlink/cli exec togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 claude
 pnpm -F @togetherlink/cli exec togetherlink --main Qwen/Qwen3.7-Max claude
 ```
 
@@ -370,7 +370,7 @@ try {
 '
 ```
 
-Expected result for `togetherlink codex-app` is seven visible models, starting with `moonshotai/Kimi-K3` and display name `Kimi K3 · default · vision · 1M`. If this probe is correct but Desktop still shows stale or missing models, the bug is in the running Desktop process or frontend state, not the Codex app-server model manager.
+Expected result for `togetherlink codex-app` includes the five curated Together models, starting with `moonshotai/Kimi-K3`, alongside the native models available to the signed-in account. If this probe is correct but Desktop still shows stale or missing models, the bug is in the running Desktop process or frontend state, not the Codex app-server model manager.
 
 Also verify the active Togetherlink daemon session route returns the same catalog without calling Together:
 

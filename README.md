@@ -44,6 +44,7 @@ To pin a model for one run, put the TogetherLink flag before the harness name:
 ```bash
 togetherlink --model zai-org/GLM-5.2 claude -p "task"
 togetherlink --model zai-org/GLM-5.2 codex exec "task"
+togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 codex exec "task"
 ```
 
 Arguments after `claude`, `codex`, or another harness name belong to the underlying agent CLI, so

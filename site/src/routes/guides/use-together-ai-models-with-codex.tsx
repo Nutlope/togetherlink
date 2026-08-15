@@ -16,6 +16,11 @@ import {
 
 const models = [
   {
+    name: "DeepSeek V4 Flash",
+    id: "deepseek-ai/DeepSeek-V4-Flash-0731",
+    note: "Fast text reasoning model with a 1M context window.",
+  },
+  {
     name: "Kimi K3",
     id: "moonshotai/Kimi-K3",
     note: "Default vision coding model with a 1M context window.",

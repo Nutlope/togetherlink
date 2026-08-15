@@ -14,6 +14,11 @@
  *    models.dev PR github.com/anomalyco/models.dev/pull/2663 (output 164000).
  *  - Kimi K3 and vision models use Together's published model pricing and
  *    capabilities.
+ *  - DeepSeek V4 Flash: Together's authenticated catalog and serverless model
+ *    table (pricing, context, chat/tool support) plus DeepSeek's model card
+ *    (text modality, reasoning efforts, temperature, output guidance).
+ *    https://docs.together.ai/docs/serverless-models
+ *    https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731
  */
 
 export const TOGETHER_BASE_URL = "https://api.together.ai/v1";
@@ -168,6 +173,30 @@ export const QWEN_3_7_MAX: ModelDefinition = {
 };
 
 /**
+ * DeepSeek V4 Flash 0731 — DeepSeek's fast agentic V4 release. Together's
+ * authenticated catalog reports the exact chat id, 1,048,576-token context,
+ * and $0.14/$0.28 pricing with $0.03 cached input. Together documents function
+ * calling; DeepSeek documents low/high/max reasoning and recommends a 384K
+ * maximum output length for high/max reasoning. No provider alias is
+ * documented, so harnesses use the exact Together id.
+ */
+export const DEEPSEEK_V4_FLASH: ModelDefinition = {
+  id: "deepseek-ai/DeepSeek-V4-Flash-0731",
+  name: "DeepSeek V4 Flash 0731",
+  anthropicAlias: null,
+  cost: { input: 0.14, output: 0.28, cache_read: 0.03 },
+  limit: { context: 1_048_576, output: 393_216 },
+  attachment: false,
+  reasoning: true,
+  reasoningEfforts: ["low", "high", "max"],
+  defaultReasoningEffort: "high",
+  temperature: true,
+  tool_call: true,
+  codexAutoCompactTokenLimit: 900_000,
+  modalities: { input: ["text"], output: ["text"] },
+};
+
+/**
  * Capabilities string Claude Code reads from ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES.
  * Mirrors what GLM-5.2 supports on Together: adjustable reasoning effort
  * (incl. xhigh/max), thinking, adaptive thinking, and interleaved thinking.
@@ -227,7 +256,13 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
  * Sources: Together changelog (ids/pricing/context, June 2026) +
  * models.dev (output limits). See per-model doc comments for specifics.
  */
-const CURATED_MODELS: readonly ModelDefinition[] = [KIMI_K3, GLM_5_2, MINIMAX_M3, QWEN_3_7_MAX];
+const CURATED_MODELS: readonly ModelDefinition[] = [
+  KIMI_K3,
+  DEEPSEEK_V4_FLASH,
+  GLM_5_2,
+  MINIMAX_M3,
+  QWEN_3_7_MAX,
+];
 
 export const SELECTABLE_MODELS: readonly ModelDefinition[] = [
   DEFAULT_MODEL,
