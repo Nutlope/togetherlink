@@ -9,19 +9,13 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
+import { CODEX_SUPPORTED_MODELS, type CodexModelSelection } from "../codex/defaults.js";
 import { HARNESS } from "../harness.js";
-import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
+import { defineHarness, type HarnessRunContext, type HarnessResult } from "../harness-types.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import {
-  resolveTogetherApiKey,
-  resolveTogetherBaseUrl,
-  TOGETHER_BASE_URL,
-} from "../together-core.js";
+import { TOGETHER_BASE_URL } from "../together-core.js";
 
 const PI_PROVIDER_ID = "together";
-const PI_SUPPORTED_MODELS = CODEX_SUPPORTED_MODELS.map((model) => model.id).join(",");
-
 const VALUE_FLAGS = new Set(["--api-key", "--provider", "--model", "--models"]);
 
 function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
@@ -48,8 +42,11 @@ function piArgsWithoutTogetherlinkOverrides(args: string[]): string[] {
   return sanitized;
 }
 
-export function buildPiModelsJson(apiKey: string, baseUrl = TOGETHER_BASE_URL): string {
-  const models = CODEX_SUPPORTED_MODELS.map(({ definition }) => ({
+export function buildPiModelsJson(
+  baseUrl = TOGETHER_BASE_URL,
+  modelSelections: readonly CodexModelSelection[] = CODEX_SUPPORTED_MODELS,
+): string {
+  const models = modelSelections.map(({ definition }) => ({
     id: definition.id,
     name: definition.name,
     reasoning: definition.reasoning,
@@ -68,7 +65,6 @@ export function buildPiModelsJson(apiKey: string, baseUrl = TOGETHER_BASE_URL): 
     {
       providers: {
         [PI_PROVIDER_ID]: {
-          apiKey,
           baseUrl,
           models,
         },
@@ -79,8 +75,12 @@ export function buildPiModelsJson(apiKey: string, baseUrl = TOGETHER_BASE_URL): 
   )}\n`;
 }
 
-function writePiModelsJson(agentDir: string, apiKey: string, baseUrl: string): void {
-  writeFileSync(join(agentDir, "models.json"), buildPiModelsJson(apiKey, baseUrl), "utf8");
+function writePiModelsJson(
+  agentDir: string,
+  baseUrl: string,
+  models: readonly CodexModelSelection[],
+): void {
+  writeFileSync(join(agentDir, "models.json"), buildPiModelsJson(baseUrl, models), "utf8");
 }
 
 // Pi resolves its managed tools (fd, rg) from "<agent dir>/bin". togetherlink
@@ -141,33 +141,29 @@ export default defineHarness({
   id: HARNESS.PI,
   label: "Pi Code",
 
-  async run(ctx: HarnessContext): Promise<HarnessResult> {
-    const apiKey = await resolveTogetherApiKey({
-      apiKey: ctx.apiKey,
-      home: ctx.home,
-    });
-    if (!apiKey) {
-      throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
-    }
-
+  async run(ctx: HarnessRunContext): Promise<HarnessResult> {
     const agentDir = mkdtempSync(join(tmpdir(), "togetherlink-pi-"));
     const userHome = ctx.home || homedir();
     const sessionDir =
       process.env.PI_CODING_AGENT_SESSION_DIR ?? join(userHome, ".pi", "agent", "sessions");
-    const baseUrl = resolveTogetherBaseUrl();
-    writePiModelsJson(agentDir, apiKey, baseUrl);
+    const baseUrl = ctx.baseUrl;
+    const selectedModel = {
+      id: ctx.selectedModel.definition.id,
+      definition: ctx.selectedModel.definition,
+    };
+    const models = [...CODEX_SUPPORTED_MODELS];
+    if (!models.some((model) => model.id === selectedModel.id)) models.push(selectedModel);
+    const supportedModels = models.map((model) => model.id).join(",");
+    writePiModelsJson(agentDir, baseUrl, models);
     const userBinDir = join(userHome, ".pi", "agent", "bin");
     seedPiManagedTools(agentDir, userBinDir);
-    const selectedModel = resolveCodexModel(ctx.main);
     const args = [
       "--provider",
       PI_PROVIDER_ID,
       "--model",
       selectedModel.id,
       "--models",
-      PI_SUPPORTED_MODELS,
-      "--api-key",
-      apiKey,
+      supportedModels,
       "--no-approve",
       "--no-extensions",
       "--no-skills",
@@ -179,7 +175,7 @@ export default defineHarness({
     if (process.env.TOGETHERLINK_DEBUG === "1") {
       process.stderr.write(`[togetherlink pi] provider: ${PI_PROVIDER_ID}\n`);
       process.stderr.write(`[togetherlink pi] model: ${selectedModel.id}\n`);
-      process.stderr.write(`[togetherlink pi] models: ${PI_SUPPORTED_MODELS}\n`);
+      process.stderr.write(`[togetherlink pi] models: ${supportedModels}\n`);
       process.stderr.write(`[togetherlink pi] temp config dir: ${agentDir}\n`);
       process.stderr.write(`[togetherlink pi] session dir: ${sessionDir}\n`);
     }
@@ -195,7 +191,7 @@ export default defineHarness({
           ...process.env,
           PI_CODING_AGENT_DIR: agentDir,
           PI_CODING_AGENT_SESSION_DIR: sessionDir,
-          TOGETHER_API_KEY: apiKey,
+          TOGETHER_API_KEY: ctx.apiKey,
         },
         stdio: "inherit",
       },

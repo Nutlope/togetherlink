@@ -1,4 +1,3 @@
-import { resolveCodexModel } from "../codex/defaults.js";
 import {
   buildDeepseekLaunchSpec,
   resolveDeepseekPatchPath,
@@ -7,25 +6,31 @@ import {
 import { HARNESS } from "../harness.js";
 import { defineHarness } from "../harness-types.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
+import { CODEX_SUPPORTED_MODELS } from "../codex/defaults.js";
 
 export default defineHarness({
   id: HARNESS.DEEPSEEK,
   label: "DeepSeek Harness (alpha)",
 
   async run(ctx) {
-    const apiKey = await resolveTogetherApiKey({ apiKey: ctx.apiKey, home: ctx.home });
-    if (!apiKey) {
-      throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
-    }
-
-    const selectedModel = resolveCodexModel(ctx.main);
-    const baseUrl = resolveTogetherBaseUrl();
+    const selectedModel = {
+      id: ctx.selectedModel.definition.id,
+      definition: ctx.selectedModel.definition,
+    };
+    const baseUrl = ctx.baseUrl;
+    const models = [...CODEX_SUPPORTED_MODELS];
+    if (!models.some((model) => model.id === selectedModel.id)) models.push(selectedModel);
     const nativeDeepseekApiKey = process.env.DEEPSEEK_API_KEY;
-    const patchPath = resolveDeepseekPatchPath(ctx.home, selectedModel, baseUrl, process.env);
-    await writeDeepseekPatch(patchPath, selectedModel, baseUrl, nativeDeepseekApiKey);
+    const patchPath = resolveDeepseekPatchPath(
+      ctx.home,
+      selectedModel,
+      baseUrl,
+      process.env,
+      models,
+    );
+    await writeDeepseekPatch(patchPath, selectedModel, baseUrl, nativeDeepseekApiKey, models);
     const launch = buildDeepseekLaunchSpec({
-      apiKey,
+      apiKey: ctx.apiKey,
       baseUrl,
       patchPath,
       passthrough: ctx.passthrough ?? [],

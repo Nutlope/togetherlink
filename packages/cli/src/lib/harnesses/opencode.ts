@@ -1,11 +1,9 @@
-import { OPENCODE_DEFAULT_MODEL } from "../opencode/defaults.js";
 import { buildOpencodeConfigJson, buildOpencodeEnv } from "../opencode/core.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
 import { streamTurnTimeoutMs } from "../together-stream.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 import { defineHarness } from "../harness-types.js";
 import { HARNESS } from "../harness.js";
-import type { HarnessContext, HarnessResult } from "../harness-types.js";
+import type { HarnessRunContext, HarnessResult } from "../harness-types.js";
 
 /**
  * Strips any `--model`/`-m`/`--model=` from passthrough args so a user can't
@@ -35,24 +33,18 @@ export default defineHarness({
   id: HARNESS.OPENCODE,
   label: "OpenCode",
 
-  async run(ctx: HarnessContext): Promise<HarnessResult> {
-    const apiKey = await resolveTogetherApiKey({
-      apiKey: ctx.apiKey,
-      home: ctx.home,
-    });
-    if (!apiKey) {
-      throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
-    }
-
-    const modelId = ctx.main ?? OPENCODE_DEFAULT_MODEL;
-    const baseUrl = resolveTogetherBaseUrl();
+  async run(ctx: HarnessRunContext): Promise<HarnessResult> {
+    const selectedModel = ctx.selectedModel.definition;
+    const modelId = selectedModel.id;
+    const baseUrl = ctx.baseUrl;
     const timeoutMs = streamTurnTimeoutMs();
     const configJson = buildOpencodeConfigJson({
       modelId,
+      modelDefinition: selectedModel,
       baseUrl,
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
-    const env = buildOpencodeEnv({ apiKey, configJson });
+    const env = buildOpencodeEnv({ apiKey: ctx.apiKey, configJson });
 
     if (process.env.TOGETHERLINK_DEBUG === "1") {
       process.stderr.write(`[togetherlink opencode] custom model: ${modelId}\n`);

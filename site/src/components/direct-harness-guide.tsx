@@ -39,6 +39,7 @@ export type DirectHarnessGuideConfig = {
 
 const models = [
   ["Kimi K3", "moonshotai/Kimi-K3", "Default · vision · 1M context"],
+  ["DeepSeek V4 Flash", "deepseek-ai/DeepSeek-V4-Flash-0731", "Text · reasoning · 1M context"],
   ["GLM 5.2", "zai-org/GLM-5.2", "Text · 512K context"],
   ["MiniMax M3", "MiniMaxAI/MiniMax-M3", "Vision · 512K context"],
   ["Qwen 3.7 Max", "Qwen/Qwen3.7-Max", "Vision · 1M context"],
@@ -197,11 +198,16 @@ export function DirectHarnessGuidePage(config: DirectHarnessGuideConfig) {
             Curated model catalog
           </div>
           <h2 id="models-heading" className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]">
-            Four models, with Kimi K3 as the default
+            Five models, with Kimi K3 as the default
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
             To override the model, put <code>--model</code> before the harness name. Arguments after
             the harness name belong to the underlying tool.
+          </p>
+          <p className="mt-3 text-[14px] leading-relaxed text-muted">
+            You can also pass an exact, newly released Together chat model ID. TogetherLink
+            validates non-curated IDs against the authenticated catalog for that launch; they do not
+            enter the normal picker or replace the default.
           </p>
           <div className="mt-6 border-t border-line-strong">
             {models.map(([name, id, note]) => (

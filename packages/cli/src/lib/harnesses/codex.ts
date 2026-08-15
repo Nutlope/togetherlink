@@ -1,28 +1,19 @@
-import { resolveCodexModel } from "../codex/defaults.js";
 import { runCodexTogether } from "../codex/core.js";
 import { HARNESS } from "../harness.js";
-import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
+import { defineHarness, type HarnessRunContext, type HarnessResult } from "../harness-types.js";
 
 export default defineHarness({
   id: HARNESS.CODEX,
   label: "Codex",
 
-  async run(ctx: HarnessContext): Promise<HarnessResult> {
-    const apiKey = await resolveTogetherApiKey({
-      apiKey: ctx.apiKey,
-      home: ctx.home,
-    });
-    if (!apiKey) {
-      throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
-    }
-
-    const selectedModel = resolveCodexModel(ctx.main);
+  async run(ctx: HarnessRunContext): Promise<HarnessResult> {
+    const selectedModel = ctx.selectedModel.definition;
     const result = await runCodexTogether({
-      apiKey,
-      baseUrl: resolveTogetherBaseUrl(),
+      apiKey: ctx.apiKey,
+      baseUrl: ctx.baseUrl,
       home: ctx.home,
       modelId: selectedModel.id,
+      modelDefinition: selectedModel,
       ...(ctx.passthrough ? { args: ctx.passthrough } : {}),
     });
     if (typeof result.status === "number") {

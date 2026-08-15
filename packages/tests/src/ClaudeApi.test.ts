@@ -2,9 +2,9 @@ import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  DEEPSEEK_V4_FLASH,
   GLM_5_2,
   KIMI_K3,
-  MINIMAX_M3,
   QWEN_3_7_MAX,
   SELECTABLE_MODELS,
   type ModelDefinition,
@@ -81,13 +81,13 @@ describe("Claude proxy compatibility API", () => {
       env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
     ];
     expect(tierModels).toEqual([
-      GLM_5_2.anthropicAlias,
+      `${DEEPSEEK_V4_FLASH.id}[1m]`,
       `${KIMI_K3.anthropicAlias}[1m]`,
-      MINIMAX_M3.id,
+      GLM_5_2.anthropicAlias,
       EXPECTED_HAIKU_MODEL_ID,
     ]);
     expect(new Set(tierModels).size).toBe(tierModels.length);
-    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME).toBe(GLM_5_2.name);
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME).toBe(DEEPSEEK_V4_FLASH.name);
     expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION).not.toContain("Fable");
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION).toBeUndefined();
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBeUndefined();

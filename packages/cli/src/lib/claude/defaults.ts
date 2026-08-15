@@ -65,7 +65,9 @@ export function resolveClaudeModel(value: string | undefined): ClaudeModelSelect
     const expected = CLAUDE_SUPPORTED_MODELS.map(
       (model) => `${model.alias} (${model.definition.id})`,
     ).join(", ");
-    throw new Error(`Unsupported Claude model "${value}". Expected one of: ${expected}.`);
+    throw new Error(
+      `Model "${value}" is not in TogetherLink's curated model catalog. Curated models: ${expected}. Explicit custom Together chat ids must be validated by the top-level --model launcher path.`,
+    );
   }
   return { alias: found.anthropicAlias ?? found.id, definition: found };
 }

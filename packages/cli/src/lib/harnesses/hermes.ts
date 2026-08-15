@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { CODEX_SUPPORTED_MODELS, resolveCodexModel } from "../codex/defaults.js";
+import { CODEX_SUPPORTED_MODELS } from "../codex/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness } from "../harness-types.js";
 import {
@@ -9,30 +9,25 @@ import {
   resolveHermesCommand,
 } from "../hermes/core.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 
 export default defineHarness({
   id: HARNESS.HERMES,
   label: "Hermes Agent",
   run: async (ctx) => {
     const command = resolveHermesCommand(ctx.passthrough ?? []);
-    const apiKey = await resolveTogetherApiKey({ apiKey: ctx.apiKey, home: ctx.home });
-    if (!apiKey) {
-      throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
-    }
-
-    const selectedModel = resolveCodexModel(ctx.main);
+    const selectedModel = ctx.selectedModel.definition;
     const nativeHermesHome = process.env.HERMES_HOME?.trim() || join(ctx.home, ".hermes");
-    const baseUrl = resolveTogetherBaseUrl();
+    const baseUrl = ctx.baseUrl;
+    const modelIds = CODEX_SUPPORTED_MODELS.map((model) => model.id);
+    if (!modelIds.includes(selectedModel.id)) modelIds.push(selectedModel.id);
     const hermesHome = createHermesHomeOverlay(nativeHermesHome, {
-      apiKey,
       baseUrl,
-      modelIds: CODEX_SUPPORTED_MODELS.map((model) => model.id),
+      modelIds,
     });
     const launch = buildHermesLaunchSpec({
       mode: command.mode,
       modelId: selectedModel.id,
-      apiKey,
+      apiKey: ctx.apiKey,
       baseUrl,
       hermesHome,
       passthrough: command.passthrough,

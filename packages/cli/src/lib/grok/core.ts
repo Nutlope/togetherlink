@@ -35,10 +35,15 @@ export type GrokModelCatalog = {
  * while Together's `/models` endpoint returns the array directly. This is
  * metadata only; every completion still goes straight to `baseUrl`.
  */
-export function buildGrokModelCatalog(baseUrl = TOGETHER_BASE_URL): GrokModelCatalog {
+export function buildGrokModelCatalog(
+  baseUrl = TOGETHER_BASE_URL,
+  additionalModels: readonly ModelDefinition[] = [],
+): GrokModelCatalog {
+  const models = new Map(SELECTABLE_MODELS.map((model) => [model.id, model]));
+  for (const model of additionalModels) models.set(model.id, model);
   return {
     object: "list",
-    data: SELECTABLE_MODELS.map((model) => ({
+    data: [...models.values()].map((model) => ({
       id: model.id,
       model: model.id,
       name: `Together AI · ${model.name}`,
@@ -59,8 +64,9 @@ export type GrokModelCatalogServer = {
 
 export async function startGrokModelCatalogServer(
   baseUrl = TOGETHER_BASE_URL,
+  additionalModels: readonly ModelDefinition[] = [],
 ): Promise<GrokModelCatalogServer> {
-  const body = JSON.stringify(buildGrokModelCatalog(baseUrl));
+  const body = JSON.stringify(buildGrokModelCatalog(baseUrl, additionalModels));
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
     if (request.method === "GET" && pathname === "/v1/models") {

@@ -1,4 +1,5 @@
 import type { HarnessId } from "./harness.js";
+import type { ResolvedTogetherModel } from "./together-model.js";
 
 export type HarnessContext = {
   home: string;
@@ -17,10 +18,16 @@ export type HarnessResult = {
   payload?: Record<string, unknown>;
 };
 
+export type HarnessRunContext = HarnessContext & {
+  apiKey: string;
+  baseUrl: string;
+  selectedModel: ResolvedTogetherModel;
+};
+
 export type Harness = {
   id: HarnessId;
   label: string;
-  run: (ctx: HarnessContext) => Promise<HarnessResult>;
+  run: (ctx: HarnessRunContext) => Promise<HarnessResult>;
 };
 
 /**

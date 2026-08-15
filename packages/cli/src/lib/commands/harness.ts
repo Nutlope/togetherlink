@@ -4,6 +4,8 @@ import { loadHarness, isHarnessImplemented } from "../harness-registry.js";
 import { detectInstalledHarness } from "../detect.js";
 import { ensureHarnessInstalled } from "../install-harness.js";
 import type { HarnessContext, HarnessResult } from "../harness-types.js";
+import { resolveTogetherModel } from "../together-model.js";
+import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 
 export async function dispatchHarnessCommand(
   harnessName: string | undefined,
@@ -24,11 +26,34 @@ export async function dispatchHarnessCommand(
   if (verb !== undefined && verb !== "run") {
     throw new Error(`Unknown command "${harnessName} ${verb}". Expected: run.`);
   }
+  const baseContext = { home: os.homedir(), ...flags };
+  const apiKey = await resolveTogetherApiKey({
+    apiKey: baseContext.apiKey,
+    home: baseContext.home,
+  });
+  if (!apiKey) {
+    throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
+  }
+  const baseUrl = resolveTogetherBaseUrl();
+  const selectedModel = await resolveTogetherModel({
+    requestedModel: baseContext.main,
+    apiKey,
+    baseUrl,
+    harness: harnessName,
+  });
   if (!detectInstalledHarness(harnessName).installed) {
     await ensureHarnessInstalled(harnessName);
   }
+  if (selectedModel.custom) {
+    process.stderr.write(
+      `togetherlink ▸ Custom model ${selectedModel.definition.id} validated as an exact chat model in Together's authenticated catalog.\n`,
+    );
+    for (const warning of selectedModel.warnings) {
+      process.stderr.write(`togetherlink ▸ Warning: ${warning}\n`);
+    }
+  }
 
-  const ctx = { home: os.homedir(), ...flags };
+  const ctx = { ...baseContext, apiKey, baseUrl, selectedModel };
   const result = await harnessModule.run(ctx);
   renderResult(result, flags);
 }

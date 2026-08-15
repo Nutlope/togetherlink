@@ -1,4 +1,4 @@
-import { resolveCodexModel } from "../codex/defaults.js";
+import { CODEX_SUPPORTED_MODELS } from "../codex/defaults.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness } from "../harness-types.js";
 import {
@@ -8,28 +8,28 @@ import {
   writePrimeProviderExtension,
 } from "../prime/core.js";
 import { runTrackedSpawnedSession } from "../spawned-session.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
 
 export default defineHarness({
   id: HARNESS.PRIME,
   label: "Prime Agent",
 
   async run(ctx) {
-    const apiKey = await resolveTogetherApiKey({ apiKey: ctx.apiKey, home: ctx.home });
-    if (!apiKey) {
-      throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
-    }
-
-    const selectedModel = resolveCodexModel(ctx.main);
-    const baseUrl = resolveTogetherBaseUrl();
-    const extensionPath = resolvePrimeProviderExtensionPath(ctx.home, baseUrl);
-    await writePrimeProviderExtension(extensionPath, baseUrl);
+    const selectedModel = {
+      id: ctx.selectedModel.definition.id,
+      definition: ctx.selectedModel.definition,
+    };
+    const baseUrl = ctx.baseUrl;
+    const models = [...CODEX_SUPPORTED_MODELS];
+    if (!models.some((model) => model.id === selectedModel.id)) models.push(selectedModel);
+    const extensionPath = resolvePrimeProviderExtensionPath(ctx.home, baseUrl, process.env, models);
+    await writePrimeProviderExtension(extensionPath, baseUrl, models);
     const launch = buildPrimeLaunchSpec({
       selectedModel,
-      apiKey,
+      apiKey: ctx.apiKey,
       baseUrl,
       extensionPath,
       passthrough: ctx.passthrough ?? [],
+      models,
     });
 
     if (process.env.TOGETHERLINK_DEBUG === "1") {

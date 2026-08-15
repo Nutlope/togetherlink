@@ -6,12 +6,14 @@ import { CODEX_AUTH_ENV, CODEX_PROVIDER_ID, resolveCodexModel } from "./defaults
 import { codexArgsIgnoreUserConfig, ensureCodexGenericUserDefaults } from "./user-config.js";
 import {} from "../daemon/launch.js";
 import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session.js";
+import type { ModelDefinition } from "@togetherlink/models";
 
 export type CodexLaunchOptions = {
   apiKey: string;
   baseUrl: string;
   home: string;
   modelId?: string;
+  modelDefinition?: ModelDefinition;
   args?: string[];
 };
 
@@ -28,7 +30,9 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     await ensureCodexGenericUserDefaults(options.home);
   }
 
-  const selectedModel = resolveCodexModel(options.modelId);
+  const selectedModel = options.modelDefinition
+    ? { id: options.modelDefinition.id, definition: options.modelDefinition }
+    : resolveCodexModel(options.modelId);
   let catalog: { path: string; cleanup: () => void } | undefined;
   const result: ProxiedSessionResult = await runProxiedSession({
     agent: "codex",
@@ -44,7 +48,7 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     banner: (modelName) =>
       `togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`,
     beforeSpawn: () => {
-      catalog = writeCodexModelCatalog();
+      catalog = writeCodexModelCatalog(selectedModel);
       return catalog;
     },
     buildEnv: ({ authToken }) => buildCodexEnv(authToken),
@@ -120,10 +124,13 @@ function codexConfigArgs(
   ];
 }
 
-function writeCodexModelCatalog(): { path: string; cleanup: () => void } {
+function writeCodexModelCatalog(selectedModel: { id: string; definition: ModelDefinition }): {
+  path: string;
+  cleanup: () => void;
+} {
   const dir = mkdtempSync(join(tmpdir(), "togetherlink-codex-catalog-"));
   const path = join(dir, "models.json");
-  writeFileSync(path, codexModelCatalogJson(), "utf8");
+  writeFileSync(path, codexModelCatalogJson([selectedModel]), "utf8");
   return {
     path,
     cleanup: () => {

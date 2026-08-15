@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MODEL,
+  DEEPSEEK_V4_FLASH,
   GLM_5_2,
   KIMI_K3,
   MINIMAX_M3,
@@ -82,6 +83,24 @@ describe("resolveModelByKeys", () => {
 });
 
 describe("shared harness default", () => {
+  it("exposes DeepSeek V4 Flash with verified Together and DeepSeek metadata", () => {
+    expect(SELECTABLE_MODELS).toContain(DEEPSEEK_V4_FLASH);
+    expect(DEEPSEEK_V4_FLASH).toMatchObject({
+      id: "deepseek-ai/DeepSeek-V4-Flash-0731",
+      name: "DeepSeek V4 Flash 0731",
+      anthropicAlias: null,
+      cost: { input: 0.14, cache_read: 0.03, output: 0.28 },
+      limit: { context: 1_048_576, output: 393_216 },
+      attachment: false,
+      reasoning: true,
+      reasoningEfforts: ["low", "high", "max"],
+      defaultReasoningEffort: "high",
+      temperature: true,
+      tool_call: true,
+      modalities: { input: ["text"], output: ["text"] },
+    });
+  });
+
   it("uses Kimi K3 as the shared coding default", () => {
     expect(DEFAULT_MODEL).toBe(KIMI_K3);
     expect(DEFAULT_MODEL).toMatchObject({
@@ -104,6 +123,13 @@ describe("shared harness default", () => {
     expect(OPENCODE_DEFAULT_MODEL).toBe(DEFAULT_MODEL.id);
     expect(resolveCodexModel(undefined).definition).toBe(DEFAULT_MODEL);
     expect(resolveClaudeModel(undefined).definition).toBe(DEFAULT_MODEL);
+  });
+
+  it("uses harness-neutral errors for static-only resolver calls", () => {
+    expect(() => resolveCodexModel("no/such-model")).toThrow(
+      'Model "no/such-model" is not in TogetherLink\'s curated model catalog.',
+    );
+    expect(() => resolveCodexModel("no/such-model")).not.toThrow("Unsupported Codex model");
   });
 
   it("advertises Claude custom-model capabilities only when verified per model", () => {

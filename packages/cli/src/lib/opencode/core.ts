@@ -7,7 +7,9 @@ import {
   OPENCODE_VISION_MODEL_SELECTOR,
   OPENCODE_BUILD_PROMPT,
   OPENCODE_VISION_AGENT_PROMPT,
+  toOpencodeModelEntry,
 } from "./defaults.js";
+import type { ModelDefinition } from "@togetherlink/models";
 
 type OpencodeConfig = {
   $schema?: string;
@@ -64,6 +66,7 @@ export function buildOpencodeConfigJson({
   apiKeyEnvRef = TOGETHER_API_KEY_ENV_REF,
   baseUrl = TOGETHER_BASE_URL,
   timeoutMs,
+  modelDefinition,
   buildPrompt = OPENCODE_BUILD_PROMPT,
   visionPrompt = OPENCODE_VISION_AGENT_PROMPT,
 }: {
@@ -71,6 +74,7 @@ export function buildOpencodeConfigJson({
   apiKeyEnvRef?: string;
   baseUrl?: string;
   timeoutMs?: number;
+  modelDefinition?: ModelDefinition;
   buildPrompt?: string;
   visionPrompt?: string;
 } = {}): OpencodeConfig {
@@ -78,6 +82,11 @@ export function buildOpencodeConfigJson({
   // real metadata + tip-bearing display names. The `@vision` subagent's model
   // (Kimi K3) is part of this set, so it's covered too.
   const models = { ...OPENCODE_MODEL_ENTRIES };
+  if (modelDefinition) models[modelDefinition.id] = toOpencodeModelEntry(modelDefinition);
+  const whitelist = [...OPENCODE_MODEL_WHITELIST];
+  if (modelDefinition && !whitelist.includes(modelDefinition.id)) {
+    whitelist.push(modelDefinition.id);
+  }
 
   const provider: OpencodeProviderConfig = {
     npm: "@ai-sdk/togetherai",
@@ -97,7 +106,7 @@ export function buildOpencodeConfigJson({
     // shows Together's full catalog (hundreds of models) because the `models`
     // block merges onto the provider's models.dev catalog rather than replacing
     // it (opencode PR #3416 added whitelist/blacklist filtering).
-    whitelist: OPENCODE_MODEL_WHITELIST,
+    whitelist,
   };
 
   return {

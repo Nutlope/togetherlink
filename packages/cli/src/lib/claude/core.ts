@@ -7,6 +7,7 @@ import {
 } from "./defaults.js";
 import {} from "../daemon/launch.js";
 import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session.js";
+import type { ModelDefinition } from "@togetherlink/models";
 
 const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -41,6 +42,7 @@ export type ClaudeLaunchOptions = {
   apiKey: string;
   baseUrl: string;
   modelId?: string;
+  modelDefinition?: ModelDefinition;
   args?: string[];
 };
 
@@ -52,9 +54,10 @@ export type ClaudeLaunchResult = {
 export function buildClaudeEnv({
   apiKey,
   modelId,
+  modelDefinition,
   proxyUrl,
   authToken,
-}: Pick<ClaudeLaunchOptions, "apiKey"> & {
+}: Pick<ClaudeLaunchOptions, "apiKey" | "modelDefinition"> & {
   modelId: string;
   modelName: string;
   proxyUrl: string;
@@ -74,7 +77,8 @@ export function buildClaudeEnv({
   // Claude Code does not derive its local context budget from gateway model
   // metadata. It recognizes the `[1m]` client hint instead, then strips that
   // suffix before sending the model id to the proxy.
-  env.ANTHROPIC_MODEL = claudeCodeModelId(resolveClaudeModel(modelId));
+  const selectedModel = claudeModelSelection(modelId, modelDefinition);
+  env.ANTHROPIC_MODEL = claudeCodeModelId(selectedModel);
   // Claude Code disables tool search automatically when ANTHROPIC_BASE_URL is
   // customized unless the feature is explicitly enabled. TogetherLink forwards
   // the required tool_reference blocks, so opt in by default. Preserve
@@ -98,7 +102,7 @@ export function buildClaudeEnv({
   if (env.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined) {
     env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(DEFAULT_CLAUDE_CODE_MAX_OUTPUT_TOKENS);
   }
-  applyClaudeModelMenuEnv(env, modelId);
+  applyClaudeModelMenuEnv(env, selectedModel);
 
   // Disable Claude Code's periodic "How is Claude doing this session?" survey.
   // It's an internal TUI prompt (not a request the proxy could intercept), and
@@ -126,8 +130,7 @@ export function buildClaudeEnv({
   return env;
 }
 
-function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string): void {
-  const selected = resolveClaudeModel(selectedAlias);
+function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selected: ClaudeModelSelection): void {
   const defaultModel = CLAUDE_SUPPORTED_MODELS[0] ?? selected;
   const fableModel =
     CLAUDE_SUPPORTED_MODELS.find((model) => model.alias !== defaultModel.alias) ?? selected;
@@ -195,7 +198,7 @@ function claudeCodeModelId(model: ClaudeModelSelection): string {
 
 export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<ClaudeLaunchResult> {
   const args = options.args ?? [];
-  const selectedModel = resolveClaudeModel(options.modelId);
+  const selectedModel = claudeModelSelection(options.modelId, options.modelDefinition);
   const result: ProxiedSessionResult = await runProxiedSession({
     agent: "claude",
     apiKey: options.apiKey,
@@ -222,6 +225,19 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     buildArgs: ({ args }) => buildClaudeLaunchArgs(args),
   });
   return result;
+}
+
+function claudeModelSelection(
+  modelId: string | undefined,
+  modelDefinition: ModelDefinition | undefined,
+): ClaudeModelSelection {
+  if (modelDefinition) {
+    return {
+      alias: modelDefinition.anthropicAlias ?? modelDefinition.id,
+      definition: modelDefinition,
+    };
+  }
+  return resolveClaudeModel(modelId);
 }
 
 export function claudeRunsInBackground(args: string[]): boolean {

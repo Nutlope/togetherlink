@@ -44,7 +44,15 @@ To pin a model for one run, put the TogetherLink flag before the harness name:
 ```bash
 togetherlink --model zai-org/GLM-5.2 claude -p "task"
 togetherlink --model zai-org/GLM-5.2 codex exec "task"
+togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 codex exec "task"
 ```
+
+The interactive menus stay curated. An exact Together chat model ID that is
+not yet curated can still be used explicitly with `--model`: TogetherLink
+validates it against the authenticated runtime `/v1/models` catalog and never
+falls back to another model. Catalog-only models use conservative text-only
+metadata when Together does not publish output or capability fields; the CLI
+prints those limitations before launch.
 
 Arguments after `claude`, `codex`, or another harness name belong to the underlying agent CLI, so
 TogetherLink does not consume model flags placed there.

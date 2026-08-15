@@ -109,7 +109,6 @@ describe("Hermes harnesses", () => {
     writeFileSync(join(nativeHome, "config.yaml"), "display:\n  interface: cli\n", "utf8");
 
     const overlay = createHermesHomeOverlay(nativeHome, {
-      apiKey: "together-secret",
       baseUrl: "https://api.together.ai/v1",
       modelIds: ["moonshotai/Kimi-K3"],
     });
@@ -146,7 +145,6 @@ describe("Hermes harnesses", () => {
     );
 
     const overlay = createHermesHomeOverlay(nativeHome, {
-      apiKey: "together-secret",
       baseUrl: "https://api.together.ai/v1",
       modelIds: ["moonshotai/Kimi-K2.5", "zai-org/GLM-5"],
     });
@@ -165,9 +163,7 @@ describe("Hermes harnesses", () => {
       "display:\n  interface: tui\nproviders:\n  native-provider:\n    base_url: https://native.example/v1\n",
     );
     expect(() => readlinkSync(join(overlay, "auth.json"))).toThrow();
-    expect(readFileSync(join(overlay, ".env"), "utf8")).toContain(
-      'TOGETHERLINK_HERMES_API_KEY="together-secret"',
-    );
+    expect(() => readFileSync(join(overlay, ".env"), "utf8")).toThrow();
     expect(readFileSync(join(nativeHome, ".env"), "utf8")).toBe(
       "TOGETHER_API_KEY=old-secret\nOPENROUTER_API_KEY=secret\n",
     );

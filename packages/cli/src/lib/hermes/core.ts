@@ -32,7 +32,6 @@ type BuildHermesLaunchSpecOptions = {
 };
 
 type HermesHomeOverlayOptions = {
-  apiKey: string;
   baseUrl: string;
   modelIds: readonly string[];
 };
@@ -156,34 +155,12 @@ function writeTogetherProviderConfig(
   writeFileSync(configPath, document.toString(), "utf8");
 }
 
-function writeHermesEnvironment(
-  overlay: string,
-  nativeHome: string,
-  { apiKey, baseUrl }: HermesHomeOverlayOptions,
-): void {
-  const nativeEnvPath = join(nativeHome, ".env");
-  const existing = existsSync(nativeEnvPath)
-    ? readFileSync(nativeEnvPath, "utf8")
-        .split(/\r?\n/)
-        .filter(
-          (line) => !/^\s*(?:export\s+)?TOGETHERLINK_HERMES_(?:API_KEY|BASE_URL)\s*=/.test(line),
-        )
-        .join("\n")
-        .trimEnd()
-    : "";
-  const prefix = existing ? `${existing}\n` : "";
-  writeFileSync(
-    join(overlay, ".env"),
-    `${prefix}${HERMES_PROVIDER_API_KEY_ENV}=${JSON.stringify(apiKey)}\n${HERMES_PROVIDER_BASE_URL_ENV}=${JSON.stringify(baseUrl)}\n`,
-    { encoding: "utf8", mode: 0o600 },
-  );
-}
-
 /**
- * Hermes prefers its saved .env and credential pool over process variables.
- * Give each TogetherLink launch an isolated root, while mirroring ordinary
+ * Give each TogetherLink launch an isolated root while mirroring ordinary
  * Hermes state so sessions, skills, memories, and user preferences remain
- * native and resumable. The Together provider plugin exists only here.
+ * native and resumable. Credential files stay excluded; the Together key is
+ * supplied only in the child process environment. The provider plugin exists
+ * only in this overlay.
  */
 export function createHermesHomeOverlay(
   nativeHome: string,
@@ -229,7 +206,6 @@ export function createHermesHomeOverlay(
       }
     }
     writeTogetherProviderConfig(overlay, options);
-    writeHermesEnvironment(overlay, nativeHome, options);
     writeTogetherProviderPlugin(overlay, options);
     return overlay;
   } catch (error) {

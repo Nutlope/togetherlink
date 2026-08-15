@@ -3,12 +3,16 @@ import { readFile, rename, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { findModelById } from "@togetherlink/models";
+import type { ModelDefinition } from "@togetherlink/models";
 import { mergeCodexModelCatalog, type CodexModelCatalog } from "../codex/catalog.js";
 
 const execFileAsync = promisify(execFile);
 
-export function mergedCodexAppCatalogJson(nativeCatalog: CodexModelCatalog): string {
-  return JSON.stringify(mergeCodexModelCatalog(nativeCatalog));
+export function mergedCodexAppCatalogJson(
+  nativeCatalog: CodexModelCatalog,
+  additionalModels: readonly { id: string; definition: ModelDefinition }[] = [],
+): string {
+  return JSON.stringify(mergeCodexModelCatalog(nativeCatalog, additionalModels));
 }
 
 /**
@@ -22,10 +26,11 @@ export async function writeMergedCodexAppCatalog(
   home: string,
   outputPath: string,
   nativeSnapshotPath: string,
+  additionalModels: readonly { id: string; definition: ModelDefinition }[] = [],
 ): Promise<number> {
   const nativeCatalog = await loadNativeCatalog(home, nativeSnapshotPath);
   await writeTextAtomic(nativeSnapshotPath, `${JSON.stringify(nativeCatalog, null, 2)}\n`);
-  const merged = mergeCodexModelCatalog(nativeCatalog);
+  const merged = mergeCodexModelCatalog(nativeCatalog, additionalModels);
   await writeTextAtomic(outputPath, `${JSON.stringify(merged)}\n`);
   return merged.models.length;
 }

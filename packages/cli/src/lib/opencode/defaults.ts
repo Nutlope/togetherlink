@@ -26,10 +26,15 @@ type OpencodeModelEntry = {
   tool_call: boolean;
   limit: { context: number; output: number };
   modalities: { input: string[]; output: string[] };
-  cost: { input: number; output: number; cache_read: number };
+  cost?: { input: number; output: number; cache_read: number };
 };
 
-function toOpencodeModelEntry(model: ModelDefinition): OpencodeModelEntry {
+export function toOpencodeModelEntry(model: ModelDefinition): OpencodeModelEntry {
+  const pricingKnown = !(
+    "catalogMetadata" in model &&
+    (model as ModelDefinition & { catalogMetadata?: { pricingKnown?: boolean } }).catalogMetadata
+      ?.pricingKnown === false
+  );
   return {
     name: model.name,
     attachment: model.attachment,
@@ -41,7 +46,15 @@ function toOpencodeModelEntry(model: ModelDefinition): OpencodeModelEntry {
       input: [...model.modalities.input],
       output: [...model.modalities.output],
     },
-    cost: { input: model.cost.input, output: model.cost.output, cache_read: model.cost.cache_read },
+    ...(pricingKnown
+      ? {
+          cost: {
+            input: model.cost.input,
+            output: model.cost.output,
+            cache_read: model.cost.cache_read,
+          },
+        }
+      : {}),
   };
 }
 

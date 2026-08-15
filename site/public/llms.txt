@@ -119,11 +119,12 @@ Backups of your original config live under `~/.togetherlink/backup/codex-app/`.
 
 togetherlink routes to a curated set of Together AI models. The default for every coding harness is Kimi K3.
 
-Serverless prices below are in USD per 1 million tokens and come from Together's authenticated `/v1/models` catalog, checked August 7, 2026. Cached input is billed at the lower rate when Together's automatic prompt cache matches a prefix; otherwise the standard input rate applies. Together may change these prices, so check the live catalog for billing-critical decisions.
+Serverless prices below are in USD per 1 million tokens and come from Together's authenticated `/v1/models` catalog, checked August 15, 2026. Cached input is billed at the lower rate when Together's automatic prompt cache matches a prefix; otherwise the standard input rate applies. Together may change these prices, so check the live catalog for billing-critical decisions.
 
 | Model | Together API id | Input | Output | Cached input |
 | --- | --- | ---: | ---: | ---: |
 | Kimi K3 (default) | `moonshotai/Kimi-K3` | $3.00 | $15.00 | $0.30 |
+| DeepSeek V4 Flash 0731 | `deepseek-ai/DeepSeek-V4-Flash-0731` | $0.14 | $0.28 | $0.03 |
 | GLM 5.2 | `zai-org/GLM-5.2` | $1.40 | $4.40 | $0.26 |
 | MiniMax M3 | `MiniMaxAI/MiniMax-M3` | $0.30 | $1.20 | $0.06 |
 | Qwen 3.7 Max | `Qwen/Qwen3.7-Max` | $1.25 | $3.75 | $0.125 |
@@ -135,14 +136,18 @@ Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togethe
 ```
 togetherlink --model MiniMaxAI/MiniMax-M3 codex exec "task"
 togetherlink --model MiniMaxAI/MiniMax-M3 claude -p "task"
+togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 deepseek
 togetherlink --main together-glm-5-2 claude -p "task"   # Claude matches alias OR id
 ```
 
 Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (Kimi K3), not the model you asked for. Always use the long form with the flag first.
 
+An explicit exact Together chat ID does not need to be in this static list. TogetherLink validates non-curated IDs against Together's authenticated runtime `/v1/models` catalog using the configured API key. Missing IDs and non-chat model types fail clearly, and an explicit ID never falls back to a curated model. Interactive menus and no-argument defaults remain curated. For catalog-only models, TogetherLink uses catalog pricing/context when present, a conservative 8,192-token output limit when output metadata is absent, and text-only metadata without advertising reasoning, vision, or tool support. If cached-input pricing is absent, it conservatively uses the standard input rate. It prints these limitations before launch. Proxied or metadata-dependent harnesses fail instead of inventing a price when catalog input/output pricing is incomplete.
+
 Capabilities:
 
 - `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
+- `deepseek-ai/DeepSeek-V4-Flash-0731` — DeepSeek V4 Flash 0731. Text-only, 1M context, low/high/max reasoning, 384K documented output guidance, function calling.
 - `zai-org/GLM-5.2` — GLM 5.2. Text-only, 512K context, reasoning.
 - `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.
 - `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context.

@@ -77,12 +77,10 @@ describe("direct coding harness configuration", () => {
   });
 
   test("Pi receives baseUrl", () => {
-    const config = JSON.parse(buildPiModelsJson("phantom-key", baseUrl)) as {
-      providers: { together: { apiKey: string; baseUrl: string } };
+    const config = JSON.parse(buildPiModelsJson(baseUrl)) as {
+      providers: { together: { apiKey?: string; baseUrl: string } };
     };
-    expect(config.providers.together).toMatchObject({
-      apiKey: "phantom-key",
-      baseUrl,
-    });
+    expect(config.providers.together).toEqual(expect.objectContaining({ baseUrl }));
+    expect(config.providers.together.apiKey).toBeUndefined();
   });
 });

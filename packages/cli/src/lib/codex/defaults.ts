@@ -33,7 +33,9 @@ export function resolveCodexModel(value: string | undefined): CodexModelSelectio
   );
   if (!found) {
     const expected = CODEX_SUPPORTED_MODELS.map((model) => model.id).join(", ");
-    throw new Error(`Unsupported Codex model "${value}". Expected one of: ${expected}.`);
+    throw new Error(
+      `Model "${value}" is not in TogetherLink's curated model catalog. Curated models: ${expected}. Explicit custom Together chat ids must be validated by the top-level --model launcher path.`,
+    );
   }
   return { id: found.id, definition: found };
 }

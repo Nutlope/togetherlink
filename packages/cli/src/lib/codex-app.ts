@@ -1,7 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
+import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID } from "./codex/defaults.js";
 import { codexModelCatalogJson } from "./codex/catalog.js";
 import { applyCodexGenericUserDefaults } from "./codex/user-config.js";
 import { clearAppRegistration, writeAppRegistration } from "./daemon/app-registration.js";
@@ -42,6 +42,9 @@ import { repairCodexSessionHistory } from "./codex-app/session-repair.js";
 import { writeMergedCodexAppCatalog, mergedCodexAppCatalogJson } from "./codex-app/catalog.js";
 import { DEFAULT_CODEX_NATIVE_BASE_URL, nativeCodexBaseUrl } from "./codex/native-router.js";
 import type { CodexModelCatalog } from "./codex/catalog.js";
+import { HARNESS } from "./harness.js";
+import { resolveTogetherModel } from "./together-model.js";
+import type { ModelDefinition } from "@togetherlink/models";
 
 const CODEX_APP_PROVIDER_ID = `${CODEX_PROVIDER_ID}_codex_app`;
 const CODEX_APP_CONFIG_MARKER_START = "# >>> togetherlink codex-app alpha >>>";
@@ -74,7 +77,21 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     );
   }
 
-  const selectedModel = resolveCodexModel(ctx.main);
+  const baseUrl = resolveTogetherBaseUrl();
+  const selectedModel = await resolveTogetherModel({
+    requestedModel: ctx.main,
+    apiKey,
+    baseUrl,
+    harness: HARNESS.CODEX,
+  });
+  if (selectedModel.custom) {
+    process.stderr.write(
+      `togetherlink ▸ Custom model ${selectedModel.definition.id} validated as an exact chat model in Together's authenticated catalog.\n`,
+    );
+    for (const warning of selectedModel.warnings) {
+      process.stderr.write(`togetherlink ▸ Warning: ${warning}\n`);
+    }
+  }
   const authToken = await localProxyAuthToken();
   const sessionToken = codexAppSessionToken(authToken);
   const telemetrySessionId = sessionToken;
@@ -85,14 +102,20 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const nativeBaseUrl = nativeCodexBaseUrl(configBase);
   const { url: proxyUrl } = await ensureDaemon();
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionToken);
-  const { path: catalogPath, modelCount } = await writePersistentModelCatalog(ctx.home);
+  const additionalModels = selectedModel.custom
+    ? [{ id: selectedModel.definition.id, definition: selectedModel.definition }]
+    : [];
+  const { path: catalogPath, modelCount } = await writePersistentModelCatalog(
+    ctx.home,
+    additionalModels,
+  );
 
   const registration: RegisterSessionRequest = {
     token: sessionToken,
     authToken,
     agent: "codex-app",
     apiKey,
-    baseUrl: resolveTogetherBaseUrl(),
+    baseUrl,
     modelLabel: `${selectedModel.definition.name} (ChatGPT App alpha)`,
     modelId: selectedModel.definition.id,
     targetModelId: selectedModel.definition.id,
@@ -388,14 +411,25 @@ async function originalCodexAppConfig(
 
 async function writePersistentModelCatalog(
   home: string,
+  additionalModels: readonly { id: string; definition: ModelDefinition }[] = [],
 ): Promise<{ path: string; modelCount: number }> {
   const file = modelCatalogPath(home);
-  const modelCount = await writeMergedCodexAppCatalog(home, file, nativeModelCatalogPath(home));
+  const modelCount = await writeMergedCodexAppCatalog(
+    home,
+    file,
+    nativeModelCatalogPath(home),
+    additionalModels,
+  );
   return { path: file, modelCount };
 }
 
-export function codexAppModelCatalogJson(nativeCatalog?: CodexModelCatalog): string {
-  return nativeCatalog ? mergedCodexAppCatalogJson(nativeCatalog) : codexModelCatalogJson();
+export function codexAppModelCatalogJson(
+  nativeCatalog?: CodexModelCatalog,
+  additionalModels: readonly { id: string; definition: ModelDefinition }[] = [],
+): string {
+  return nativeCatalog
+    ? mergedCodexAppCatalogJson(nativeCatalog, additionalModels)
+    : codexModelCatalogJson(additionalModels);
 }
 
 function codexConfigPath(home: string): string {
