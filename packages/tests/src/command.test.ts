@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -77,5 +78,55 @@ describe("runCommand", () => {
       await readFile(path.join(home, ".togetherlink", "install-id"), "utf8"),
     ) as { id?: string };
     expect(stored.id).toBe(installId);
+  });
+
+  test("usage prints locally tracked spend for completed proxied sessions", async () => {
+    const home = await mkdtemp(path.join(tmpDir, "usage-home-"));
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          import { createSessionStore } from "./packages/cli/dist/lib/daemon/storage.js";
+          import { KIMI_K3 } from "./packages/models/dist/index.js";
+          const store = await createSessionStore(process.argv[1]);
+          store.upsertSession({
+            token: "completed-chatgpt-session",
+            agent: "codex-app",
+            apiKey: "phantom-key",
+            modelLabel: KIMI_K3.name,
+            targetModelId: KIMI_K3.id,
+            modelDefinition: KIMI_K3,
+            startedAt: Date.now() - 2000,
+            lastSeenAt: Date.now() - 1000,
+            endedAt: Date.now(),
+            costSummary: "test",
+            costTotals: { promptTokens: 10, cachedTokens: 0, completionTokens: 2, costUsd: 1.5 },
+            usageByModel: [{ model: KIMI_K3.id, promptTokens: 10, cachedTokens: 0, completionTokens: 2, costUsd: 1.5 }],
+          });
+          store.close();
+        `,
+        path.join(home, ".togetherlink"),
+      ],
+      { cwd: path.join(process.cwd(), "..", "..") },
+    );
+
+    const result = await runCommand(
+      context,
+      "usage-report",
+      process.execPath,
+      [cliBin, "usage", "--last", "7d"],
+      { env: { HOME: home, TOGETHERLINK_HOME: path.join(home, ".togetherlink") } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("TogetherLink usage · last 7 days");
+    expect(result.stdout).toContain("Cost          $1.50");
+    expect(result.stdout).toContain("Total tokens     12");
+    expect(result.stdout).toContain("Other harnesses aren't tracked yet.");
+    expect(result.stdout).toContain("Kimi K3");
+    expect(result.stdout).toContain("ChatGPT Desktop");
   });
 });

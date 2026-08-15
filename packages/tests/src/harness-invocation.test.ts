@@ -3,6 +3,13 @@ import { resolveHarnessInvocation } from "../../cli/src/lib/commands/harness-inv
 import { parseArgs } from "../../cli/src/lib/parse-args.js";
 
 describe("harness invocation parsing", () => {
+  test("parses the usage reporting window", () => {
+    const parsed = parseArgs(["usage", "--last", "7d"]);
+
+    expect(parsed.positional).toEqual(["usage"]);
+    expect(parsed.flags.last).toBe("7d");
+  });
+
   test("forwards harness flags as real CLI args", () => {
     const parsed = parseArgs(["claude", "--resume", "8616d14d-f3a7-4ee3-bfc3-34bce6602b8d"]);
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);

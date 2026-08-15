@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../cost.js";
+import type { ModelTokenUsage, TokenUsage } from "../cost.js";
 import type { AgentId, RegisterSessionRequest } from "./state.js";
 import { chmod, mkdir } from "node:fs/promises";
 import os from "node:os";
@@ -25,6 +25,7 @@ export type StoredSession = RegisterSessionRequest & {
   cachedTokens?: number;
   completionTokens?: number;
   costUsd?: number;
+  usageByModel?: ModelTokenUsage[];
   externalSummary?: string;
 };
 
@@ -34,24 +35,34 @@ export type SessionPersistInput = RegisterSessionRequest & {
   endedAt?: number;
   costSummary: string;
   costTotals: TokenUsage;
+  usageByModel?: ModelTokenUsage[];
   externalSummary?: string;
+};
+
+export type TrackedUsageSession = {
+  agent: "claude" | "codex" | "codex-app";
+  costUsd: number;
+  usageByModel: ModelTokenUsage[];
 };
 
 export type SessionStore = {
   kind: "sqlite" | "memory";
   restoreActiveSessions(): StoredSession[];
+  queryUsageSince(since: number): TrackedUsageSession[];
   upsertSession(session: SessionPersistInput): void;
   markSessionEnded(
     token: string,
     endedAt: number,
     costSummary: string,
     costTotals: TokenUsage,
+    usageByModel: ModelTokenUsage[],
   ): void;
   updateSessionPid(token: string, pid: number): void;
   updateSessionUsage(
     token: string,
     costSummary: string,
     costTotals: TokenUsage,
+    usageByModel: ModelTokenUsage[],
     externalSummary?: string,
   ): void;
   updateSessionLastSeen(token: string, lastSeenAt: number): void;
@@ -162,6 +173,15 @@ class ResilientSessionStore implements SessionStore {
     }
   }
 
+  queryUsageSince(since: number): TrackedUsageSession[] {
+    try {
+      return this.inner.queryUsageSince(since);
+    } catch (err) {
+      warnStoreError("query usage", err);
+      return [];
+    }
+  }
+
   upsertSession(session: SessionPersistInput): void {
     this.write("persist session", () => this.inner.upsertSession(session));
   }
@@ -171,9 +191,10 @@ class ResilientSessionStore implements SessionStore {
     endedAt: number,
     costSummary: string,
     costTotals: TokenUsage,
+    usageByModel: ModelTokenUsage[],
   ): void {
     this.write("mark session ended", () =>
-      this.inner.markSessionEnded(token, endedAt, costSummary, costTotals),
+      this.inner.markSessionEnded(token, endedAt, costSummary, costTotals, usageByModel),
     );
   }
 
@@ -185,10 +206,11 @@ class ResilientSessionStore implements SessionStore {
     token: string,
     costSummary: string,
     costTotals: TokenUsage,
+    usageByModel: ModelTokenUsage[],
     externalSummary?: string,
   ): void {
     this.write("update session usage", () =>
-      this.inner.updateSessionUsage(token, costSummary, costTotals, externalSummary),
+      this.inner.updateSessionUsage(token, costSummary, costTotals, usageByModel, externalSummary),
     );
   }
 
@@ -234,6 +256,21 @@ class SqliteSessionStore implements SessionStore {
     return rows.map((row) => this.toStoredSession(row));
   }
 
+  queryUsageSince(since: number): TrackedUsageSession[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM sessions
+         WHERE ended_at >= ? AND agent IN ('claude', 'codex', 'codex-app')
+         ORDER BY ended_at DESC`,
+      )
+      .all(since) as SessionRow[];
+    return rows.map((row) => ({
+      agent: row.agent as TrackedUsageSession["agent"],
+      costUsd: row.cost_usd,
+      usageByModel: usageByModelForRow(row),
+    }));
+  }
+
   upsertSession(session: SessionPersistInput): void {
     this.db
       .prepare(`
@@ -243,8 +280,8 @@ class SqliteSessionStore implements SessionStore {
           model_id, target_model_id, model_name, model_definition_json,
           claude_code_max_output_tokens, claude_code_max_output_tokens_user_set, debug,
           prompt_tokens, cached_tokens, completion_tokens, cost_usd, cost_summary,
-          external_summary, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          external_summary, usage_by_model_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
           agent = excluded.agent,
           pid = excluded.pid,
@@ -269,6 +306,7 @@ class SqliteSessionStore implements SessionStore {
           cost_usd = excluded.cost_usd,
           cost_summary = excluded.cost_summary,
           external_summary = excluded.external_summary,
+          usage_by_model_json = excluded.usage_by_model_json,
           updated_at = excluded.updated_at
       `)
       .run(...sessionParams(session, Date.now()));
@@ -279,12 +317,13 @@ class SqliteSessionStore implements SessionStore {
     endedAt: number,
     costSummary: string,
     costTotals: TokenUsage,
+    usageByModel: ModelTokenUsage[],
   ): void {
     this.db
       .prepare(`
         UPDATE sessions
         SET ended_at = ?, prompt_tokens = ?, cached_tokens = ?, completion_tokens = ?,
-            cost_usd = ?, cost_summary = ?, updated_at = ?
+            cost_usd = ?, cost_summary = ?, usage_by_model_json = ?, updated_at = ?
         WHERE token = ?
       `)
       .run(
@@ -294,6 +333,7 @@ class SqliteSessionStore implements SessionStore {
         costTotals.completionTokens,
         costTotals.costUsd,
         costSummary,
+        JSON.stringify(usageByModel),
         Date.now(),
         token,
       );
@@ -309,13 +349,15 @@ class SqliteSessionStore implements SessionStore {
     token: string,
     costSummary: string,
     costTotals: TokenUsage,
+    usageByModel: ModelTokenUsage[],
     externalSummary?: string,
   ): void {
     this.db
       .prepare(`
         UPDATE sessions
         SET prompt_tokens = ?, cached_tokens = ?, completion_tokens = ?, cost_usd = ?,
-            cost_summary = ?, external_summary = COALESCE(?, external_summary), updated_at = ?
+            cost_summary = ?, usage_by_model_json = ?,
+            external_summary = COALESCE(?, external_summary), updated_at = ?
         WHERE token = ?
       `)
       .run(
@@ -324,6 +366,7 @@ class SqliteSessionStore implements SessionStore {
         costTotals.completionTokens,
         costTotals.costUsd,
         costSummary,
+        JSON.stringify(usageByModel),
         externalSummary ?? null,
         Date.now(),
         token,
@@ -370,6 +413,7 @@ class SqliteSessionStore implements SessionStore {
         cost_usd REAL NOT NULL DEFAULT 0,
         cost_summary TEXT NOT NULL DEFAULT '',
         external_summary TEXT,
+        usage_by_model_json TEXT,
         updated_at INTEGER NOT NULL
       );
 
@@ -380,6 +424,7 @@ class SqliteSessionStore implements SessionStore {
     this.addColumnIfMissing("sessions", "native_base_url", "TEXT");
     this.addColumnIfMissing("sessions", "claude_code_max_output_tokens", "INTEGER");
     this.addColumnIfMissing("sessions", "claude_code_max_output_tokens_user_set", "INTEGER");
+    this.addColumnIfMissing("sessions", "usage_by_model_json", "TEXT");
   }
 
   private addColumnIfMissing(table: string, column: string, type: string): void {
@@ -398,6 +443,7 @@ class SqliteSessionStore implements SessionStore {
       cachedTokens: row.cached_tokens,
       completionTokens: row.completion_tokens,
       costUsd: row.cost_usd,
+      usageByModel: usageByModelForRow(row),
       ...(row.external_summary ? { externalSummary: row.external_summary } : {}),
     };
   }
@@ -407,6 +453,10 @@ class MemorySessionStore implements SessionStore {
   readonly kind = "memory";
 
   restoreActiveSessions(): StoredSession[] {
+    return [];
+  }
+
+  queryUsageSince(): TrackedUsageSession[] {
     return [];
   }
 
@@ -453,6 +503,7 @@ function sessionParams(session: SessionPersistInput, updatedAt: number): unknown
     session.costTotals.costUsd,
     session.costSummary,
     session.externalSummary ?? null,
+    session.usageByModel ? JSON.stringify(session.usageByModel) : null,
     updatedAt,
   ];
 }
@@ -482,7 +533,45 @@ type SessionRow = {
   cost_usd: number;
   cost_summary: string;
   external_summary: string | null;
+  usage_by_model_json: string | null;
 };
+
+function usageByModelForRow(row: SessionRow): ModelTokenUsage[] {
+  const parsed = parseJson(row.usage_by_model_json ?? "", []);
+  if (Array.isArray(parsed)) {
+    const valid = parsed.filter(isModelTokenUsage);
+    if (valid.length > 0) {
+      return valid;
+    }
+  }
+  const definition = parseJson(row.model_definition_json, {}) as { id?: unknown };
+  const model =
+    row.target_model_id ??
+    (typeof definition.id === "string" && definition.id ? definition.id : row.model_label);
+  return [
+    {
+      model,
+      promptTokens: row.prompt_tokens,
+      cachedTokens: row.cached_tokens,
+      completionTokens: row.completion_tokens,
+      costUsd: row.cost_usd,
+    },
+  ];
+}
+
+function isModelTokenUsage(value: unknown): value is ModelTokenUsage {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const usage = value as Partial<ModelTokenUsage>;
+  return (
+    typeof usage.model === "string" &&
+    typeof usage.promptTokens === "number" &&
+    typeof usage.cachedTokens === "number" &&
+    typeof usage.completionTokens === "number" &&
+    typeof usage.costUsd === "number"
+  );
+}
 
 function rowToSessionBase(row: SessionRow): StoredSession {
   return {

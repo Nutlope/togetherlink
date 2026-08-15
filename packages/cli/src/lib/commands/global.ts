@@ -19,6 +19,7 @@ Usage:
   togetherlink configure
   togetherlink update           update to the latest release
   togetherlink whoami
+  togetherlink usage [--last 7d]  tracked spend for Claude, Codex, and ChatGPT
   togetherlink chatgpt [--model <model>] [--restore]  (alpha)
   togetherlink daemon install    enable daemon auto-start at login (macOS/Linux)
   togetherlink daemon uninstall  disable daemon auto-start at login (macOS/Linux)

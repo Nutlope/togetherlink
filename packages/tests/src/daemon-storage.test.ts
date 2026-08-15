@@ -62,4 +62,58 @@ describe("daemon session persistence", () => {
       nativeBaseUrl: "https://chatgpt.example/backend-api/codex",
     });
   });
+
+  test("queries ended proxied sessions with durable per-model usage", async () => {
+    const home = mkdtempSync(join(tmpdir(), "togetherlink-daemon-usage-"));
+    cleanup.push(home);
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          import { createSessionStore } from "./packages/cli/dist/lib/daemon/storage.js";
+          import { GLM_5_2 } from "./packages/models/dist/index.js";
+          const home = process.argv[1];
+          const store = await createSessionStore(home);
+          if (store.kind !== "sqlite") throw new Error("sqlite unavailable");
+          const base = {
+            apiKey: "phantom-key",
+            modelLabel: GLM_5_2.name,
+            targetModelId: GLM_5_2.id,
+            modelDefinition: GLM_5_2,
+            startedAt: 100,
+            lastSeenAt: 200,
+            endedAt: 300,
+            costSummary: "test",
+            costTotals: { promptTokens: 10, cachedTokens: 2, completionTokens: 3, costUsd: 1.25 },
+            usageByModel: [{ model: GLM_5_2.id, promptTokens: 10, cachedTokens: 2, completionTokens: 3, costUsd: 1.25 }],
+          };
+          store.upsertSession({ ...base, token: "claude", agent: "claude" });
+          store.upsertSession({ ...base, token: "direct", agent: "opencode" });
+          store.upsertSession({ ...base, token: "too-old", agent: "codex", endedAt: 99 });
+          process.stdout.write(JSON.stringify(store.queryUsageSince(100)));
+          store.close();
+        `,
+        home,
+      ],
+      { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
+    );
+
+    expect(JSON.parse(output)).toEqual([
+      {
+        agent: "claude",
+        costUsd: 1.25,
+        usageByModel: [
+          {
+            model: "zai-org/GLM-5.2",
+            promptTokens: 10,
+            cachedTokens: 2,
+            completionTokens: 3,
+            costUsd: 1.25,
+          },
+        ],
+      },
+    ]);
+  });
 });

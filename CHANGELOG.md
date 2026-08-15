@@ -3,6 +3,20 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.2 - 2026-08-15
+
+### Added
+
+- Added `togetherlink usage --last 7d` to report completed Claude Code, Codex, and ChatGPT Desktop
+  session cost and token usage, grouped by model and harness.
+- Persisted per-model usage breakdowns in the local daemon database so completed historical
+  sessions retain accurate model attribution.
+
+### Tests
+
+- Added focused coverage for usage-window parsing, aggregation and rendering, historical SQLite
+  filtering, CLI argument handling, and the end-to-end command output.
+
 ## 0.8.1 - 2026-08-14
 
 ### Changed

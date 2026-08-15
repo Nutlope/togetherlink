@@ -190,6 +190,7 @@ export class SessionRegistry {
       state.endedAt,
       state.costTracker.summarize(),
       state.costTracker.totals,
+      state.costTracker.totalsByModel,
     );
     emitDaemonSessionEndedTelemetry(state);
     return true;
@@ -225,6 +226,7 @@ export class SessionRegistry {
           now,
           "[togetherlink cost] session total: $0.0000 (0 in, 0 out)",
           { promptTokens: 0, cachedTokens: 0, completionTokens: 0, costUsd: 0 },
+          [],
         );
         continue;
       }
@@ -240,6 +242,7 @@ export class SessionRegistry {
             completionTokens: session.completionTokens ?? 0,
             costUsd: session.costUsd ?? 0,
           },
+          session.usageByModel ?? [],
         );
         continue;
       }
@@ -258,6 +261,7 @@ export class SessionRegistry {
           costUsd: session.costUsd ?? 0,
         },
         session.externalSummary,
+        session.usageByModel,
       );
       this.map.set(state.token, state);
       restored += 1;
@@ -306,6 +310,7 @@ export class SessionRegistry {
       token,
       state.costTracker.summarize(),
       state.costTracker.totals,
+      state.costTracker.totalsByModel,
       state.externalSummary,
     );
   }
@@ -474,6 +479,7 @@ function toPersistedSession(state: SessionState): PersistedSession {
     lastSeenAt: state.lastSeenAt,
     costSummary: state.costTracker.summarize(),
     costTotals: state.costTracker.totals,
+    usageByModel: state.costTracker.totalsByModel,
     ...(state.pid !== undefined ? { pid: state.pid } : {}),
     ...(state.endedAt !== undefined ? { endedAt: state.endedAt } : {}),
     ...(state.externalSummary !== undefined ? { externalSummary: state.externalSummary } : {}),

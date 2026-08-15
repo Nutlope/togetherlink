@@ -7,7 +7,8 @@ const FLAG_ALIASES = {
   "--model": "main",
   "--search": "search",
   "--slot": "slot",
-} as const satisfies Record<string, keyof HarnessContext>;
+  "--last": "last",
+} as const;
 
 const BOOLEAN_FLAGS = new Set(["--json", "--restore"]);
 type BooleanFlag = "json" | "restore";
@@ -19,7 +20,7 @@ const BOOLEAN_FLAG_KEYS = {
 export type ParsedArgs = {
   positional: string[];
   flags: Partial<HarnessContext> &
-    Record<BooleanFlag, boolean> & { passthroughSeparator?: boolean };
+    Record<BooleanFlag, boolean> & { last?: string; passthroughSeparator?: boolean };
 };
 
 /**

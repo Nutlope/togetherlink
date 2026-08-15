@@ -237,16 +237,31 @@ export class CostTracker {
     this.externalSummary = summary;
   }
 
-  hydrateUsage(totals: Partial<TokenUsage>, externalSummary?: string): void {
+  hydrateUsage(
+    totals: Partial<TokenUsage>,
+    externalSummary?: string,
+    usageByModel?: ModelTokenUsage[],
+  ): void {
     this.promptTokens = totals.promptTokens ?? 0;
     this.cachedTokens = Math.max(0, Math.min(totals.cachedTokens ?? 0, this.promptTokens));
     this.completionTokens = totals.completionTokens ?? 0;
     this.costUsd = totals.costUsd ?? 0;
     this.externalSummary = externalSummary;
-    // Hydration restores a flat snapshot (e.g. daemon restart recovery), which
-    // has no per-model breakdown. Fold it into the default model's bucket
-    // rather than losing it from the breakdown entirely.
-    this.byModel.set(this.defaultMainModel.id, { ...this.totals });
+    this.byModel.clear();
+    if (usageByModel && usageByModel.length > 0) {
+      for (const usage of usageByModel) {
+        this.byModel.set(usage.model, {
+          promptTokens: usage.promptTokens,
+          cachedTokens: usage.cachedTokens,
+          completionTokens: usage.completionTokens,
+          costUsd: usage.costUsd,
+        });
+      }
+    } else {
+      // Older rows only have a flat snapshot. Preserve that spend under the
+      // session's configured model instead of dropping it from the report.
+      this.byModel.set(this.defaultMainModel.id, { ...this.totals });
+    }
     this.beginRequest();
   }
 

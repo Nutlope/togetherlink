@@ -235,6 +235,15 @@ async function main() {
     return;
   }
 
+  if (command === "usage") {
+    if (rawVerb !== undefined) {
+      throw new Error('Unknown "usage" argument. Expected: togetherlink usage --last 7d.');
+    }
+    const { buildUsageReport } = await import("../lib/usage-report.js");
+    process.stdout.write(`${await buildUsageReport(parsed.flags.last)}\n`);
+    return;
+  }
+
   // Internal entry point run by install.sh right after a successful install
   // verification. Not user-facing; emits the one-time install event.
   if (command === "__telemetry-install-completed") {
