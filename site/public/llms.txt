@@ -131,7 +131,7 @@ Serverless prices below are in USD per 1 million tokens and come from Together's
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.8.2):
+Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.8.3):
 
 ```
 togetherlink --model MiniMaxAI/MiniMax-M3 codex exec "task"
