@@ -780,10 +780,10 @@ function UserLeaderboard({
                 </span>
                 <span className="mt-0.5 block font-mono text-xs tabular-nums text-muted">
                   {metric === "tokens"
-                    ? `${formatNumber(install.sessionEnds)} ${
+                    ? `${formatCost(install.costUsd)} · ${formatNumber(install.sessionEnds)} ${
                         install.sessionEnds === 1 ? "session" : "sessions"
                       }`
-                    : `${formatCompactTokens(totalTokens(install))} tokens`}
+                    : `${formatCost(install.costUsd)} · ${formatCompactTokens(totalTokens(install))} tokens`}
                 </span>
               </span>
             </button>
@@ -827,9 +827,7 @@ function DailyActiveUsersChart({
     const y = chartBottom - (row.count / chartMax) * chartHeight;
     return { ...row, x, y };
   });
-  const linePath = points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
-    .join(" ");
+  const linePath = smoothChartPath(points);
   const areaPath =
     points.length > 0
       ? `${linePath} L ${points.at(-1)?.x ?? 0} ${chartBottom} L ${points[0]?.x ?? 0} ${chartBottom} Z`
@@ -1563,6 +1561,17 @@ function leaderboardMetricValue(
 
 function formatLeaderboardMetric(value: number, metric: LeaderboardMetric): string {
   return metric === "tokens" ? formatCompactTokens(value) : formatNumber(value);
+}
+
+function smoothChartPath(points: Array<{ x: number; y: number }>): string {
+  const firstPoint = points[0];
+  if (!firstPoint) return "";
+
+  return points.slice(1).reduce((path, point, index) => {
+    const previousPoint = points[index];
+    const midpointX = (previousPoint.x + point.x) / 2;
+    return `${path} C ${midpointX} ${previousPoint.y} ${midpointX} ${point.y} ${point.x} ${point.y}`;
+  }, `M ${firstPoint.x} ${firstPoint.y}`);
 }
 
 function fillActivitySeries(rows: DailyActiveUsers[], range: DashboardRange): DailyActiveUsers[] {
