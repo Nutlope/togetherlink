@@ -34,12 +34,12 @@ const guide = defineGuide({
   path: "/guides/use-together-ai-models-with-deepseek-harness",
   title: "Try DeepSeek Harness with Together AI Models",
   description:
-    "Launch the DeepSeek Harness developer-preview web UI with Kimi K3, GLM 5.2, MiniMax M3, or Qwen 3.7 Max through an ephemeral Together provider patch.",
+    "Launch the DeepSeek Harness developer-preview web UI with Kimi K3, GLM 5.2, MiniMax M3, Qwen 3.7 Max, or DeepSeek V4 Flash through an ephemeral Together provider patch.",
   breadcrumbLabel: "DeepSeek Harness with Together AI models",
   ogKey: "together-deepseek",
   ogAlt: "DeepSeek Harness web UI using open models from Together AI through TogetherLink",
   datePublished: "2026-08-14T12:00:00+02:00",
-  dateModified: "2026-08-14T12:00:00+02:00",
+  dateModified: "2026-08-15T12:00:00+02:00",
   faqs,
 });
 
@@ -60,8 +60,8 @@ function DeepseekHarnessGuide() {
       upstreamInstallLabel="DeepSeek Harness repository"
       launchCommand="tdeepseek"
       launchLabel="Install if needed, then open on Kimi K3"
-      alternateCommand="togetherlink --model zai-org/GLM-5.2 deepseek --port 4080"
-      alternateLabel="Use GLM 5.2 on another port"
+      alternateCommand="togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 deepseek --port 4080"
+      alternateLabel="Use DeepSeek V4 Flash on another port"
       banner="togetherlink ▸ Launching DeepSeek Harness web UI with Together AI (alpha)."
       shortAnswer={
         <p className="m-0">

@@ -34,12 +34,12 @@ const guide = defineGuide({
   path: "/guides/use-together-ai-models-with-prime-agent",
   title: "Run Prime Agent on Together AI Models",
   description:
-    "Launch Prime Agent with Kimi K3, GLM 5.2, MiniMax M3, or Qwen 3.7 Max through Together AI while preserving Prime's long-running agent workflow.",
+    "Launch Prime Agent with Kimi K3, GLM 5.2, MiniMax M3, Qwen 3.7 Max, or DeepSeek V4 Flash through Together AI while preserving Prime's long-running agent workflow.",
   breadcrumbLabel: "Prime Agent with Together AI models",
   ogKey: "together-prime",
   ogAlt: "Prime Agent using open models from Together AI through TogetherLink",
   datePublished: "2026-08-14T12:00:00+02:00",
-  dateModified: "2026-08-14T12:00:00+02:00",
+  dateModified: "2026-08-15T12:00:00+02:00",
   faqs,
 });
 
@@ -95,7 +95,7 @@ function PrimeAgentGuide() {
         ],
         [
           "Model choice",
-          "Switch among the four curated Together models without editing Prime's normal configuration.",
+          "Switch among the five curated Together models without editing Prime's normal configuration.",
         ],
       ]}
       faqs={faqs}

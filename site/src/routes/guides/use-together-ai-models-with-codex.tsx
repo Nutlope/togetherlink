@@ -35,6 +35,11 @@ const models = [
     id: "Qwen/Qwen3.7-Max",
     note: "Vision-capable model with a 1M context window.",
   },
+  {
+    name: "DeepSeek V4 Flash",
+    id: "deepseek-ai/DeepSeek-V4-Flash-0731",
+    note: "Fast text reasoning model with a 1M context window.",
+  },
 ];
 
 const faqs: Faq[] = [

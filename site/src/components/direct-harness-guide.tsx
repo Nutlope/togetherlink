@@ -42,6 +42,7 @@ const models = [
   ["GLM 5.2", "zai-org/GLM-5.2", "Text · 512K context"],
   ["MiniMax M3", "MiniMaxAI/MiniMax-M3", "Vision · 512K context"],
   ["Qwen 3.7 Max", "Qwen/Qwen3.7-Max", "Vision · 1M context"],
+  ["DeepSeek V4 Flash", "deepseek-ai/DeepSeek-V4-Flash-0731", "Text · reasoning · 1M context"],
 ] as const;
 
 export function DirectHarnessGuidePage(config: DirectHarnessGuideConfig) {
@@ -197,7 +198,7 @@ export function DirectHarnessGuidePage(config: DirectHarnessGuideConfig) {
             Curated model catalog
           </div>
           <h2 id="models-heading" className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]">
-            Four models, with Kimi K3 as the default
+            Five models, with Kimi K3 as the default
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
             To override the model, put <code>--model</code> before the harness name. Arguments after

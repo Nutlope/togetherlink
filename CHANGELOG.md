@@ -3,6 +3,25 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.3 - 2026-08-15
+
+### Added
+
+- Added `deepseek-ai/DeepSeek-V4-Flash-0731` as a curated selectable model across Claude Code,
+  Codex, OpenCode, DeepSeek Harness, Grok Build, Pi Code, Prime Agent, and ChatGPT Desktop.
+- Added verified Together pricing and context metadata plus DeepSeek reasoning, text-modality,
+  tool-calling, and output-limit metadata.
+
+### Changed
+
+- Listed DeepSeek V4 Flash last in curated model selectors and user-facing model lists while
+  keeping Kimi K3 as the default.
+
+### Tests
+
+- Added focused coverage for exact-ID resolution and generated model catalogs across the
+  supported harnesses, plus a live exact-ID Codex inference smoke.
+
 ## 0.8.2 - 2026-08-15
 
 ### Added
