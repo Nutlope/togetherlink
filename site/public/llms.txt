@@ -152,7 +152,7 @@ Capabilities:
 - `MiniMaxAI/MiniMax-M3` — MiniMax M3. Vision, 512K context, cheapest vision primary.
 - `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context.
 
-Vision-capable models accept image attachments directly; the text-only GLM 5.2 model routes images to the Kimi K3 vision subagent automatically.
+Vision-capable models accept image attachments directly. DeepSeek V4 Flash and GLM 5.2 are text-only; harnesses with vision delegation use Kimi K3 for image work.
 
 ## Headless & agentic usage
 
