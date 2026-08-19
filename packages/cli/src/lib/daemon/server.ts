@@ -336,6 +336,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       // Active requests are deliberately left alone and keep draining.
       server.closeIdleConnections();
     });
+    activeSessions.flushAll();
     activeSessions.closeStore();
     try {
       await unlink(daemonPidPath());

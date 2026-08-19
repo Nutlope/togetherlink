@@ -87,7 +87,7 @@ export function formatUsageReport(summary: UsageSummary, periodLabel: string): s
   const coverage = "Other harnesses aren't tracked yet.";
   const lines = [`TogetherLink usage · ${periodLabel.toLowerCase()}`];
   if (summary.models.length === 0) {
-    lines.push("", "No completed usage.", coverage);
+    lines.push("", "No usage recorded in this window.", coverage);
     return lines.join("\n");
   }
 
@@ -110,8 +110,8 @@ export function formatUsageReport(summary: UsageSummary, periodLabel: string): s
     label: AGENT_LABEL[agent],
     ...usage,
   }));
-  lines.push("", ...formatBreakdownTable("Models", models));
-  lines.push("", ...formatBreakdownTable("Harnesses", harnesses));
+  lines.push("", "Models", ...formatBreakdownTable("Model", models));
+  lines.push("", "Harnesses", ...formatBreakdownTable("Harness", harnesses));
   lines.push("", coverage);
   return lines.join("\n");
 }
@@ -164,23 +164,71 @@ function formatSummaryRows(rows: Array<{ label: string; value: string }>): strin
 }
 
 function formatBreakdownTable(
-  title: string,
+  firstHeader: string,
   rows: Array<{ label: string } & UsageBreakdown>,
 ): string[] {
   const rendered = rows.map((row) => ({
-    label: `  ${row.label}`,
+    label: row.label,
     tokens: formatCompactNumber(totalTokens(row)),
     cost: formatUsd(row.costUsd),
   }));
-  const labelWidth = Math.max(title.length, ...rendered.map((row) => row.label.length));
-  const tokenWidth = Math.max("Tokens".length, ...rendered.map((row) => row.tokens.length));
-  const costWidth = Math.max("Cost".length, ...rendered.map((row) => row.cost.length));
+  return formatBoxTable(
+    [firstHeader, "Tokens", "Cost"],
+    rendered.map((row) => [row.label, row.tokens, row.cost]),
+    ["left", "right", "right"],
+  );
+}
+
+const HORIZONTAL = "─";
+const VERTICAL = "│";
+
+/**
+ * Render a headered table with Unicode box borders. Headers are centered,
+ * each column's alignment is caller-chosen (labels left, numbers right).
+ * No external deps — keeps the usage report self-contained.
+ */
+function formatBoxTable(
+  headers: string[],
+  rows: string[][],
+  aligns: Array<"left" | "right" | "center">,
+): string[] {
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...rows.map((row) => (row[column] ?? "").length)),
+  );
+  const padCell = (text: string, width: number, alignment: "left" | "right" | "center"): string => {
+    if (alignment === "right") {
+      return text.padStart(width);
+    }
+    if (alignment === "center") {
+      const left = Math.floor((width - text.length) / 2);
+      return " ".repeat(left) + text + " ".repeat(width - text.length - left);
+    }
+    return text.padEnd(width);
+  };
+  const renderRow = (cells: string[], cellAligns: Array<"left" | "right" | "center">): string =>
+    VERTICAL +
+    cells
+      .map((cell, column) => {
+        const width = widths[column];
+        const alignment = cellAligns[column];
+        if (width === undefined || alignment === undefined) {
+          return ` ${cell} `;
+        }
+        return ` ${padCell(cell, width, alignment)} `;
+      })
+      .join(VERTICAL) +
+    VERTICAL;
+  const border = (left: string, join: string, right: string): string =>
+    left + widths.map((width) => HORIZONTAL.repeat(width + 2)).join(join) + right;
   return [
-    `${title.padEnd(labelWidth)}  ${"Tokens".padStart(tokenWidth)}  ${"Cost".padStart(costWidth)}`,
-    ...rendered.map(
-      (row) =>
-        `${row.label.padEnd(labelWidth)}  ${row.tokens.padStart(tokenWidth)}  ${row.cost.padStart(costWidth)}`,
+    border("┌", "┬", "┐"),
+    renderRow(
+      headers,
+      aligns.map(() => "center"),
     ),
+    border("├", "┼", "┤"),
+    ...rows.map((row) => renderRow(row, aligns)),
+    border("└", "┴", "┘"),
   ];
 }
 

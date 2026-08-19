@@ -3,6 +3,21 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## Unreleased
+
+### Fixed
+
+- `togetherlink usage` now counts ChatGPT Desktop (codex-app) and other still-running proxied
+  sessions. Usage was previously only recorded when a session ended, and codex-app sessions
+  register without a pid so they never end while the app is open — their spend was invisible in
+  the report and lost if the daemon restarted. The daemon now flushes in-memory cost to the
+  session store on a cadence and on graceful shutdown, and the usage query includes active
+  sessions seen within the window.
+
+### Changed
+
+- `togetherlink usage` model and harness breakdowns now render as Unicode box-bordered tables.
+
 ## 0.8.3 - 2026-08-15
 
 ### Added

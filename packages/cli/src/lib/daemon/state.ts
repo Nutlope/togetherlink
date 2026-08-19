@@ -320,6 +320,39 @@ export class SessionRegistry {
     this.store = undefined;
   }
 
+  /**
+   * Attach a session store directly — used by the daemon's `restorePersisted`
+   * and by tests that want to drive persistence without spawning the daemon.
+   * Pairs with `closeStore`.
+   */
+  attachStore(store: SessionStore): void {
+    this.store = store;
+  }
+
+  /**
+   * Flush one session's accumulated cost to the store now. The daemon calls
+   * this on a cadence from `markSeen` (via the private `flushSessionUsage`) so
+   * never-ending proxied sessions (codex-app) surface in the usage report and
+   * survive a restart; exposing it also makes that flush unit-testable.
+   */
+  flushUsage(token: string): void {
+    const state = this.map.get(token);
+    if (state) {
+      this.flushSessionUsage(state);
+    }
+  }
+
+  /**
+   * Flush every active session's accumulated cost to the store. Called on
+   * graceful shutdown so a daemon restart (CLI update, service refresh) does
+   * not lose the tail of in-flight spend the cadence tick has not yet written.
+   */
+  flushAll(): void {
+    for (const state of this.map.values()) {
+      this.flushSessionUsage(state);
+    }
+  }
+
   private persistSession(state: SessionState): void {
     this.store?.upsertSession(toPersistedSession(state));
   }
@@ -332,6 +365,29 @@ export class SessionRegistry {
     }
     state.lastSeenPersistedAt = now;
     this.store?.updateSessionLastSeen(state.token, now);
+    this.flushSessionUsage(state);
+  }
+
+  /**
+   * Flush the in-memory cost tracker for a proxied session to the store on the
+   * same cadence as the last-seen tick. Proxied agents (claude/codex/codex-app)
+   * otherwise only persist usage at session end — so a daemon restart would
+   * lose in-flight spend, and a never-ending session (codex-app, which has no
+   * pid and so is never reaped while the app is open) would never surface in
+   * the usage report at all. `queryUsageSince` now counts active sessions too,
+   * so keeping this snapshot fresh is what makes codex-app usage visible.
+   */
+  private flushSessionUsage(state: SessionState): void {
+    if (!isProxiedAgent(state.agent)) {
+      return;
+    }
+    this.store?.updateSessionUsage(
+      state.token,
+      state.costTracker.summarize(),
+      state.costTracker.totals,
+      state.costTracker.totalsByModel,
+      state.externalSummary,
+    );
   }
 
   private enforceNoPidSessionLimit(now: number): number {
