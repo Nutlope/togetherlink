@@ -131,12 +131,12 @@ Serverless prices below are in USD per 1 million tokens and come from Together's
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.8.4):
+Put `--model` BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. `--main` is an exact alias of `--model` (same flag, same slot, all harnesses); neither one is harness-specific, and neither works after the harness name. Verified against the installed CLI (v0.8.4):
 
 ```
 togetherlink --model MiniMaxAI/MiniMax-M3 codex exec "task"
 togetherlink --model MiniMaxAI/MiniMax-M3 claude -p "task"
-togetherlink --main together-glm-5-2 claude -p "task"   # Claude matches alias OR id
+togetherlink --main together-glm-5-2 claude -p "task"   # --main == --model; value matches alias OR id
 togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 deepseek
 ```
 
@@ -227,7 +227,7 @@ Per-task cost varies a lot with how verbose the agent is. Mechanical, well-scope
 3. 60s health check after launch; kill + relaunch on a failed start (watch for frozen line count).
 4. Never lint/review mid-run; wait for the done signal.
 5. Review the diff + re-run lint yourself before committing.
-6. To select a model, put `--model` (or `--main` for Claude) before the harness subcommand — after the harness it is silently ignored and the default runs.
+6. To select a model, put `--model` (or its exact alias `--main`) before the harness subcommand — after the harness it is silently ignored and the default runs. The flag order is what matters, not which spelling you use.
 7. For Claude `-p`, pass `--dangerously-skip-permissions` so a headless subagent never blocks on a permission prompt. Codex `exec` is non-interactive by design; use `-s workspace-write` for edits and `--skip-git-repo-check` outside a git repo.
 8. If your current CLI has native subagents, delegate togetherlink launches to one of those subagents and let it return the result, instead of spending the main orchestrator's context on the full `tcodex`/`tclaude` run.
 
