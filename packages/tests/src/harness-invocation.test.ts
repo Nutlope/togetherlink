@@ -92,6 +92,43 @@ describe("harness invocation parsing", () => {
     expect(parsed.flags.restore).toBe(true);
   });
 
+  test("parses off after a harness as a togetherlink verb, not passthrough", () => {
+    const parsed = parseArgs(["codex", "off"]);
+
+    expect(parsed.positional).toEqual(["codex", "off"]);
+    expect(parsed.flags.passthrough).toEqual([]);
+  });
+
+  test("parses restore after a harness as a togetherlink verb, not passthrough", () => {
+    const parsed = parseArgs(["codex", "restore"]);
+
+    expect(parsed.positional).toEqual(["codex", "restore"]);
+    expect(parsed.flags.passthrough).toEqual([]);
+  });
+
+  test("keeps harness passthrough after the off/restore verb", () => {
+    const parsed = parseArgs(["codex", "off", "--flag-for-codex"]);
+
+    expect(parsed.positional).toEqual(["codex", "off"]);
+    expect(parsed.flags.passthrough).toEqual(["--flag-for-codex"]);
+  });
+
+  test("still forwards a literal off after the passthrough separator", () => {
+    const parsed = parseArgs(["codex", "--", "off"]);
+    const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);
+
+    expect(invocation.command).toBe("codex");
+    expect(invocation.flags.passthrough).toEqual(["off"]);
+    expect(invocation.flags.passthroughSeparator).toBe(true);
+  });
+
+  test("keeps off positional for chatgpt, which is not a harness token", () => {
+    const parsed = parseArgs(["chatgpt", "off"]);
+
+    expect(parsed.positional).toEqual(["chatgpt", "off"]);
+    expect(parsed.flags.passthrough).toBeUndefined();
+  });
+
   test("forwards Grok headless flags to the native CLI", () => {
     const parsed = parseArgs(["grok", "--", "--output-format", "streaming-json", "-p", "hi"]);
     const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);

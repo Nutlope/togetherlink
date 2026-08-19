@@ -158,7 +158,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
       ? `Default model changed to: ${selectedModel.definition.name}`
       : `Native GPT default preserved; Together default available: ${selectedModel.definition.name}`,
     "Start a task or open a repository in ChatGPT App as usual.",
-    "Restore your previous ChatGPT App profile with: togetherlink chatgpt --restore",
+    "Disable and restore your previous profile with: togetherlink chatgpt off (or: togetherlink codex off)",
     `Backup: ${backup}`,
     codexAppLaunchMessage(launch),
   ]
@@ -245,15 +245,33 @@ export function buildCodexAppConfig(
 }
 
 async function restoreCodexApp(home: string): Promise<HarnessResult> {
+  const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
+  const raw = await readTextIfExists(manifestPath);
+  if (!raw) {
+    // Distinguish "never enabled" from "enabled but the backup is gone": with
+    // no managed block in the shared config there is genuinely nothing to do,
+    // which is the common case for `togetherlink codex off` on a fresh setup.
+    // Check this before the running-app guard so a plain `codex off` works
+    // even while ChatGPT Desktop happens to be open.
+    if (
+      !(await isManagedCodexAppConfig(
+        home,
+        codexConfigPath(home),
+        CODEX_APP_CONFIG_MARKER_START,
+        modelCatalogPath(home),
+      ))
+    ) {
+      return {
+        message:
+          "No togetherlink-managed config found in ~/.codex/config.toml — nothing to disable.",
+      };
+    }
+    throw new Error(`No ChatGPT App backup found at ${manifestPath}.`);
+  }
   if (await isCodexAppRunning()) {
     throw new Error(
       "Quit ChatGPT App before restoring TogetherLink so affected task history can be backed up and repaired safely.",
     );
-  }
-  const manifestPath = path.join(backupDir(home), BACKUP_MANIFEST);
-  const raw = await readTextIfExists(manifestPath);
-  if (!raw) {
-    throw new Error(`No ChatGPT App backup found at ${manifestPath}.`);
   }
 
   const manifest = JSON.parse(raw) as BackupManifest;
@@ -294,7 +312,7 @@ async function restoreCodexApp(home: string): Promise<HarnessResult> {
   const launch = await launchCodexApp({ reason: "restored", openIfClosed: false });
   return {
     message: [
-      "ChatGPT App restored to your previous profile.",
+      "Removed the togetherlink-managed config from ~/.codex/config.toml (shared by Codex CLI and ChatGPT App) and restored your previous profile.",
       `Backup date: ${manifest.createdAt}`,
       repair.itemsRepaired > 0
         ? `Repaired ${repair.itemsRepaired} replay-unsafe reasoning item(s) across ${repair.filesRepaired} task file(s); originals were backed up.`

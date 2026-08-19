@@ -67,6 +67,17 @@ async function daemonStop(): Promise<void> {
   console.log(`togetherlink daemon: stopped (pid ${pid}) on ${daemonUrl(port)}.`);
 }
 
+async function runCodexApp(flags: ReturnType<typeof parseArgs>["flags"]): Promise<void> {
+  const { runCodexAppCommand } = await import("../lib/codex-app.js");
+  const result = await runCodexAppCommand({ home: os.homedir(), ...flags });
+  if (result.message) {
+    console.log(result.message);
+  }
+  if (result.payload) {
+    console.log(JSON.stringify(result.payload, null, 2));
+  }
+}
+
 async function loadStoredExaKey(): Promise<void> {
   if (process.env.EXA_API_KEY) {
     return;
@@ -300,21 +311,51 @@ async function main() {
     throw new Error(`Unknown "daemon ${verb}" command. Expected: stop.`);
   }
 
+  // `off`/`restore` after `chatgpt`/`codex-app` (or bare `togetherlink
+  // restore`) disables the togetherlink-managed block in ~/.codex/config.toml.
+  // That file is shared by ChatGPT Desktop and the Codex CLI, so the managed
+  // `openai_base_url` would otherwise keep routing plain `codex` launches
+  // through the local daemon. No API key is needed to turn the config off.
+  if (command === "restore") {
+    if (rawVerb !== undefined) {
+      throw new Error('Unknown "restore" argument. Expected: togetherlink restore.');
+    }
+    await runCodexApp({ ...parsed.flags, restore: true });
+    return;
+  }
+
   if (command === "codex-app") {
+    if (rawVerb === "off" || rawVerb === "restore") {
+      parsed.flags.restore = true;
+    } else if (rawVerb !== undefined) {
+      throw new Error(`Unknown "chatgpt ${rawVerb}" command. Expected: off, restore.`);
+    }
     if (!parsed.flags.restore && !(await ensureConfiguredForInteractiveLaunch())) {
       throw new Error(
         "No Together API key found. Run `togetherlink configure` or set TOGETHER_API_KEY.",
       );
     }
-    const { runCodexAppCommand } = await import("../lib/codex-app.js");
-    const result = await runCodexAppCommand({ home: os.homedir(), ...parsed.flags });
-    if (result.message) {
-      console.log(result.message);
-    }
-    if (result.payload) {
-      console.log(JSON.stringify(result.payload, null, 2));
-    }
+    await runCodexApp(parsed.flags);
     return;
+  }
+
+  // `togetherlink codex off` / `codex restore`: Codex CLI itself holds no
+  // persistent togetherlink state (it is configured via `-c` launch flags),
+  // but it reads the same ~/.codex/config.toml the chatgpt command manages —
+  // so disabling that managed config is the only sensible meaning of "off".
+  if (command === "codex" && (rawVerb === "off" || rawVerb === "restore")) {
+    await runCodexApp({ ...parsed.flags, restore: true });
+    return;
+  }
+
+  // Every other harness is configured per-launch (env vars / flags), so there
+  // is no persistent togetherlink config for `off`/`restore` to remove. Fail
+  // loudly instead of forwarding the verb to the harness binary as a prompt.
+  if (isHarnessCommand(command) && (rawVerb === "off" || rawVerb === "restore")) {
+    throw new Error(
+      `togetherlink ${command} writes no persistent config — there is nothing to disable. ` +
+        "Only chatgpt/codex share a managed ~/.codex/config.toml (see: togetherlink codex off).",
+    );
   }
 
   const invocation = resolveHarnessInvocation(parsed.positional, parsed.flags);

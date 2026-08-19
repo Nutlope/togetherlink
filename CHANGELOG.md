@@ -3,6 +3,26 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## Unreleased
+
+### Added
+
+- `togetherlink chatgpt off` to disable the togetherlink-managed `~/.codex/config.toml` and
+  restore the previous profile. Also available as `togetherlink codex off`, bare
+  `togetherlink restore`, and the `restore` verb without dashes (`chatgpt restore`,
+  `codex restore`); the `--restore` flag keeps working. The managed config is shared by ChatGPT
+  Desktop and the Codex CLI, so disabling it from either command fixes both.
+
+### Fixed
+
+- `togetherlink chatgpt off` silently re-applied the managed config (the `off` argument was
+  ignored), and `togetherlink codex off` launched the Codex CLI with "off" as a prompt argument.
+  Both now disable the managed config.
+- Disabling with no managed config present is now a friendly no-op instead of a missing-backup
+  error, and it works while ChatGPT Desktop is open.
+- `off`/`restore` after harnesses that write no persistent config (Claude Code, OpenCode, ...)
+  now fails with a clear error instead of forwarding the verb to the harness as a prompt.
+
 ## 0.8.4 - 2026-08-19
 
 ### Fixed
