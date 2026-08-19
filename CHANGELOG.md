@@ -17,6 +17,8 @@ version 0.6.5; earlier release history remains available in Git.
 ### Changed
 
 - `togetherlink usage` model and harness breakdowns now render as Unicode box-bordered tables.
+- Renamed the Codex launcher option and usage-report harness label to "Codex CLI" to distinguish
+  the terminal Codex CLI from ChatGPT Desktop.
 
 ## 0.8.3 - 2026-08-15
 

@@ -33,7 +33,7 @@ const WINDOW_UNITS = {
 
 const AGENT_LABEL: Record<UsageSession["agent"], string> = {
   claude: "Claude Code",
-  codex: "Codex",
+  codex: "Codex CLI",
   "codex-app": "ChatGPT Desktop",
 };
 
