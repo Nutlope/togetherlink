@@ -99,6 +99,7 @@ Relative to the frozen Together median, the candidate median:
 - reduced thinking-bearing responses by 93.3%;
 - reduced median compactions from 1 to 0, although the longest run still compacted once at 167,377 pre-compaction tokens;
 - increased turns by 51.9%; and
+- increased aggregate input tokens by 83.8% and cached input tokens by 89.7%; and
 - increased provider cost by 28.1%.
 
 The result confirms the narrow mechanism: historical reasoning replay was a major source of output and duration amplification. It does not establish that the change eliminates compaction or reduces cost on every trajectory. The remaining efficiency gap is dominated by more agent turns and provider requests, including large volumes of cached input.
