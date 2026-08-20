@@ -1,6 +1,6 @@
 # Claude historical-thinking replay experiment
 
-Status: feasibility passed; two identical replication runs required before any stability or merge claim
+Status: three-run screen passed the review gate on correctness, duration, compaction, and protocol validity; provider cost regressed and requires separate optimization
 
 ## Hypothesis
 
@@ -44,7 +44,7 @@ Representative source artifact SHA-256: `7e7336abcd946695ccacdd98d5b55633bdfdf30
 
 One earlier live attempt used a stale key and returned HTTP 402 before inference. A second valid-key attempt completed two turns but Claude Code's conservative cost estimate crossed a deliberately low $0.15 test cap; TogetherLink measured $0.0485. Neither is candidate validity evidence.
 
-## Full E2B feasibility run
+## First full E2B feasibility run
 
 Run `togetherlink-claude-tinydb-2026-08-20T14-37-20.195Z-e6450987` used the frozen candidate bundle in one complete Claude Code invocation. It ran in a fresh E2B sandbox with model-only egress to Together, a sealed evaluator, the unchanged TinyDB task hash, GLM-5.2, Claude Code 2.1.235, and the matched 200k context profile.
 
@@ -75,10 +75,42 @@ The candidate does not delete thinking blocks already stored in Claude Code's lo
 
 ### Directional FireConnect comparison
 
-The historical five-run FireConnect median was 163/204, 20m 33s, $1.1982, 89,336 output tokens, 73 turns, and zero compactions. This single candidate run scored higher and finished about 20% faster, but remained about 4x more expensive and used 13% more output tokens. Because this is one candidate run compared with a historical distribution rather than a fresh matched pair, it is directional evidence only.
+The historical five-run FireConnect median was 163/204, 20m 33s, $1.1982, 89,336 output tokens, 73 turns, and zero compactions. The three-run candidate median scored six tests higher and took 24 seconds longer, but remained 6.1x more expensive, used 50% more output tokens, and used 3.2x as many turns. Because this candidate screen is compared with a historical distribution rather than fresh matched pairs, it is directional evidence only.
+
+## Three-run screen
+
+The two independent replications used the same frozen bundle, task hash, Claude Code version, GLM-5.2 model, matched 200k context, E2B isolation, and network policy. No run was resumed, continued after termination, or combined with another invocation.
+
+|                    Run |       Score |    Duration |        Cost | Output tokens |   Turns | Compactions | Thinking responses |
+| ---------------------: | ----------: | ----------: | ----------: | ------------: | ------: | ----------: | -----------------: |
+|                      1 |     173/204 |     16m 30s |     $4.7582 |       101,214 |     212 |           0 |                  6 |
+|                      2 |     169/204 |     20m 57s |     $7.3147 |       134,379 |     237 |           0 |                  6 |
+|                      3 |     164/204 |     41m 03s |     $9.0242 |       286,328 |     334 |           1 |                 19 |
+|   **Candidate median** | **169/204** | **20m 57s** | **$7.3147** |   **134,379** | **237** |       **0** |              **6** |
+| Frozen Together median |     172/204 |     40m 51s |     $5.7119 |       260,883 |     156 |           1 |                 89 |
+
+All three runs exited 0 with terminal reason `completed`, produced READY, and returned all 204 evaluator outcomes. All three used fresh isolated sandboxes, passed the secret scan, and logged no transport error, timeout, retry, or reconnect.
+
+Relative to the frozen Together median, the candidate median:
+
+- lost 3 evaluator passes while remaining above the predeclared 167-pass floor;
+- reduced duration by 48.7%;
+- reduced output tokens by 48.5%;
+- reduced thinking-bearing responses by 93.3%;
+- reduced median compactions from 1 to 0, although the longest run still compacted once at 167,377 pre-compaction tokens;
+- increased turns by 51.9%; and
+- increased provider cost by 28.1%.
+
+The result confirms the narrow mechanism: historical reasoning replay was a major source of output and duration amplification. It does not establish that the change eliminates compaction or reduces cost on every trajectory. The remaining efficiency gap is dominated by more agent turns and provider requests, including large volumes of cached input.
 
 ## Decision and next gate
 
-The candidate passes the feasibility gate and merits replication. It must not be described as stable or merge-ready from one run.
+The candidate passes its predeclared three-run promotion gate:
 
-Run exactly two more independent TogetherLink candidate invocations with the identical bundle and frozen configuration. Promote the candidate for review only if all three runs complete normally with READY and all 204 evaluator outcomes, the three-run median score is at least 167, median compactions is zero, and median duration improves by at least 20% or median provider cost improves by at least 20% against the frozen Together baseline, with no new protocol or isolation regression.
+- 3/3 normal READY runs with all 204 outcomes;
+- median score 169, above the 167 floor;
+- median compactions 0;
+- median duration improved by more than 20%; and
+- no protocol or isolation regression.
+
+Promote the branch for code review, not automatic merge. The review should decide whether omitting historical `thinking` is an acceptable Claude-compatibility policy. Do not spend more full TinyDB runs on this unchanged candidate. The next controlled experiment should target the remaining request/turn proliferation; a fresh matched FireConnect run is only needed if making a causal provider-comparison claim rather than evaluating this TogetherLink change against its frozen baseline.
