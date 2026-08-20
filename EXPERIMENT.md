@@ -1,6 +1,6 @@
 # Claude historical-thinking replay experiment
 
-Status: candidate frozen; one full E2B feasibility run pending
+Status: feasibility passed; two identical replication runs required before any stability or merge claim
 
 ## Hypothesis
 
@@ -44,10 +44,41 @@ Representative source artifact SHA-256: `7e7336abcd946695ccacdd98d5b55633bdfdf30
 
 One earlier live attempt used a stale key and returned HTTP 402 before inference. A second valid-key attempt completed two turns but Claude Code's conservative cost estimate crossed a deliberately low $0.15 test cap; TogetherLink measured $0.0485. Neither is candidate validity evidence.
 
-## Important boundary
+## Full E2B feasibility run
 
-This change reduces the history sent from TogetherLink to Together. It does not remove thinking blocks already shown to and stored by Claude Code, so it is not expected by itself to prevent Claude Code's local auto-compaction. The full run must separately measure provider cost/output behavior and client compaction.
+Run `togetherlink-claude-tinydb-2026-08-20T14-37-20.195Z-e6450987` used the frozen candidate bundle in one complete Claude Code invocation. It ran in a fresh E2B sandbox with model-only egress to Together, a sealed evaluator, the unchanged TinyDB task hash, GLM-5.2, Claude Code 2.1.235, and the matched 200k context profile.
 
-## Next gate
+The comparison below uses the median of the five valid frozen TogetherLink baseline runs. This is a one-run feasibility result, not a stability estimate.
 
-Run exactly one network-sealed TogetherLink TinyDB invocation using this frozen bundle. It is a feasibility run, not a stability claim. If it completes normally with READY and all 204 evaluator outcomes while preserving score, compare its duration, cost, output tokens, turns, and compaction with the frozen five-run baseline before deciding whether it merits a three-run screen.
+| Measure                       | Frozen baseline median |  Candidate run |  Change |
+| ----------------------------- | ---------------------: | -------------: | ------: |
+| Evaluator pass count          |                172/204 |        173/204 | +1 test |
+| Agent duration                |                40m 51s |        16m 30s |  -59.6% |
+| Provider cost                 |                $5.7119 |        $4.7582 |  -16.7% |
+| Output tokens                 |                260,883 |        101,214 |  -61.2% |
+| Claude turns                  |                    156 |            212 |  +35.9% |
+| Compactions                   |                      1 |              0 |      -1 |
+| Maximum provider input        |         164,883 tokens | 111,526 tokens |  -32.4% |
+| Provider requests             |                    145 |            201 |  +38.6% |
+| Responses containing thinking |                     89 |              6 |  -93.3% |
+| Streamed thinking             |          537,248 chars |   45,227 chars |  -91.6% |
+
+The invocation exited 0 with terminal reason `completed`, produced READY, and returned all 204 evaluator outcomes: 173 passed, 30 failed, 0 errored, and 1 skipped. The transport log contains 201 completed streams and 201 metered requests with no logged error, timeout, retry, or reconnect.
+
+One internal provider response stopped at `max_tokens` after emitting 28,000 output tokens and hitting TogetherLink's 32,000-character thinking cap. Claude Code issued its next normal model request inside the same invocation, and the run later ended normally. This was not a continuation, resume, or second agent run. The five baseline runs had one or two such internal `max_tokens` responses each.
+
+### What the result supports
+
+The model did not do less agent work: it used 212 turns and 211 tool calls, both above the baseline median. The measured improvement instead lines up with the hypothesis that replayed hidden reasoning was amplifying later requests. After removing that replay, the model generated reasoning on only six requests, maximum provider input stayed at 111,526 tokens, Claude Code did not compact, and correctness remained at the baseline level.
+
+The candidate does not delete thinking blocks already stored in Claude Code's local transcript. However, this run shows that reducing the history sent to the provider can also keep Claude Code's observed request usage below its compaction threshold.
+
+### Directional FireConnect comparison
+
+The historical five-run FireConnect median was 163/204, 20m 33s, $1.1982, 89,336 output tokens, 73 turns, and zero compactions. This single candidate run scored higher and finished about 20% faster, but remained about 4x more expensive and used 13% more output tokens. Because this is one candidate run compared with a historical distribution rather than a fresh matched pair, it is directional evidence only.
+
+## Decision and next gate
+
+The candidate passes the feasibility gate and merits replication. It must not be described as stable or merge-ready from one run.
+
+Run exactly two more independent TogetherLink candidate invocations with the identical bundle and frozen configuration. Promote the candidate for review only if all three runs complete normally with READY and all 204 evaluator outcomes, the three-run median score is at least 167, median compactions is zero, and median duration improves by at least 20% or median provider cost improves by at least 20% against the frozen Together baseline, with no new protocol or isolation regression.
