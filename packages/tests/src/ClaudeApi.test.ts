@@ -802,7 +802,7 @@ describe("Claude proxy compatibility API", () => {
     expect(String(content[0]?.signature).length).toBeLessThan(40);
   });
 
-  test("preserves prior Claude thinking blocks when translating history", async () => {
+  test("drops prior Claude thinking blocks when translating history", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
@@ -847,15 +847,10 @@ describe("Claude proxy compatibility API", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(upstreamMessages(upstreamBodies[0])).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: "assistant",
-          content: "READY",
-          reasoning_content: "Remember marker BLUE-CHAIR-8273.",
-        }),
-      ]),
+    const assistant = upstreamMessages(upstreamBodies[0]).find(
+      (message) => message.role === "assistant" && message.content === "READY",
     );
+    expect(assistant).toEqual({ role: "assistant", content: "READY" });
   });
 
   test("recovers from Together input-over-context errors by trimming old prompt text", async () => {

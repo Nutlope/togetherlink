@@ -196,7 +196,6 @@ export function toOpenAIMessages(
     const textParts: string[] = [];
     const contentParts: NonNullable<Exclude<OpenAIMessage["content"], string | null>> = [];
     let hasImageContent = false;
-    const reasoningParts: string[] = [];
     const toolCalls: OpenAIMessage["tool_calls"] = [];
     for (const block of message.content) {
       if (block.type === "text") {
@@ -208,10 +207,11 @@ export function toOpenAIMessages(
           contentParts.push({ type: "image_url", image_url: { url: imageUrl } });
           hasImageContent = true;
         }
-      } else if (block.type === "thinking") {
-        reasoningParts.push(block.thinking);
-      } else if (block.type === "redacted_thinking") {
-        reasoningParts.push(block.data);
+      } else if (block.type === "thinking" || block.type === "redacted_thinking") {
+        // Claude includes prior thinking blocks in conversation history. Replaying
+        // them as reasoning_content makes hidden work grow on every turn; visible
+        // text and tool calls already preserve the actions the model took.
+        continue;
       } else if (block.type === "tool_result") {
         messages.push({
           role: "tool",
@@ -258,11 +258,10 @@ export function toOpenAIMessages(
     }
 
     const content = hasImageContent ? contentParts : textParts.join("\n");
-    if (content.length > 0 || reasoningParts.length > 0 || toolCalls.length > 0) {
+    if (content.length > 0 || toolCalls.length > 0) {
       messages.push({
         role: message.role,
         content: typeof content === "string" ? content || null : content,
-        ...(reasoningParts.length > 0 ? { reasoning_content: reasoningParts.join("\n") } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       });
     }
