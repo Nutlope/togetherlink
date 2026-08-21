@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import os from "node:os";
 import { loadEnvFile } from "../lib/load-env.js";
-import { parseArgs } from "../lib/parse-args.js";
+import { isRestoreVerb, parseArgs } from "../lib/parse-args.js";
 import { printHelp, runConfigure } from "../lib/commands/global.js";
 import { dispatchHarnessCommand } from "../lib/commands/harness.js";
 import { isHarnessCommand, resolveHarnessInvocation } from "../lib/commands/harness-invocation.js";
@@ -325,7 +325,7 @@ async function main() {
   }
 
   if (command === "codex-app") {
-    if (rawVerb === "off" || rawVerb === "restore") {
+    if (isRestoreVerb(rawVerb)) {
       parsed.flags.restore = true;
     } else if (rawVerb !== undefined) {
       throw new Error(`Unknown "chatgpt ${rawVerb}" command. Expected: off, restore.`);
@@ -343,7 +343,7 @@ async function main() {
   // persistent togetherlink state (it is configured via `-c` launch flags),
   // but it reads the same ~/.codex/config.toml the chatgpt command manages —
   // so disabling that managed config is the only sensible meaning of "off".
-  if (command === "codex" && (rawVerb === "off" || rawVerb === "restore")) {
+  if (command === "codex" && isRestoreVerb(rawVerb)) {
     await runCodexApp({ ...parsed.flags, restore: true });
     return;
   }
@@ -351,7 +351,7 @@ async function main() {
   // Every other harness is configured per-launch (env vars / flags), so there
   // is no persistent togetherlink config for `off`/`restore` to remove. Fail
   // loudly instead of forwarding the verb to the harness binary as a prompt.
-  if (isHarnessCommand(command) && (rawVerb === "off" || rawVerb === "restore")) {
+  if (isHarnessCommand(command) && isRestoreVerb(rawVerb)) {
     throw new Error(
       `togetherlink ${command} writes no persistent config — there is nothing to disable. ` +
         "Only chatgpt/codex share a managed ~/.codex/config.toml (see: togetherlink codex off).",

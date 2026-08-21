@@ -21,7 +21,7 @@ import { CodexRequestError } from "../codex/native-router.js";
 import { isCodexResponsesWebsocketPath } from "../codex/routes.js";
 import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
-import { isReasoningHistoryMode } from "../reasoning-history.js";
+import { isReasoningHistoryMode, REASONING_HISTORY_MODES } from "../reasoning-history.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
 import {
@@ -692,7 +692,7 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
         res,
         400,
         "invalid_request_error",
-        "reasoningHistoryMode must be one of: off, interleaved, full.",
+        `reasoningHistoryMode must be one of: ${REASONING_HISTORY_MODES.join(", ")}.`,
       );
       return;
     }

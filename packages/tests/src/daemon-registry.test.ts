@@ -137,7 +137,7 @@ describe("SessionRegistry (#5 — exported, injectable, testable in isolation)",
     expect(reg.get("second")?.options?.baseUrl).toBe("http://second.test/together/v1");
   });
 
-  test("flushUsage persists a never-ending proxied session's live cost to the store", () => {
+  test("updateUsage persists a never-ending proxied session's live cost to the store", () => {
     const home = mkdtempSync(join(tmpdir(), "togetherlink-registry-flush-"));
     cleanup.push(home);
     // Runs in a child node process so node:sqlite loads (it is not available
@@ -155,8 +155,7 @@ describe("SessionRegistry (#5 — exported, injectable, testable in isolation)",
           const home = process.argv[1];
           const store = await createSessionStore(home);
           if (store.kind !== "sqlite") throw new Error("sqlite unavailable");
-          const reg = new SessionRegistry();
-          reg.attachStore(store);
+          const reg = new SessionRegistry(store);
           // codex-app registers without a pid, so it is never reaped while the app
           // is open — exactly the session whose spend otherwise never reaches the DB.
           reg.register(buildSession({
@@ -174,7 +173,7 @@ describe("SessionRegistry (#5 — exported, injectable, testable in isolation)",
           if (!state) throw new Error("session not registered");
           // 1M input tokens at $1.4/M => $1.40 — a clean, exact figure.
           state.costTracker.addUsage(1_000_000, 0, 0, GLM_5_2);
-          reg.flushUsage("live");
+          reg.updateUsage("live");
           process.stdout.write(JSON.stringify(store.queryUsageSince(0)));
           store.close();
         `,

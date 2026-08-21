@@ -26,11 +26,15 @@ export function resolveReasoningHistoryMode(
   );
 }
 
+export function effectiveReasoningHistoryMode(mode?: ReasoningHistoryMode): ReasoningHistoryMode {
+  return mode ?? DEFAULT_REASONING_HISTORY_MODE;
+}
+
 export function reasoningHistoryPolicy(mode?: ReasoningHistoryMode): {
   includeHistoricalReasoning: boolean;
   clearThinking: boolean;
 } {
-  const effectiveMode = mode ?? DEFAULT_REASONING_HISTORY_MODE;
+  const effectiveMode = effectiveReasoningHistoryMode(mode);
   return {
     includeHistoricalReasoning: effectiveMode !== "off",
     clearThinking: effectiveMode !== "full",

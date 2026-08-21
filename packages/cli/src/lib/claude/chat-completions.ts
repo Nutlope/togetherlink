@@ -3,7 +3,11 @@ import { type ModelDefinition } from "@togetherlink/models";
 import type { ExaSearchOutcome } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
-import { reasoningHistoryPolicy, type ReasoningHistoryMode } from "../reasoning-history.js";
+import {
+  effectiveReasoningHistoryMode,
+  reasoningHistoryPolicy,
+  type ReasoningHistoryMode,
+} from "../reasoning-history.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
 import { CostTracker } from "../cost.js";
 import {
@@ -53,21 +57,14 @@ export async function callTogetherChatCompletions(
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
 ): Promise<OpenAIChatResponse> {
-  const translated =
-    perf?.spanSync("translate_request", () => {
-      const targetModel = resolveTargetModel(body.model, options);
-      const nativeTools = nativeServerTools(body.tools);
-      const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
-      const tools = toOpenAITools(body.tools, options);
-      return { targetModel, nativeTools, messages, tools };
-    }) ??
-    (() => {
-      const targetModel = resolveTargetModel(body.model, options);
-      const nativeTools = nativeServerTools(body.tools);
-      const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
-      const tools = toOpenAITools(body.tools, options);
-      return { targetModel, nativeTools, messages, tools };
-    })();
+  const translate = () => {
+    const targetModel = resolveTargetModel(body.model, options);
+    const nativeTools = nativeServerTools(body.tools);
+    const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
+    const tools = toOpenAITools(body.tools, options);
+    return { targetModel, nativeTools, messages, tools };
+  };
+  const translated = perf?.spanSync("translate_request", translate) ?? translate();
   const { targetModel, nativeTools, messages, tools } = translated;
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
@@ -119,7 +116,7 @@ export async function callTogetherChatCompletions(
       toolCount: payload.tools?.length ?? 0,
       maxTokens: payload.max_tokens,
       reasoningEffort,
-      reasoningHistoryMode: options.reasoningHistoryMode ?? "full",
+      reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
       nativeToolCount: nativeTools.length,
       turn,
     });

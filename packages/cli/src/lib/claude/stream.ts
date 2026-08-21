@@ -4,7 +4,11 @@ import { type ModelDefinition } from "@togetherlink/models";
 import type { ExaSearchOutcome } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
-import { reasoningHistoryPolicy, type ReasoningHistoryMode } from "../reasoning-history.js";
+import {
+  effectiveReasoningHistoryMode,
+  reasoningHistoryPolicy,
+  type ReasoningHistoryMode,
+} from "../reasoning-history.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
 import { writeSse } from "../sse.js";
 import {
@@ -144,7 +148,7 @@ export async function streamAnthropicFromTogether(
     toolCount: payload.tools?.length ?? 0,
     maxTokens: payload.max_tokens,
     reasoningEffort,
-    reasoningHistoryMode: options.reasoningHistoryMode ?? "full",
+    reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
   });
 
   // The Together client owns both transient-status and reactive context-fit

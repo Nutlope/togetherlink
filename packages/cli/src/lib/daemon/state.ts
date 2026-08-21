@@ -165,7 +165,8 @@ export type UsageReportRequest = {
 
 export class SessionRegistry {
   private readonly map = new Map<string, SessionState>();
-  private store: SessionStore | undefined;
+
+  constructor(private store?: SessionStore) {}
 
   register(state: SessionState): void {
     this.map.set(state.token, state);
@@ -218,7 +219,7 @@ export class SessionRegistry {
   }
 
   async restorePersisted(): Promise<number> {
-    this.store = await createSessionStore();
+    this.store ??= await createSessionStore();
     const persisted = this.store.restoreActiveSessions();
     let restored = 0;
     const now = Date.now();
@@ -309,40 +310,12 @@ export class SessionRegistry {
     if (externalSummary) {
       state.externalSummary = externalSummary;
     }
-    this.store?.updateSessionUsage(
-      token,
-      state.costTracker.summarize(),
-      state.costTracker.totals,
-      state.costTracker.totalsByModel,
-      state.externalSummary,
-    );
+    this.persistUsage(state);
   }
 
   closeStore(): void {
     this.store?.close();
     this.store = undefined;
-  }
-
-  /**
-   * Attach a session store directly — used by the daemon's `restorePersisted`
-   * and by tests that want to drive persistence without spawning the daemon.
-   * Pairs with `closeStore`.
-   */
-  attachStore(store: SessionStore): void {
-    this.store = store;
-  }
-
-  /**
-   * Flush one session's accumulated cost to the store now. The daemon calls
-   * this on a cadence from `markSeen` (via the private `flushSessionUsage`) so
-   * never-ending proxied sessions (codex-app) surface in the usage report and
-   * survive a restart; exposing it also makes that flush unit-testable.
-   */
-  flushUsage(token: string): void {
-    const state = this.map.get(token);
-    if (state) {
-      this.flushSessionUsage(state);
-    }
   }
 
   /**
@@ -384,6 +357,10 @@ export class SessionRegistry {
     if (!isProxiedAgent(state.agent)) {
       return;
     }
+    this.persistUsage(state);
+  }
+
+  private persistUsage(state: SessionState): void {
     this.store?.updateSessionUsage(
       state.token,
       state.costTracker.summarize(),

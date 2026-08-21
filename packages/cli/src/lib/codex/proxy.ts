@@ -42,7 +42,7 @@ import {
 } from "./routes.js";
 import type { ResponsesRequest, ResponsesTool } from "./wire-types.js";
 import type { TogetherClientOptions } from "../together-client.js";
-import type { ReasoningHistoryMode } from "../reasoning-history.js";
+import { effectiveReasoningHistoryMode, type ReasoningHistoryMode } from "../reasoning-history.js";
 
 export type CodexProxyOptions = {
   apiKey: string;
@@ -292,7 +292,7 @@ export async function handleCodexProxyRequest(
     inputItems: Array.isArray(body.input) ? body.input.length : typeof body.input,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount,
-    reasoningHistoryMode: options.reasoningHistoryMode ?? "full",
+    reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
     tools: summarizeResponsesTools(body.tools),
   }));
 
