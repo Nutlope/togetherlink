@@ -35,8 +35,13 @@ describe("launchd plist generation", () => {
   const tempHome = path.join(realpathSync(os.tmpdir()), `togetherlink-launchd-test-${process.pid}`);
   const togetherlinkHome = path.join(tempHome, ".togetherlink");
   const originalArgv = [...process.argv];
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
 
   beforeEach(async () => {
+    Object.defineProperty(process, "platform", {
+      ...originalPlatform,
+      value: "darwin",
+    });
     await mkdir(tempHome, { recursive: true });
     vi.spyOn(os, "homedir").mockReturnValue(tempHome);
     vi.stubEnv("TOGETHERLINK_HOME", togetherlinkHome);
@@ -49,6 +54,7 @@ describe("launchd plist generation", () => {
 
   afterEach(async () => {
     process.argv.splice(0, process.argv.length, ...originalArgv);
+    if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await rm(tempHome, { recursive: true, force: true });
