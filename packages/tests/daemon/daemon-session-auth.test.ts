@@ -11,7 +11,7 @@ describe("daemon session-URL auth", () => {
   beforeAll(async () => {
     context = await createTestContext();
     daemon = await startTestDaemon(context);
-    token = await registerClaudeSession(context, daemon);
+    token = await registerClaudeSession(context, daemon, "test-api-key");
   }, 30_000);
 
   afterAll(async () => {

@@ -94,8 +94,9 @@ export async function startTestDaemon(
 export async function registerClaudeSession(
   context: TestContext,
   daemon: TestDaemon,
+  apiKey?: string,
 ): Promise<string> {
-  return await registerSession(context, daemon, "claude");
+  return await registerSession(context, daemon, "claude", apiKey);
 }
 
 export async function registerCodexSession(
@@ -113,8 +114,9 @@ async function registerSession(
   context: TestContext,
   daemon: TestDaemon,
   agent: "claude" | "codex" | "codex-app",
+  providedApiKey?: string,
 ): Promise<string> {
-  const apiKey = await resolveTogetherApiKey(context.repoRoot);
+  const apiKey = providedApiKey ?? (await resolveTogetherApiKey(context.repoRoot));
   const token = `${agent}-context-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const response = await fetch(`${daemon.url}/internal/sessions`, {
     method: "POST",

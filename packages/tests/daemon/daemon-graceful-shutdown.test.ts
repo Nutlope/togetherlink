@@ -24,12 +24,12 @@ describe("daemon graceful shutdown", () => {
         "content-length": "2",
       },
     });
-    const responseStatus = new Promise<number | undefined>((resolve, reject) => {
+    const responseStatus = new Promise<number | undefined>((resolve) => {
       request.once("response", (response) => {
         response.resume();
         response.once("end", () => resolve(response.statusCode));
       });
-      request.once("error", reject);
+      request.once("error", () => resolve(undefined));
     });
     await new Promise<void>((resolve, reject) => {
       request.once("socket", (socket) => {
@@ -44,8 +44,10 @@ describe("daemon graceful shutdown", () => {
 
     // Send only half of the declared body so the request stays active while
     // launchd asks the daemon to restart.
-    request.write("{");
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise<void>((resolve, reject) => {
+      request.write("{", (error) => (error ? reject(error) : resolve()));
+    });
+    expect((await fetch(`${daemon.url}/healthz`)).ok).toBe(true);
     daemon.signal("SIGTERM");
     await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -82,8 +84,10 @@ describe("daemon graceful shutdown", () => {
         socket.once("error", reject);
       });
     });
-    request.write("{");
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise<void>((resolve, reject) => {
+      request.write("{", (error) => (error ? reject(error) : resolve()));
+    });
+    expect((await fetch(`${daemon.url}/healthz`)).ok).toBe(true);
     daemon.signal("SIGTERM");
 
     try {
