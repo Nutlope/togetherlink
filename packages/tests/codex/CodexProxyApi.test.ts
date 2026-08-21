@@ -737,8 +737,11 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(raw).toContain("PORTABLE_ANSWER");
   });
 
-  test("keeps custom and function tool history portable across resumed turns", async () => {
-    const requests: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+  test("keeps reasoning and tool history portable across Codex turns in interleaved mode", async () => {
+    const requests: Array<{
+      messages?: Array<Record<string, unknown>>;
+      chat_template_kwargs?: { clear_thinking?: boolean };
+    }> = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -805,11 +808,14 @@ describe("Codex Responses proxy tool compatibility", () => {
         },
       },
     ];
-    const first = await postResponses({
-      model: GLM_5_2.id,
-      tools,
-      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Act." }] }],
-    });
+    const first = await postResponses(
+      {
+        model: GLM_5_2.id,
+        tools,
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Act." }] }],
+      },
+      { ...options, reasoningHistoryMode: "interleaved" },
+    );
 
     expect(first.output).toEqual([
       expect.objectContaining({ type: "reasoning", content: [] }),
@@ -825,22 +831,26 @@ describe("Codex Responses proxy tool compatibility", () => {
       }),
     ]);
 
-    const second = await postResponses({
-      model: GLM_5_2.id,
-      tools,
-      input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Act." }] },
-        ...first.output,
-        { type: "custom_tool_call_output", call_id: "call_patch", output: "PATCH_DONE" },
-        { type: "function_call_output", call_id: "call_shell", output: "SHELL_DONE" },
-      ],
-    });
+    const second = await postResponses(
+      {
+        model: GLM_5_2.id,
+        tools,
+        input: [
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Act." }] },
+          ...first.output,
+          { type: "custom_tool_call_output", call_id: "call_patch", output: "PATCH_DONE" },
+          { type: "function_call_output", call_id: "call_shell", output: "SHELL_DONE" },
+        ],
+      },
+      { ...options, reasoningHistoryMode: "interleaved" },
+    );
 
     expect(requests[1]?.messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "assistant",
           content: null,
+          reasoning_content: "Choose two local actions.",
           tool_calls: [
             expect.objectContaining({ id: "call_patch" }),
             expect.objectContaining({ id: "call_shell" }),
@@ -850,6 +860,7 @@ describe("Codex Responses proxy tool compatibility", () => {
         { role: "tool", tool_call_id: "call_shell", content: "SHELL_DONE" },
       ]),
     );
+    expect(requests[1]?.chat_template_kwargs).toEqual({ clear_thinking: true });
     expect(second.output).toEqual([
       expect.objectContaining({ type: "reasoning", content: [] }),
       expect.objectContaining({

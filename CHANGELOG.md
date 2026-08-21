@@ -3,6 +3,20 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.5 - 2026-08-21
+
+### Fixed
+
+- Codex CLI and ChatGPT Desktop now replay Together reasoning stored in Responses `summary`
+  items when reasoning history is `interleaved` or `full`. Previously, real Codex tool
+  continuations only replayed `content`, so the live client silently dropped prior reasoning even
+  though direct protocol requests enforced the selected policy.
+
+### Tests
+
+- Added a Codex response-to-tool-result-to-next-request regression that verifies `interleaved`
+  sends the replay-safe reasoning summary as `reasoning_content` with `clear_thinking=true`.
+
 ## 0.8.4 - 2026-08-19
 
 ### Added

@@ -184,7 +184,8 @@ function toChatMessages(
       continue;
     }
     if (item.type === "reasoning") {
-      const reasoning = stringifyResponsesContent(item.content);
+      const reasoning =
+        stringifyResponsesContent(item.content) || stringifyResponsesContent(item.summary);
       if (reasoning && includeHistoricalReasoning) {
         pendingReasoningParts.push(reasoning);
       }
@@ -763,7 +764,8 @@ function stringifyResponsesContent(content: ResponsesInputItem["content"]): stri
         part.type === "input_text" ||
         part.type === "output_text" ||
         part.type === "text" ||
-        part.type === "reasoning_text"
+        part.type === "reasoning_text" ||
+        part.type === "summary_text"
       ) {
         return part.text ?? "";
       }

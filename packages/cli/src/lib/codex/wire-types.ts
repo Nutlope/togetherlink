@@ -14,6 +14,7 @@ export type ResponsesInputItem = {
   type?: string;
   role?: string;
   content?: string | ResponsesContentPart[];
+  summary?: ResponsesContentPart[];
   author?: string;
   recipient?: string;
   call_id?: string;
