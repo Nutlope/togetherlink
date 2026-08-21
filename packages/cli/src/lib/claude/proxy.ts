@@ -20,6 +20,7 @@ import { extractImageBlocks, resolveImageBlocks } from "./vision-resolver.js";
 import { callTogetherChatCompletions } from "./chat-completions.js";
 import { tuneClaudeCompactionRequest } from "./compaction.js";
 import type { TogetherClientOptions } from "../together-client.js";
+import type { ReasoningHistoryMode } from "../reasoning-history.js";
 
 import type {
   AnthropicCountTokensRequest,
@@ -41,6 +42,8 @@ export type ClaudeProxyOptions = {
   authToken: string;
   claudeCodeMaxOutputTokens?: number | undefined;
   claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
+  /** Historical model reasoning replay policy. Defaults to full for old sessions. */
+  reasoningHistoryMode?: ReasoningHistoryMode | undefined;
   debug?: boolean | undefined;
   costTracker?: CostTracker | undefined;
   perfSink?: ProxyPerfSink | undefined;

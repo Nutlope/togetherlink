@@ -16,6 +16,7 @@ import type { RegisterSessionRequest } from "./daemon/state.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
 import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "./together-core.js";
+import { resolveReasoningHistoryMode } from "./reasoning-history.js";
 import {
   removeManagedBlock as tomlRemoveManagedBlock,
   removeTomlSections,
@@ -98,6 +99,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
+    reasoningHistoryMode: resolveReasoningHistoryMode(),
     nativeBaseUrl,
     ...(process.env.TOGETHERLINK_DEBUG === "1" ? { debug: true } : {}),
   };

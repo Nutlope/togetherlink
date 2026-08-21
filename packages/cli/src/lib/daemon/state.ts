@@ -6,6 +6,7 @@ import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyPerfPayload } from "../proxy-perf.js";
 import { sendTelemetryEvent } from "../telemetry.js";
 import { isProcessAlive } from "../paths.js";
+import { DEFAULT_REASONING_HISTORY_MODE, type ReasoningHistoryMode } from "../reasoning-history.js";
 import {
   createSessionStore,
   type SessionPersistInput,
@@ -142,6 +143,8 @@ export type RegisterSessionRequest = {
   claudeCodeMaxOutputTokens?: number;
   /** True when the user had CLAUDE_CODE_MAX_OUTPUT_TOKENS set before launch. */
   claudeCodeMaxOutputTokensUserSet?: boolean;
+  /** Historical reasoning replay mode resolved by the launching process. */
+  reasoningHistoryMode?: ReasoningHistoryMode;
   debug?: boolean;
 };
 
@@ -454,6 +457,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       modelName: req.modelName ?? req.modelLabel,
       modelDefinition: req.modelDefinition,
       authToken: req.authToken ?? req.token,
+      reasoningHistoryMode: req.reasoningHistoryMode ?? DEFAULT_REASONING_HISTORY_MODE,
       ...(req.nativeBaseUrl !== undefined ? { nativeBaseUrl: req.nativeBaseUrl } : {}),
       ...(req.claudeCodeMaxOutputTokens !== undefined
         ? { claudeCodeMaxOutputTokens: req.claudeCodeMaxOutputTokens }

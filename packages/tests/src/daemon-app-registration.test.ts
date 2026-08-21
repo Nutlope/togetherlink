@@ -28,6 +28,7 @@ function registration(): RegisterSessionRequest {
     targetModelId: GLM_5_2.id,
     modelName: GLM_5_2.name,
     modelDefinition: GLM_5_2,
+    reasoningHistoryMode: "interleaved",
   };
 }
 

@@ -61,6 +61,29 @@ describe("daemon session state", () => {
       },
     });
   });
+
+  test("uses registered Claude reasoning history instead of daemon environment", () => {
+    const legacySession = buildSession(registerBody("legacy"));
+    expect(legacySession.options).toMatchObject({ reasoningHistoryMode: "full" });
+
+    const interleavedSession = buildSession({
+      ...registerBody("interleaved"),
+      reasoningHistoryMode: "interleaved",
+    });
+    expect(interleavedSession.options).toMatchObject({ reasoningHistoryMode: "interleaved" });
+  });
+
+  test.each(["codex", "codex-app"] as const)(
+    "propagates registered reasoning history to %s proxy sessions",
+    (agent) => {
+      const session = buildSession({
+        ...registerBody(agent),
+        agent,
+        reasoningHistoryMode: "off",
+      });
+      expect(session.options).toMatchObject({ reasoningHistoryMode: "off" });
+    },
+  );
 });
 
 function registerBody(token: string): RegisterSessionRequest {

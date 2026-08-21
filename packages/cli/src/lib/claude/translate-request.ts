@@ -7,6 +7,7 @@ import {
   type ExaSearchOutcome,
 } from "../exa-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
+import { reasoningHistoryPolicy, type ReasoningHistoryMode } from "../reasoning-history.js";
 import {
   formatToolResultContent,
   formatWebSearchToolResult,
@@ -175,7 +176,9 @@ export async function runClaudeExaSearch(
 export function toOpenAIMessages(
   body: AnthropicMessagesRequest,
   targetModel?: ModelDefinition,
+  reasoningHistoryMode?: ReasoningHistoryMode,
 ): OpenAIMessage[] {
+  const { includeHistoricalReasoning } = reasoningHistoryPolicy(reasoningHistoryMode);
   const systemParts = [
     targetModel
       ? `${TOGETHERLINK_IDENTITY_PROMPT} Backend: ${targetModel.name} (${targetModel.id}).`
@@ -209,9 +212,13 @@ export function toOpenAIMessages(
           hasImageContent = true;
         }
       } else if (block.type === "thinking") {
-        reasoningParts.push(block.thinking);
+        if (includeHistoricalReasoning) {
+          reasoningParts.push(block.thinking);
+        }
       } else if (block.type === "redacted_thinking") {
-        reasoningParts.push(block.data);
+        if (includeHistoricalReasoning) {
+          reasoningParts.push(block.data);
+        }
       } else if (block.type === "tool_result") {
         messages.push({
           role: "tool",

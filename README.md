@@ -69,6 +69,15 @@ togetherlink codex
 
 `TOGETHER_BASE_URL` applies to every coding harness and is intentionally not loaded from repository `.env` files.
 
+Claude Code, Codex CLI, and ChatGPT Desktop can control how prior model reasoning is replayed:
+
+```bash
+export TOGETHERLINK_REASONING_HISTORY=interleaved
+togetherlink claude   # or codex / chatgpt
+```
+
+The accepted values are `off` (do not replay historical reasoning), `interleaved` (let the Together model template retain only reasoning needed for the active tool exchange), and `full` (replay all historical reasoning). The default is `full` for backward compatibility. This setting changes history replay only; it does not disable current reasoning or hide live reasoning output. Run `togetherlink chatgpt` again after changing it so the persistent Desktop registration is updated.
+
 If DeepSeek Harness is missing, invoking or selecting it installs the official `@deepseek-ai/dsh` package and then continues the launch. No installation happens during startup, configuration, detection, or self-update. Other missing agent CLIs are not installed automatically; togetherlink prints their official install command and docs link, then exits.
 
 To disable TogetherLink's anonymous analytics, set:
