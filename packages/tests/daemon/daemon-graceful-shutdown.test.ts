@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import http from "node:http";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { startTestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { startTestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 describe("daemon graceful shutdown", () => {
   let context: TestContext;

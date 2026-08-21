@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { codexExecArgs } from "./codex-exec.js";
+import { codexExecArgs } from "../src/codex-exec.js";
 
 describe("codexExecArgs", () => {
   test("keeps text-only Codex probes sandboxed by default", () => {

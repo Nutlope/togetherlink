@@ -12,5 +12,21 @@
     "rootDir": "../..",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "chatgpt/**/*.ts",
+    "claude/**/*.ts",
+    "codex/**/*.ts",
+    "core/**/*.ts",
+    "daemon/**/*.ts",
+    "deepseek/**/*.ts",
+    "grok/**/*.ts",
+    "hermes/**/*.ts",
+    "opencode/**/*.ts",
+    "pi/**/*.ts",
+    "prime/**/*.ts",
+    "vitest.config.ts",
+    "vitest.group.config.ts",
+    "vitest.live.config.ts"
+  ]
 }

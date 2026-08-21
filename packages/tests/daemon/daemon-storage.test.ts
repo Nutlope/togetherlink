@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 const cleanup: string[] = [];
+const repoRoot = join(import.meta.dirname, "..", "..", "..");
 
 afterEach(() => {
   for (const directory of cleanup.splice(0)) {
@@ -54,7 +55,7 @@ describe("daemon session persistence", () => {
         `,
         home,
       ],
-      { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
+      { cwd: repoRoot, encoding: "utf8" },
     );
 
     expect(JSON.parse(output)).toEqual({
@@ -97,7 +98,7 @@ describe("daemon session persistence", () => {
         `,
         home,
       ],
-      { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
+      { cwd: repoRoot, encoding: "utf8" },
     );
 
     expect(JSON.parse(output)).toEqual([
@@ -149,7 +150,7 @@ describe("daemon session persistence", () => {
         `,
         home,
       ],
-      { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
+      { cwd: repoRoot, encoding: "utf8" },
     );
 
     expect(JSON.parse(output)).toEqual([

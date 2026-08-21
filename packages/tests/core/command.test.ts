@@ -3,9 +3,11 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { runCommand } from "./command.js";
-import { cliBin } from "./paths.js";
-import type { TestContext } from "./types.js";
+import { runCommand } from "../src/command.js";
+import { cliBin } from "../src/paths.js";
+import type { TestContext } from "../src/types.js";
+
+const repoRoot = path.join(import.meta.dirname, "..", "..", "..");
 
 describe("runCommand", () => {
   let tmpDir: string;
@@ -109,7 +111,7 @@ describe("runCommand", () => {
         `,
         path.join(home, ".togetherlink"),
       ],
-      { cwd: path.join(process.cwd(), "..", "..") },
+      { cwd: repoRoot },
     );
 
     const result = await runCommand(

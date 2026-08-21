@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { registerClaudeSession, startTestDaemon, type TestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { registerClaudeSession, startTestDaemon, type TestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 describe("daemon session-URL auth", () => {
   let context: TestContext;

@@ -1,6 +1,7 @@
 packages:
   - "site"
   - "packages/*"
+  - "packages/tests/*"
 allowBuilds:
   esbuild: true
   lefthook: true

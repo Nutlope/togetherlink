@@ -10,9 +10,9 @@ import {
   writeAppRegistration,
 } from "../../cli/src/lib/daemon/app-registration.js";
 import type { RegisterSessionRequest } from "../../cli/src/lib/daemon/state.js";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { startTestDaemon, type TestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { startTestDaemon, type TestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 const TOKEN = "togetherlink-local-app-registration-test";
 

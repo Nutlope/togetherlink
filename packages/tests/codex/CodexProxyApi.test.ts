@@ -9,7 +9,7 @@ import {
 } from "@togetherlink/models";
 import { CostTracker } from "../../cli/src/lib/cost.js";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "../../cli/src/lib/codex/proxy.js";
-import { asRecord } from "./json-lines.js";
+import { asRecord } from "../src/json-lines.js";
 
 const realFetch = globalThis.fetch.bind(globalThis);
 

@@ -90,6 +90,9 @@ jobs:
       - name: Typecheck workspace
         run: pnpm typecheck
 
+      - name: Run deterministic test groups
+        run: pnpm test
+
       - name: Install coding-agent CLIs
         run: |
           case "$HARNESS" in
@@ -155,28 +158,28 @@ jobs:
         run: |
           case "$HARNESS" in
             all)
-              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm exec turbo run test:gauntlet:core test:gauntlet:claude test:gauntlet:codex test:gauntlet:grok test:gauntlet:opencode test:gauntlet:pi test:gauntlet:prime --filter @togetherlink/tests --concurrency=1
+              VITEST_FILE_PARALLELISM=0 VITEST_MAX_CONCURRENCY=1 pnpm test:live
               ;;
             claude)
-              pnpm exec turbo run test:gauntlet:claude --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_TEST_FILE=src/Claude.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             codex)
-              pnpm exec turbo run test:gauntlet:codex --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_TEST_FILE=src/Codex.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             grok)
-              pnpm exec turbo run test:gauntlet:grok --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_TEST_FILE=src/Grok.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             live-models-check)
-              pnpm exec turbo run test:gauntlet:live-models-check --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_MODELS_CHECK=1 TOGETHERLINK_LIVE_TEST_FILE=src/livemodelscheck.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             opencode)
-              pnpm exec turbo run test:gauntlet:opencode --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_TEST_FILE=src/OpenCode.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             pi)
-              pnpm exec turbo run test:gauntlet:pi --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_TEST_FILE=src/Pi.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             prime)
-              pnpm exec turbo run test:gauntlet:prime --filter @togetherlink/tests
+              TOGETHERLINK_LIVE_TEST_FILE=src/LivePrimeRlm.test.ts pnpm --filter @togetherlink/tests test:live
               ;;
             *)
               echo "Unknown harness: $HARNESS" >&2

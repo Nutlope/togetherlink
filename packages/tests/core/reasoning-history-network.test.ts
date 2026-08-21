@@ -2,9 +2,9 @@ import http from "node:http";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
 import type { ReasoningHistoryMode } from "../../cli/src/lib/reasoning-history.js";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { startTestDaemon, type TestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { startTestDaemon, type TestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 type ProxiedAgent = "claude" | "codex" | "codex-app";
 

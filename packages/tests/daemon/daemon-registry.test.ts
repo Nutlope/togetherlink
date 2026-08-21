@@ -12,6 +12,7 @@ import {
 } from "@togetherlink/cli/dist/lib/daemon/state.js";
 
 const cleanup: string[] = [];
+const repoRoot = join(import.meta.dirname, "..", "..", "..");
 afterEach(() => {
   for (const directory of cleanup.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -179,7 +180,7 @@ describe("SessionRegistry (#5 — exported, injectable, testable in isolation)",
         `,
         home,
       ],
-      { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
+      { cwd: repoRoot, encoding: "utf8" },
     );
 
     const usage = JSON.parse(output);

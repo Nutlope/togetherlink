@@ -9,7 +9,7 @@ import {
   GROK_IDENTITY_RULE,
   startGrokModelCatalogServer,
 } from "../../cli/src/lib/grok/core.js";
-import { claimsXaiIdentity } from "./harnesses/grok.js";
+import { claimsXaiIdentity } from "../src/harnesses/grok.js";
 
 describe("Grok harness", () => {
   test("does not mistake an explicit xAI denial for an xAI identity claim", () => {

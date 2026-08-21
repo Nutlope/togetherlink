@@ -3,9 +3,9 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { startTestDaemon, deleteSession, type TestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { startTestDaemon, deleteSession, type TestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 describe("daemon Responses WebSocket routing", () => {
   let context: TestContext;

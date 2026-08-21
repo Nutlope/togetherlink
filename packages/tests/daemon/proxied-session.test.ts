@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { GLM_5_2 } from "@togetherlink/models";
 import { runProxiedSession } from "../../cli/src/lib/proxied-session.js";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { startTestDaemon, type TestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { startTestDaemon, type TestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 describe("proxied background session lifecycle", () => {
   let context: TestContext;

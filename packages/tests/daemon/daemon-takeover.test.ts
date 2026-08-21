@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { rm } from "node:fs/promises";
 import { stopLegacyDaemonForTakeover } from "../../cli/src/lib/daemon/takeover.js";
 import { healthyPortRaceExitCode } from "../../cli/src/lib/daemon/server.js";
-import { cleanupTmpDir, createTestContext } from "./context.js";
-import { startTestDaemon } from "./daemon-session.js";
-import type { TestContext } from "./types.js";
+import { cleanupTmpDir, createTestContext } from "../src/context.js";
+import { startTestDaemon } from "../src/daemon-session.js";
+import type { TestContext } from "../src/types.js";
 
 describe("supervised daemon takeover", () => {
   let context: TestContext;

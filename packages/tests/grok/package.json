@@ -1,0 +1,15 @@
+{
+  "name": "@togetherlink/test-grok",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --config ../vitest.group.config.ts"
+  },
+  "devDependencies": {
+    "@togetherlink/cli": "workspace:*",
+    "@togetherlink/models": "workspace:*",
+    "vitest": "^4.0.15",
+    "ws": "^8.18.0"
+  }
+}

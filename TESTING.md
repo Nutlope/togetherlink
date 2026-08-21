@@ -15,7 +15,7 @@ Use this loop:
 5. Run the focused test again, then the relevant typecheck/build.
 6. Re-run a live smoke using the user's original pattern when the bug depends on real Codex, Claude, Grok, OpenCode, Pi, or Together behavior.
 
-For Codex proxy bugs, prefer `packages/tests/src/CodexProxyApi.test.ts` for deterministic protocol regressions before doing a live `tcodex -- exec ...` smoke. Examples of patterns that need regression coverage:
+For Codex proxy bugs, prefer `packages/tests/codex/CodexProxyApi.test.ts` for deterministic protocol regressions before doing a live `tcodex -- exec ...` smoke. Examples of patterns that need regression coverage:
 
 - parallel `multi_agent_v1` calls must stay in one assistant tool-call group before their tool outputs;
 - more than five parallel subagent calls must preserve all call IDs and outputs;
@@ -45,8 +45,23 @@ Quick local checks:
 
 ```bash
 pnpm -F @togetherlink/cli typecheck
-pnpm -F @togetherlink/cli test
+pnpm test
 ```
+
+`pnpm test` runs the deterministic `core`, `claude`, `codex`, `chatgpt`, `daemon`, `pi`,
+`opencode`, `grok`, `prime`, `deepseek`, and `hermes` workspace packages in parallel. Turbo caches
+each package independently. A cold run is about 10–15 seconds, an unchanged run is under a second,
+and editing one group's tests invalidates only that group. Real Claude, Codex, Grok, OpenCode, Pi,
+and Prime inference is excluded.
+
+The real-inference suite is deliberately separate and forced to execute instead of accepting a
+cached result. Run it in CI once at the release boundary:
+
+```bash
+pnpm test:live
+```
+
+The live workflow can also select one harness when diagnosing a provider-specific failure.
 
 ## Manual Harness Launches
 
