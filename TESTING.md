@@ -55,7 +55,8 @@ and editing one group's tests invalidates only that group. Real Claude, Codex, G
 and Prime inference is excluded.
 
 The real-inference suite is deliberately separate and forced to execute instead of accepting a
-cached result. Run it in CI once at the release boundary:
+cached result. Dispatch the `Tests` workflow once at the release boundary and select `all` or one
+harness. For an explicit local run:
 
 ```bash
 pnpm test:live
@@ -418,22 +419,16 @@ The Claude/Codex proxy and per-run Together settings are intentionally temporary
 
 The executable live suite is in `packages/tests`. It uses Vitest, real Claude/Codex/Grok/OpenCode/Pi/Prime CLI processes, and real Together inference; it does not mock the model provider.
 
-Build once, then run any harness test file:
+Run one harness test file explicitly:
 
 ```bash
-node_modules/.bin/tsc -p packages/cli/tsconfig.json
-chmod +x packages/cli/dist/bin/togetherlink.js
-packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Codex.test.ts
-packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Claude.test.ts
-packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Grok.test.ts
-packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/OpenCode.test.ts
-packages/tests/node_modules/.bin/vitest run --config packages/tests/vitest.config.ts packages/tests/src/Pi.test.ts
+TOGETHERLINK_LIVE_TEST_FILE=src/Codex.test.ts pnpm -F @togetherlink/tests test:live
 ```
 
 Prime's RLM lifecycle test is opt-in because it starts a real recursive child session:
 
 ```bash
-pnpm -F @togetherlink/tests test:live-prime-rlm
+TOGETHERLINK_LIVE_TEST_FILE=src/LivePrimeRlm.test.ts pnpm -F @togetherlink/tests test:live
 ```
 
 Each run writes JSON artifacts to `packages/tests/artifacts/`, including stdout/stderr for every scenario. Longer coding-task scenarios create disposable Git repos under `packages/tests/tmp/` and remove them when the suite finishes.
@@ -459,13 +454,13 @@ Current scenarios cover:
 Run it with:
 
 ```bash
-pnpm -F @togetherlink/tests test:live-models-check
+TOGETHERLINK_LIVE_MODELS_CHECK=1 TOGETHERLINK_LIVE_TEST_FILE=src/livemodelscheck.test.ts pnpm -F @togetherlink/tests test:live
 ```
 
 The check runs one concurrent case per harness/model/probe tuple. Default concurrency is 6 and can be changed with:
 
 ```bash
-VITEST_MAX_CONCURRENCY=3 pnpm -F @togetherlink/tests test:live-models-check
+VITEST_MAX_CONCURRENCY=3 TOGETHERLINK_LIVE_MODELS_CHECK=1 TOGETHERLINK_LIVE_TEST_FILE=src/livemodelscheck.test.ts pnpm -F @togetherlink/tests test:live
 ```
 
 For each curated `SELECTABLE_MODELS` entry it runs both harnesses through:
@@ -478,7 +473,10 @@ Claude also includes its Haiku-tier backend if it is not already in `SELECTABLE_
 
 ## GitHub Live Workflow
 
-`.github/workflows/live-agent-gauntlet.yml` runs the same real-inference suite on a daily schedule, on pushes to `main` that touch integration code, and by manual dispatch. It requires a repository secret named `TOGETHER_API_KEY`.
+`.github/workflows/live-agent-gauntlet.yml` runs formatting, typechecking, and cached deterministic
+test groups on pull requests and pushes to `main`. Real inference runs only by manual dispatch and
+requires a repository secret named `TOGETHER_API_KEY`. Selecting `all` runs each harness in a
+separate parallel job with verbose Vitest output, so progress and failures are visible per harness.
 
 The workflow installs the real agent CLIs explicitly:
 

@@ -1,6 +1,6 @@
 # togetherlink
 
-[![Live Agent Gauntlet](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml/badge.svg?branch=main)](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml)
+[![Tests](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml/badge.svg?branch=main)](https://github.com/Nutlope/togetherlink/actions/workflows/live-agent-gauntlet.yml)
 
 ![TogetherLink connecting OpenCode, Codex CLI, Grok Build, Claude Code, ChatGPT Desktop, and Pi Code](site/public/togetherlink-cover.png)
 

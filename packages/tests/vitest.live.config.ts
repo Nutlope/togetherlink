@@ -23,6 +23,6 @@ export default defineConfig({
     retry,
     testTimeout: 360_000,
     hookTimeout: 120_000,
-    reporters: "default",
+    reporters: "verbose",
   },
 });
