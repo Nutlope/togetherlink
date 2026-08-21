@@ -22,7 +22,10 @@ import { isCodexResponsesWebsocketPath } from "../codex/routes.js";
 import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { isReasoningHistoryMode, REASONING_HISTORY_MODES } from "../reasoning-history.js";
-import { forwardRemoteGatewayRequest } from "../remote-gateway.js";
+import {
+  forwardRemoteGatewayRequest,
+  shouldForwardCodexRequestToRemoteGateway,
+} from "../remote-gateway.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
 import {
@@ -553,6 +556,7 @@ async function handleDaemonRequest(
         session.gatewayBaseUrl &&
         session.routeSessionId &&
         session.remoteGatewayState &&
+        shouldForwardCodexRequestToRemoteGateway(req) &&
         !(req.method === "GET" && requestPath(req) === "/v1/models")
       ) {
         await forwardRemoteGatewayRequest(req, res, {

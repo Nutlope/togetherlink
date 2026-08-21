@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { gzip } from "node:zlib";
+import { CODEX_MEMORIES_PATH, normalizeCodexPath } from "./codex/routes.js";
 
 const MAX_BODY_BYTES = 256 * 1024 * 1024;
 const COMPRESSION_THRESHOLD_BYTES = 64 * 1024;
@@ -9,6 +10,17 @@ export type RemoteGatewayState = {
   requestedModel?: string | undefined;
   resolvedModel?: string | undefined;
 };
+
+export function shouldForwardCodexRequestToRemoteGateway(
+  req: Pick<IncomingMessage, "method" | "url" | "headers">,
+): boolean {
+  if (req.method !== "POST") return true;
+  const path = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+  if (normalizeCodexPath(path) === CODEX_MEMORIES_PATH) return false;
+
+  const marker = req.headers["x-openai-memgen-request"];
+  return Array.isArray(marker) ? marker.every((value) => !value.trim()) : !marker?.trim();
+}
 
 export async function forwardRemoteGatewayRequest(
   req: IncomingMessage,

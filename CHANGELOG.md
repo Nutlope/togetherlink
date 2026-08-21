@@ -3,6 +3,20 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.7 - 2026-08-21
+
+### Fixed
+
+- Remote Auto sessions now keep Codex memory extraction and consolidation on the public CLI's
+  dedicated local memory proxy instead of sending those background requests through the private
+  classifier and conversation pin. This preserves Codex Memories while preventing repeated
+  `Memory Writing Agent` jobs from appearing as user turns or looping inside the hosted router.
+
+### Tests
+
+- Added deterministic coverage that ordinary Responses turns still use the hosted gateway while
+  marked memory-generation turns and the dedicated memory-summary endpoint stay local.
+
 ## 0.8.6 - 2026-08-21
 
 ### Added
