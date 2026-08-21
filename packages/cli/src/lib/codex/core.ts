@@ -10,7 +10,9 @@ import { resolveReasoningHistoryMode } from "../reasoning-history.js";
 
 export type CodexLaunchOptions = {
   apiKey: string;
+  frontierApiKey?: string;
   baseUrl: string;
+  gatewayBaseUrl?: string;
   home: string;
   modelId?: string;
   args?: string[];
@@ -34,9 +36,11 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
   const result: ProxiedSessionResult = await runProxiedSession({
     agent: "codex",
     apiKey: options.apiKey,
+    ...(options.frontierApiKey ? { frontierApiKey: options.frontierApiKey } : {}),
     baseUrl: options.baseUrl,
-    modelId: selectedModel.definition.id,
-    targetModelId: selectedModel.definition.id,
+    ...(options.gatewayBaseUrl ? { gatewayBaseUrl: options.gatewayBaseUrl } : {}),
+    modelId: selectedModel.id,
+    targetModelId: selectedModel.routingPreset ?? selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
     extraRegistration: {
@@ -46,9 +50,11 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     binary: "codex",
     keepaliveLabel: "Codex session",
     banner: (modelName) =>
-      `togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`,
+      options.gatewayBaseUrl
+        ? `togetherlink ▸ Routing Codex → TogetherLink Auto (${modelName}).\n`
+        : `togetherlink ▸ Routing Codex → Together AI (${modelName}). Not OpenAI.\n`,
     beforeSpawn: () => {
-      catalog = writeCodexModelCatalog();
+      catalog = writeCodexModelCatalog(Boolean(options.gatewayBaseUrl));
       return catalog;
     },
     buildEnv: ({ authToken }) => buildCodexEnv(authToken),
@@ -124,10 +130,10 @@ function codexConfigArgs(
   ];
 }
 
-function writeCodexModelCatalog(): { path: string; cleanup: () => void } {
+function writeCodexModelCatalog(includeAuto: boolean): { path: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "togetherlink-codex-catalog-"));
   const path = join(dir, "models.json");
-  writeFileSync(path, codexModelCatalogJson(), "utf8");
+  writeFileSync(path, codexModelCatalogJson({ includeAuto }), "utf8");
   return {
     path,
     cleanup: () => {

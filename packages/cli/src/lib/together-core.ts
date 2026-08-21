@@ -18,8 +18,24 @@ export function resolveTogetherBaseUrl(env: NodeJS.ProcessEnv = process.env): st
   if (!override) {
     return TOGETHER_BASE_URL;
   }
-  const normalized = override.replace(/\/+$/, "");
-  return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+  return normalizeV1BaseUrl(override);
+}
+
+/** Hosted router destination, supplied at runtime and never embedded in the CLI. */
+export function resolveTogetherGatewayBaseUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const configured = env.TOGETHERLINK_GATEWAY_URL?.trim();
+  return configured ? normalizeV1BaseUrl(configured) : undefined;
+}
+
+/** User-owned frontier credential, available only during an opted-in gateway launch. */
+export function resolveFrontierApiKey(
+  gatewayBaseUrl: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (!gatewayBaseUrl) return undefined;
+  return env.OPENAI_API_KEY?.trim() || undefined;
 }
 
 export type JsonObject = Record<string, unknown>;
@@ -74,4 +90,9 @@ export async function resolveTogetherApiKey({
 
 function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
+}
+
+function normalizeV1BaseUrl(value: string): string {
+  const normalized = value.replace(/\/+$/, "");
+  return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
 }

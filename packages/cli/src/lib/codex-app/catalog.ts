@@ -4,11 +4,15 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { findModelById } from "@togetherlink/models";
 import { mergeCodexModelCatalog, type CodexModelCatalog } from "../codex/catalog.js";
+import { CODEX_ROUTABLE_MODELS } from "../codex/defaults.js";
 
 const execFileAsync = promisify(execFile);
 
-export function mergedCodexAppCatalogJson(nativeCatalog: CodexModelCatalog): string {
-  return JSON.stringify(mergeCodexModelCatalog(nativeCatalog));
+export function mergedCodexAppCatalogJson(
+  nativeCatalog: CodexModelCatalog,
+  options: { includeAuto?: boolean } = {},
+): string {
+  return JSON.stringify(mergeCodexModelCatalog(nativeCatalog, options));
 }
 
 /**
@@ -22,10 +26,11 @@ export async function writeMergedCodexAppCatalog(
   home: string,
   outputPath: string,
   nativeSnapshotPath: string,
+  options: { includeAuto?: boolean } = {},
 ): Promise<number> {
   const nativeCatalog = await loadNativeCatalog(home, nativeSnapshotPath);
   await writeTextAtomic(nativeSnapshotPath, `${JSON.stringify(nativeCatalog, null, 2)}\n`);
-  const merged = mergeCodexModelCatalog(nativeCatalog);
+  const merged = mergeCodexModelCatalog(nativeCatalog, options);
   await writeTextAtomic(outputPath, `${JSON.stringify(merged)}\n`);
   return merged.models.length;
 }
@@ -74,7 +79,11 @@ async function commandNativeCatalog(
 
 function nativeOnly(catalog: CodexModelCatalog | undefined): CodexModelCatalog | undefined {
   if (!catalog) return undefined;
-  const models = catalog.models.filter((entry) => !findModelById(String(entry.slug)));
+  const models = catalog.models.filter(
+    (entry) =>
+      !findModelById(String(entry.slug)) &&
+      !CODEX_ROUTABLE_MODELS.some((candidate) => candidate.id === String(entry.slug)),
+  );
   return models.length > 0 ? { models } : undefined;
 }
 

@@ -1,4 +1,5 @@
 import { constants as fsConstants } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CODEX_DEFAULT_MODEL, CODEX_PROVIDER_ID, resolveCodexModel } from "./codex/defaults.js";
@@ -15,7 +16,12 @@ import {
 import type { RegisterSessionRequest } from "./daemon/state.js";
 import type { HarnessContext, HarnessResult } from "./harness-types.js";
 import { sendTelemetryEvent } from "./telemetry.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "./together-core.js";
+import {
+  resolveFrontierApiKey,
+  resolveTogetherApiKey,
+  resolveTogetherBaseUrl,
+  resolveTogetherGatewayBaseUrl,
+} from "./together-core.js";
 import { resolveReasoningHistoryMode } from "./reasoning-history.js";
 import {
   removeManagedBlock as tomlRemoveManagedBlock,
@@ -75,7 +81,9 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     );
   }
 
-  const selectedModel = resolveCodexModel(ctx.main);
+  const gatewayBaseUrl = resolveTogetherGatewayBaseUrl();
+  const frontierApiKey = resolveFrontierApiKey(gatewayBaseUrl);
+  const selectedModel = resolveCodexModel(gatewayBaseUrl ? (ctx.main ?? "auto") : ctx.main);
   const authToken = await localProxyAuthToken();
   const sessionToken = codexAppSessionToken(authToken);
   const telemetrySessionId = sessionToken;
@@ -84,23 +92,30 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   const currentConfig = (await readTextIfExists(configPath)) ?? "";
   const configBase = await originalCodexAppConfig(ctx.home, configPath, currentConfig);
   const nativeBaseUrl = nativeCodexBaseUrl(configBase);
-  const { url: proxyUrl } = await ensureDaemon();
+  const { url: proxyUrl } = await ensureDaemon({
+    replaceMismatchedDaemon: Boolean(gatewayBaseUrl),
+  });
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionToken);
-  const { path: catalogPath, modelCount } = await writePersistentModelCatalog(ctx.home);
+  const { path: catalogPath, modelCount } = await writePersistentModelCatalog(
+    ctx.home,
+    Boolean(gatewayBaseUrl),
+  );
 
   const registration: RegisterSessionRequest = {
     token: sessionToken,
     authToken,
     agent: "codex-app",
     apiKey,
+    ...(frontierApiKey ? { frontierApiKey } : {}),
     baseUrl: resolveTogetherBaseUrl(),
     modelLabel: `${selectedModel.definition.name} (ChatGPT App alpha)`,
-    modelId: selectedModel.definition.id,
-    targetModelId: selectedModel.definition.id,
+    modelId: selectedModel.id,
+    targetModelId: selectedModel.routingPreset ?? selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
     reasoningHistoryMode: resolveReasoningHistoryMode(),
     nativeBaseUrl,
+    ...(gatewayBaseUrl ? { gatewayBaseUrl, routeSessionId: randomUUID() } : {}),
     ...(process.env.TOGETHERLINK_DEBUG === "1" ? { debug: true } : {}),
   };
   await registerDaemonSession(proxyUrl, registration);
@@ -111,7 +126,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
 
   const backup = await backupCodexAppConfig(ctx.home, configPath);
   const next = buildCodexAppConfig(configBase, {
-    ...(ctx.main ? { modelId: selectedModel.definition.id } : {}),
+    ...(ctx.main || gatewayBaseUrl ? { modelId: selectedModel.id } : {}),
     providerId: CODEX_APP_PROVIDER_ID,
     providerName: "Togetherlink",
     baseUrl: `${agentProxyUrl}/v1`,
@@ -138,7 +153,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
     event: "session_started",
     sessionId: telemetrySessionId,
     agent: "codex-app",
-    initialModel: selectedModel.definition.id,
+    initialModel: selectedModel.routingPreset ?? selectedModel.definition.id,
     startedAt,
     metadata: {
       integration: "codex-app",
@@ -156,7 +171,7 @@ export async function runCodexAppCommand(ctx: HarnessContext): Promise<HarnessRe
   });
   const intro = [
     "Together AI models added to the ChatGPT App picker. (alpha)",
-    ctx.main
+    ctx.main || gatewayBaseUrl
       ? `Default model changed to: ${selectedModel.definition.name}`
       : `Native GPT default preserved; Together default available: ${selectedModel.definition.name}`,
     "Start a task or open a repository in ChatGPT App as usual.",
@@ -408,14 +423,22 @@ async function originalCodexAppConfig(
 
 async function writePersistentModelCatalog(
   home: string,
+  includeAuto: boolean,
 ): Promise<{ path: string; modelCount: number }> {
   const file = modelCatalogPath(home);
-  const modelCount = await writeMergedCodexAppCatalog(home, file, nativeModelCatalogPath(home));
+  const modelCount = await writeMergedCodexAppCatalog(home, file, nativeModelCatalogPath(home), {
+    includeAuto,
+  });
   return { path: file, modelCount };
 }
 
-export function codexAppModelCatalogJson(nativeCatalog?: CodexModelCatalog): string {
-  return nativeCatalog ? mergedCodexAppCatalogJson(nativeCatalog) : codexModelCatalogJson();
+export function codexAppModelCatalogJson(
+  nativeCatalog?: CodexModelCatalog,
+  options: { includeAuto?: boolean } = {},
+): string {
+  return nativeCatalog
+    ? mergedCodexAppCatalogJson(nativeCatalog, options)
+    : codexModelCatalogJson(options);
 }
 
 function codexConfigPath(home: string): string {

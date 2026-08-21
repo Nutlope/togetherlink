@@ -7,7 +7,11 @@ import { buildGrokModelCatalog } from "../../cli/src/lib/grok/core.js";
 import { loadEnvFile } from "../../cli/src/lib/load-env.js";
 import { buildOpencodeConfigJson } from "../../cli/src/lib/opencode/core.js";
 import { buildPiModelsJson } from "../../cli/src/lib/harnesses/pi.js";
-import { resolveTogetherBaseUrl } from "../../cli/src/lib/together-core.js";
+import {
+  resolveFrontierApiKey,
+  resolveTogetherBaseUrl,
+  resolveTogetherGatewayBaseUrl,
+} from "../../cli/src/lib/together-core.js";
 
 const cleanup: string[] = [];
 
@@ -49,6 +53,29 @@ describe("Together upstream base URL", () => {
 
     expect(process.env.TOGETHER_API_KEY).toBe("from-file");
     expect(process.env.TOGETHER_BASE_URL).toBeUndefined();
+  });
+});
+
+describe("TogetherLink hosted gateway", () => {
+  test("is disabled unless the caller supplies a gateway URL", () => {
+    expect(resolveTogetherGatewayBaseUrl({})).toBeUndefined();
+  });
+
+  test("normalizes the caller-supplied gateway URL without embedding one", () => {
+    expect(
+      resolveTogetherGatewayBaseUrl({
+        TOGETHERLINK_GATEWAY_URL: "https://gateway.example/router/",
+      }),
+    ).toBe("https://gateway.example/router/v1");
+  });
+
+  test("exposes the user OpenAI key only for an opted-in gateway session", () => {
+    expect(resolveFrontierApiKey(undefined, { OPENAI_API_KEY: "sk-local-only" })).toBeUndefined();
+    expect(
+      resolveFrontierApiKey("https://gateway.example/v1", {
+        OPENAI_API_KEY: "  sk-frontier  ",
+      }),
+    ).toBe("sk-frontier");
   });
 });
 

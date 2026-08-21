@@ -22,6 +22,7 @@ import { isCodexResponsesWebsocketPath } from "../codex/routes.js";
 import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
 import { isReasoningHistoryMode, REASONING_HISTORY_MODES } from "../reasoning-history.js";
+import { forwardRemoteGatewayRequest } from "../remote-gateway.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
 import {
@@ -548,6 +549,21 @@ async function handleDaemonRequest(
 
   if (session.agent === "codex" || session.agent === "codex-app") {
     try {
+      if (
+        session.gatewayBaseUrl &&
+        session.routeSessionId &&
+        session.remoteGatewayState &&
+        !(req.method === "GET" && requestPath(req) === "/v1/models")
+      ) {
+        await forwardRemoteGatewayRequest(req, res, {
+          apiKey: session.apiKey,
+          ...(session.frontierApiKey ? { frontierApiKey: session.frontierApiKey } : {}),
+          gatewayBaseUrl: session.gatewayBaseUrl,
+          routeSessionId: session.routeSessionId,
+          state: session.remoteGatewayState,
+        });
+        return;
+      }
       await handleCodexProxyRequest(req, res, session.options);
     } finally {
       sessionRoute?.restore();
@@ -639,7 +655,21 @@ async function handleDaemonUpgrade(
     // Forward the upgrade's headers so the native WS<->WS relay can reuse the
     // client's auth/session headers on its upstream dial (the HTTP path gets
     // these from the request itself; WS turns have no per-message headers).
-    handleCodexResponsesWebsocket(ws, options, req.headers);
+    handleCodexResponsesWebsocket(
+      ws,
+      options,
+      req.headers,
+      session.gatewayBaseUrl && session.routeSessionId && session.remoteGatewayState
+        ? (gatewayReq, gatewayRes) =>
+            forwardRemoteGatewayRequest(gatewayReq, gatewayRes, {
+              apiKey: session.apiKey,
+              ...(session.frontierApiKey ? { frontierApiKey: session.frontierApiKey } : {}),
+              gatewayBaseUrl: session.gatewayBaseUrl!,
+              routeSessionId: session.routeSessionId!,
+              state: session.remoteGatewayState!,
+            })
+        : undefined,
+    );
   });
 }
 

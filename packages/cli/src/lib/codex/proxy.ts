@@ -61,6 +61,8 @@ export type CodexProxyOptions = {
   costTracker?: CostTracker | undefined;
   perfSink?: ProxyPerfSink | undefined;
   fetch?: TogetherClientOptions["fetch"];
+  /** Include the virtual Auto row while this session is backed by a hosted router. */
+  includeAutoModel?: boolean | undefined;
   /** Search evidence retained inside the proxy so client-visible
    * `web_search_call` items never need to masquerade as assistant text. */
   nativeSearchResults?: Map<string, string> | undefined;
@@ -91,7 +93,7 @@ export async function handleCodexProxyRequest(
   }
 
   if (req.method === "GET" && path === "/v1/models") {
-    writeJson(res, 200, codexModelCatalog());
+    writeJson(res, 200, codexModelCatalog({ includeAuto: Boolean(options.includeAutoModel) }));
     return;
   }
 

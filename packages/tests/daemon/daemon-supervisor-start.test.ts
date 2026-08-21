@@ -79,6 +79,66 @@ describe("installed daemon startup", () => {
     }
   }, 10_000);
 
+  test("replaces a stale daemon for a gateway session even when another session is active", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "togetherlink-gateway-daemon-test-"));
+    let replacementStarted = false;
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify(
+          replacementStarted
+            ? { ok: true }
+            : {
+                ok: true,
+                pid: 424_242,
+                version: "0.8.5",
+                home,
+                scriptPath: "/old/togetherlink.js",
+                scriptSize: 1,
+                scriptMtimeMs: 1,
+                activeSessionCount: 1,
+              },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (typeof address !== "object" || address === null) {
+      throw new Error("test server did not bind");
+    }
+
+    vi.stubEnv("TOGETHERLINK_HOME", home);
+    vi.stubEnv("TOGETHERLINK_PORT", String(address.port));
+    supervisor.runningFromBundle.mockResolvedValue(true);
+    supervisor.status.mockResolvedValue({ installed: true, loaded: true, message: "installed" });
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      void new Promise<void>((resolve) => server.close(() => resolve()));
+      return true;
+    });
+    supervisor.start.mockImplementation(async () => {
+      replacementStarted = true;
+      if (server.listening) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      await new Promise<void>((resolve) => server.listen(address.port, "127.0.0.1", resolve));
+      return true;
+    });
+
+    try {
+      await expect(ensureDaemon({ replaceMismatchedDaemon: true })).resolves.toEqual({
+        url: `http://127.0.0.1:${address.port}`,
+      });
+      expect(kill).toHaveBeenCalledWith(424_242, "SIGTERM");
+      expect(supervisor.start).toHaveBeenCalledOnce();
+    } finally {
+      kill.mockRestore();
+      if (server.listening) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test("repairs an installed supervisor that starts but never becomes healthy", async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), "togetherlink-supervisor-repair-test-"));
     const server = http.createServer((_req, res) => {

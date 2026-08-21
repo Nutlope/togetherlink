@@ -2,7 +2,12 @@ import { resolveCodexModel } from "../codex/defaults.js";
 import { runCodexTogether } from "../codex/core.js";
 import { HARNESS } from "../harness.js";
 import { defineHarness, type HarnessContext, type HarnessResult } from "../harness-types.js";
-import { resolveTogetherApiKey, resolveTogetherBaseUrl } from "../together-core.js";
+import {
+  resolveFrontierApiKey,
+  resolveTogetherApiKey,
+  resolveTogetherBaseUrl,
+  resolveTogetherGatewayBaseUrl,
+} from "../together-core.js";
 
 export default defineHarness({
   id: HARNESS.CODEX,
@@ -17,10 +22,14 @@ export default defineHarness({
       throw new Error("No Together API key found. Pass --api-key or set TOGETHER_API_KEY.");
     }
 
-    const selectedModel = resolveCodexModel(ctx.main);
+    const gatewayBaseUrl = resolveTogetherGatewayBaseUrl();
+    const frontierApiKey = resolveFrontierApiKey(gatewayBaseUrl);
+    const selectedModel = resolveCodexModel(gatewayBaseUrl ? (ctx.main ?? "auto") : ctx.main);
     const result = await runCodexTogether({
       apiKey,
+      ...(frontierApiKey ? { frontierApiKey } : {}),
       baseUrl: resolveTogetherBaseUrl(),
+      ...(gatewayBaseUrl ? { gatewayBaseUrl } : {}),
       home: ctx.home,
       modelId: selectedModel.id,
       ...(ctx.passthrough ? { args: ctx.passthrough } : {}),

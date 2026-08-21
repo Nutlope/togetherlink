@@ -27,7 +27,7 @@ export async function writeAppRegistration(
   const file = appRegistrationPath(home);
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
-  // 0600: the body carries the real Together API key, like daemon.sqlite.
+  // 0600: the body carries the user's provider credentials, like daemon.sqlite.
   await writeFile(tmp, `${JSON.stringify(registration, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,

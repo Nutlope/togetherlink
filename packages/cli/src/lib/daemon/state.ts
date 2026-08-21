@@ -7,6 +7,7 @@ import type { ProxyPerfPayload } from "../proxy-perf.js";
 import { sendTelemetryEvent } from "../telemetry.js";
 import { isProcessAlive } from "../paths.js";
 import { DEFAULT_REASONING_HISTORY_MODE, type ReasoningHistoryMode } from "../reasoning-history.js";
+import type { RemoteGatewayState } from "../remote-gateway.js";
 import {
   createSessionStore,
   type SessionPersistInput,
@@ -74,8 +75,15 @@ export type SessionState = {
   /** Real Together API key the daemon uses upstream (proxied) or that the
    *  self-reporting agent used direct. Never returned by any read endpoint. */
   apiKey: string;
+  /** User-owned frontier credential. Excluded from daemon SQLite and read endpoints.
+   *  A persistent ChatGPT registration keeps it in its local mode-0600 file. */
+  frontierApiKey?: string;
   /** Session-scoped upstream API root. Never derived from the daemon environment. */
   baseUrl: string;
+  /** Runtime-only hosted router destination and session pinning state. */
+  gatewayBaseUrl?: string;
+  routeSessionId?: string;
+  remoteGatewayState?: RemoteGatewayState;
   modelDefinition: ModelDefinition;
   costTracker: CostTracker;
   debug?: boolean;
@@ -128,8 +136,11 @@ export type RegisterSessionRequest = {
   agent?: AgentId;
   pid?: number;
   apiKey: string;
+  frontierApiKey?: string;
   /** Resolved by the launcher. Optional only for persisted/older registrations. */
   baseUrl?: string;
+  gatewayBaseUrl?: string;
+  routeSessionId?: string;
   /** Native ChatGPT Codex backend used only by the additive desktop router. */
   nativeBaseUrl?: string;
   modelLabel: string;
@@ -419,7 +430,10 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
     lastSeenPersistedAt: now,
     modelLabel: req.modelLabel,
     apiKey: req.apiKey,
+    ...(req.frontierApiKey ? { frontierApiKey: req.frontierApiKey } : {}),
     baseUrl,
+    ...(req.gatewayBaseUrl ? { gatewayBaseUrl: req.gatewayBaseUrl } : {}),
+    ...(req.routeSessionId ? { routeSessionId: req.routeSessionId, remoteGatewayState: {} } : {}),
     modelDefinition: req.modelDefinition,
     costTracker,
     ...(typeof req.pid === "number" ? { pid: req.pid } : {}),
@@ -435,6 +449,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       modelDefinition: req.modelDefinition,
       authToken: req.authToken ?? req.token,
       reasoningHistoryMode: req.reasoningHistoryMode ?? DEFAULT_REASONING_HISTORY_MODE,
+      ...(req.gatewayBaseUrl ? { includeAutoModel: true } : {}),
       ...(req.nativeBaseUrl !== undefined ? { nativeBaseUrl: req.nativeBaseUrl } : {}),
       ...(req.claudeCodeMaxOutputTokens !== undefined
         ? { claudeCodeMaxOutputTokens: req.claudeCodeMaxOutputTokens }

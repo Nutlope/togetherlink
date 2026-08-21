@@ -126,6 +126,15 @@ describe("shared harness default", () => {
     expect(resolveClaudeModel(undefined).definition).toBe(DEFAULT_MODEL);
   });
 
+  it("adds Auto as a virtual Codex model without changing the local default", () => {
+    expect(resolveCodexModel("auto")).toMatchObject({
+      id: "auto",
+      routingPreset: "auto",
+      definition: { id: "auto", name: "Auto" },
+    });
+    expect(resolveCodexModel(undefined).definition).toBe(DEFAULT_MODEL);
+  });
+
   it("advertises Claude custom-model capabilities only when verified per model", () => {
     expect(claudeModelCapabilities(GLM_5_2)).toBeTruthy();
     expect(claudeModelCapabilities(KIMI_K3)).toBe(

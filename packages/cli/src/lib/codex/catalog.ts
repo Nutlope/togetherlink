@@ -1,5 +1,5 @@
 import { type ModelDefinition, type ModelReasoningEffort } from "@togetherlink/models";
-import { CODEX_SUPPORTED_MODELS } from "./defaults.js";
+import { CODEX_ROUTABLE_MODELS, CODEX_SUPPORTED_MODELS } from "./defaults.js";
 
 const CODEX_BASE_INSTRUCTIONS =
   "You are Codex, a coding agent. You and the user share one workspace, and your job is to help them complete their coding task accurately and efficiently.";
@@ -22,9 +22,10 @@ const CODEX_MODEL_MESSAGES = {
 
 export type CodexModelCatalog = { models: Array<Record<string, unknown>> };
 
-export function codexModelCatalog(): CodexModelCatalog {
+export function codexModelCatalog(options: { includeAuto?: boolean } = {}): CodexModelCatalog {
+  const models = options.includeAuto ? CODEX_ROUTABLE_MODELS : CODEX_SUPPORTED_MODELS;
   return {
-    models: CODEX_SUPPORTED_MODELS.map((model, index) => toCodexModelCatalogEntry(model, index)),
+    models: models.map((model, index) => toCodexModelCatalogEntry(model, index)),
   };
 }
 
@@ -33,7 +34,10 @@ export function codexModelCatalog(): CodexModelCatalog {
  * metadata. Together entries are placed after the native picker rows so
  * enabling TogetherLink does not silently change the user's GPT default.
  */
-export function mergeCodexModelCatalog(nativeCatalog: CodexModelCatalog): CodexModelCatalog {
+export function mergeCodexModelCatalog(
+  nativeCatalog: CodexModelCatalog,
+  options: { includeAuto?: boolean } = {},
+): CodexModelCatalog {
   const nativeModels = nativeCatalog.models.filter(
     (entry) => typeof entry?.slug === "string" && entry.slug.length > 0,
   );
@@ -45,7 +49,8 @@ export function mergeCodexModelCatalog(nativeCatalog: CodexModelCatalog): CodexM
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const firstTogetherPriority = (priorities.length > 0 ? Math.max(...priorities) : 50) + 1;
   const merged = new Map(nativeModels.map((entry) => [String(entry.slug), entry]));
-  CODEX_SUPPORTED_MODELS.forEach((model, index) => {
+  const togetherModels = options.includeAuto ? CODEX_ROUTABLE_MODELS : CODEX_SUPPORTED_MODELS;
+  togetherModels.forEach((model, index) => {
     merged.set(model.id, toCodexModelCatalogEntry(model, firstTogetherPriority + index));
   });
   return {
@@ -58,8 +63,8 @@ export function mergeCodexModelCatalog(nativeCatalog: CodexModelCatalog): CodexM
   };
 }
 
-export function codexModelCatalogJson(): string {
-  return JSON.stringify(codexModelCatalog());
+export function codexModelCatalogJson(options: { includeAuto?: boolean } = {}): string {
+  return JSON.stringify(codexModelCatalog(options));
 }
 
 function toCodexModelCatalogEntry(

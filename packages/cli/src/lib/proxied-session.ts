@@ -52,8 +52,10 @@ export type ProxiedSessionSpec = {
   /** The agent id ("claude" / "codex") — used for registration + telemetry. */
   agent: "claude" | "codex";
   apiKey: string;
+  frontierApiKey?: string;
   /** Upstream Together API root, resolved once by the launching CLI process. */
   baseUrl: string;
+  gatewayBaseUrl?: string;
   /** Resolved model: the id Together expects + the human name for the banner. */
   modelId: string;
   targetModelId: string;
@@ -107,8 +109,11 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
   const sessionId = randomLocalProxyToken();
   const authToken = await localProxyAuthToken();
   const telemetrySessionId = randomSessionId();
+  const routeSessionId = spec.gatewayBaseUrl ? randomLocalProxyToken() : undefined;
 
-  const { url: proxyUrl } = await ensureDaemon();
+  const { url: proxyUrl } = await ensureDaemon({
+    replaceMismatchedDaemon: Boolean(spec.gatewayBaseUrl),
+  });
   const agentProxyUrl = daemonSessionUrl(proxyUrl, sessionId);
 
   const registration: RegisterSessionRequest = {
@@ -116,7 +121,10 @@ export async function runProxiedSession(spec: ProxiedSessionSpec): Promise<Proxi
     authToken,
     agent: spec.agent,
     apiKey: spec.apiKey,
+    ...(spec.frontierApiKey ? { frontierApiKey: spec.frontierApiKey } : {}),
     baseUrl: spec.baseUrl,
+    ...(spec.gatewayBaseUrl ? { gatewayBaseUrl: spec.gatewayBaseUrl } : {}),
+    ...(routeSessionId ? { routeSessionId } : {}),
     modelLabel: spec.modelName,
     modelId: spec.registrationModelId ?? spec.modelId,
     targetModelId: spec.targetModelId,

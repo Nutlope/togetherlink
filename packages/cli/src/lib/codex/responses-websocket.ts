@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebSocket, RawData } from "ws";
 import { consumeSseLines } from "../sse.js";
-import { findModelById } from "@togetherlink/models";
+import { CODEX_ROUTABLE_MODELS } from "./defaults.js";
 import { handleCodexProxyRequest, type CodexProxyOptions } from "./proxy.js";
 import { relayNativeCodexWebsocket } from "./native-websocket-relay.js";
 import { sanitizeNativeResponsesReplay } from "./native-replay.js";
@@ -31,6 +31,11 @@ export function handleCodexResponsesWebsocket(
   ws: WebSocket,
   options: CodexProxyOptions,
   upgradeHeaders: Record<string, string | string[] | undefined> = {},
+  requestHandler: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    options: CodexProxyOptions,
+  ) => Promise<void> = handleCodexProxyRequest,
 ): void {
   let activeSink: WebSocketSseSink | undefined;
   let queue: Promise<void> = Promise.resolve();
@@ -121,7 +126,7 @@ export function handleCodexResponsesWebsocket(
     });
     activeSink = sink;
     try {
-      await handleCodexProxyRequest(req, sink as unknown as ServerResponse, options);
+      await requestHandler(req, sink as unknown as ServerResponse, options);
     } finally {
       activeSink = undefined;
     }
@@ -140,7 +145,11 @@ export function handleCodexResponsesWebsocket(
       return false;
     }
     const model = body.model;
-    return typeof model === "string" && model !== "" && findModelById(model) === undefined;
+    return (
+      typeof model === "string" &&
+      model !== "" &&
+      !CODEX_ROUTABLE_MODELS.some((candidate) => candidate.id === model)
+    );
   }
 
   function ensureNativeRelay(): { send(body: Record<string, unknown>): void; close(): void } {

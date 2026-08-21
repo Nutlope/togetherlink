@@ -109,6 +109,63 @@ describe("daemon lazy codex-app session restore", () => {
     expect(response.status).toBe(401);
   });
 
+  test("re-registering ChatGPT applies a newly supplied gateway to the same session token", async () => {
+    let gatewayPath = "";
+    let gatewayAuthorization = "";
+    let gatewayFrontierKey = "";
+    const gateway = http.createServer(async (req, res) => {
+      gatewayPath = req.url ?? "";
+      gatewayAuthorization = String(req.headers.authorization ?? "");
+      gatewayFrontierKey = String(req.headers["x-togetherlink-frontier-api-key"] ?? "");
+      for await (const _chunk of req) {
+        // Drain the forwarded request.
+      }
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "x-togetherlink-resolved-model": GLM_5_2.id,
+      });
+      res.end(JSON.stringify({ id: "response_gateway", status: "completed" }));
+    });
+    await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
+    const address = gateway.address();
+    if (typeof address !== "object" || address === null) throw new Error("gateway did not bind");
+
+    try {
+      const gatewayRegistration: RegisterSessionRequest = {
+        ...registration(),
+        frontierApiKey: "openai-user-key",
+        gatewayBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+        routeSessionId: "chatgpt-auto-session",
+        modelLabel: "Auto (ChatGPT App alpha)",
+        modelId: "auto",
+        targetModelId: "auto",
+        modelName: "Auto",
+        modelDefinition: { ...DEFAULT_MODEL, id: "auto", name: "Auto" },
+      };
+      await writeAppRegistration(gatewayRegistration, daemon.home);
+      const reapply = await fetch(`${daemon.url}/internal/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(gatewayRegistration),
+      });
+      expect(reapply.ok).toBe(true);
+
+      const response = await fetch(`${daemon.url}/session/${TOKEN}/v1/responses`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "auto", input: "route me" }),
+      });
+
+      expect(response.ok).toBe(true);
+      expect(gatewayPath).toBe("/v1/responses");
+      expect(gatewayAuthorization).toBe("Bearer fake-key-never-sent-upstream");
+      expect(gatewayFrontierKey).toBe("openai-user-key");
+      expect(await readAppRegistration(daemon.home)).toEqual(gatewayRegistration);
+    } finally {
+      await new Promise<void>((resolve) => gateway.close(() => resolve()));
+    }
+  });
+
   test("routes restored codex-app requests through its persisted upstream base URL", async () => {
     let upstreamPath = "";
     const upstream = http.createServer((req, res) => {

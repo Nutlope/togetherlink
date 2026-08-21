@@ -424,6 +424,38 @@ describe("Codex Responses WebSocket", () => {
     }
   });
 
+  test("routes Auto websocket turns through the injected hosted gateway handler", async () => {
+    const hostedHandler = vi.fn(async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      for await (const _chunk of req) {
+        // Drain the synthetic Responses request.
+      }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(
+        'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_auto","status":"completed","model":"auto","output":[]}}\n\n',
+      );
+    });
+    const { events, close } = await runWebsocketTurn(
+      {
+        type: "response.create",
+        model: "auto",
+        input: [{ type: "message", role: "user", content: "route me" }],
+      },
+      {
+        nativeBaseUrl: "https://chatgpt.com/backend-api/codex",
+        requestHandler: hostedHandler,
+      },
+    );
+    try {
+      expect(events.at(-1)).toMatchObject({
+        type: "response.completed",
+        response: { model: "auto", status: "completed" },
+      });
+      expect(hostedHandler).toHaveBeenCalledTimes(1);
+    } finally {
+      await close();
+    }
+  });
+
   test("switches from a Together turn to a native model without leaking previous_response_id", async () => {
     const upstream = await startFakeNativeUpstream();
     vi.stubGlobal(
@@ -582,6 +614,11 @@ async function runWebsocketTurn(
   extras: {
     nativeBaseUrl?: string;
     upgradeHeaders?: Record<string, string>;
+    requestHandler?: (
+      req: http.IncomingMessage,
+      res: http.ServerResponse,
+      options: CodexProxyOptions,
+    ) => Promise<void>;
   } = {},
 ): Promise<{ events: Array<Record<string, unknown>>; close: () => Promise<void> }> {
   const { ws, close } = await openWebsocket(extras);
@@ -610,6 +647,11 @@ async function openWebsocket(
   extras: {
     nativeBaseUrl?: string;
     upgradeHeaders?: Record<string, string>;
+    requestHandler?: (
+      req: http.IncomingMessage,
+      res: http.ServerResponse,
+      options: CodexProxyOptions,
+    ) => Promise<void>;
   } = {},
 ): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
   const wss = new WebSocketServer({ noServer: true });
@@ -631,6 +673,7 @@ async function openWebsocket(
           ...(extras.nativeBaseUrl ? { nativeBaseUrl: extras.nativeBaseUrl } : {}),
         },
         extras.upgradeHeaders ?? {},
+        extras.requestHandler,
       );
     });
   });

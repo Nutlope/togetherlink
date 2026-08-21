@@ -37,6 +37,8 @@ const LOCAL_PROXY_TOKEN_FILE = "local-proxy-token";
  */
 export async function ensureDaemon(options?: {
   healthPollTimeoutMs?: number;
+  /** Gateway mode requires the current bundle; an older daemon cannot route `auto`. */
+  replaceMismatchedDaemon?: boolean;
 }): Promise<{ url: string }> {
   const port = resolveDaemonPort();
   const url = daemonUrl(port);
@@ -51,7 +53,10 @@ export async function ensureDaemon(options?: {
     const activeSessionCount =
       health.activeSessionCount >= 0 ? health.activeSessionCount : await activeSessionCountFor(url);
     const daemonPid = health.pid > 0 ? health.pid : await readDaemonPid();
-    if (activeSessionCount === 0 && daemonPid !== undefined) {
+    if (
+      daemonPid !== undefined &&
+      (activeSessionCount === 0 || options?.replaceMismatchedDaemon === true)
+    ) {
       await stopDaemonPid(daemonPid);
       await waitForDaemonToExit(port);
     } else {
@@ -360,7 +365,9 @@ export function startDaemonSessionKeepalive(
       return;
     }
     lastRecoveredAt = now;
-    const { url } = await ensureDaemon();
+    const { url } = await ensureDaemon({
+      replaceMismatchedDaemon: Boolean(registration.gatewayBaseUrl),
+    });
     await registerDaemonSession(url, {
       ...registration,
       ...(options.pid !== undefined ? { pid: options.pid } : {}),

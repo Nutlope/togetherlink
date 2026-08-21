@@ -3,6 +3,30 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.6 - 2026-08-21
+
+### Added
+
+- Added an opt-in `TOGETHERLINK_GATEWAY_URL` runtime mode for Codex CLI and ChatGPT Desktop.
+  Gateway sessions default to the virtual Auto model and send the original Responses protocol to
+  the configured remote router; local sessions keep the existing Together model defaults.
+- Forwarded the user's Together credential and optional `OPENAI_API_KEY` through the opted-in
+  gateway session so the private router can select either a Together model or a user-funded
+  frontier model. No gateway endpoint is embedded in the public CLI or release bundle.
+
+### Fixed
+
+- Re-running `togetherlink chatgpt` now reapplies the active gateway setting to the persistent app
+  session, including adding or removing Auto when `TOGETHERLINK_GATEWAY_URL` changes.
+- Gateway launches now replace a stale daemon after `togetherlink update`, even when another
+  persistent session is registered, so an older daemon cannot send the virtual Auto id directly
+  to Together.
+
+### Tests
+
+- Added deterministic daemon, HTTP, compression, model-catalog, ChatGPT re-registration, and
+  Responses WebSocket coverage for remote Auto routing and provider-key forwarding.
+
 ## 0.8.5 - 2026-08-21
 
 ### Fixed

@@ -275,4 +275,19 @@ describe("Codex App alpha config", () => {
         "Kimi K3 is now available through TogetherLink. Moonshot AI's flagship model brings advanced reasoning, vision support, and a 1M-token context window to Codex.",
     });
   });
+
+  test("adds Auto only while ChatGPT is configured for a hosted gateway", () => {
+    const nativeCatalog = {
+      models: [{ slug: "gpt-5.6-sol", display_name: "GPT-5.6-Sol", priority: 1 }],
+    };
+    const local = JSON.parse(codexAppModelCatalogJson(nativeCatalog)) as {
+      models: Array<{ slug: string }>;
+    };
+    const hosted = JSON.parse(codexAppModelCatalogJson(nativeCatalog, { includeAuto: true })) as {
+      models: Array<{ slug: string }>;
+    };
+
+    expect(local.models.map((model) => model.slug)).not.toContain("auto");
+    expect(hosted.models.map((model) => model.slug)).toContain("auto");
+  });
 });
