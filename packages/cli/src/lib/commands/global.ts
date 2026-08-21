@@ -20,8 +20,8 @@ Usage:
   togetherlink update           update to the latest release
   togetherlink whoami
   togetherlink usage [--last 7d]  tracked spend for Claude, Codex, and ChatGPT
-  togetherlink chatgpt [--model <model>]  (alpha)
-  togetherlink chatgpt off         disable the managed ~/.codex/config.toml (aliases: codex off, restore)
+  togetherlink chatgpt [--model <model>]  (alpha, alias: tchatgpt)
+  togetherlink chatgpt off         disable the managed ~/.codex/config.toml (aliases: tchatgpt off, codex off, restore)
   togetherlink daemon install    enable daemon auto-start at login (macOS/Linux)
   togetherlink daemon uninstall  disable daemon auto-start at login (macOS/Linux)
   togetherlink daemon status     show auto-start service status
@@ -37,7 +37,7 @@ Usage:
 
 Extra args after codex/deepseek/claude/grok/hermes/pi/prime/opencode are passed through.
 DeepSeek Harness support is alpha and launches its web profile with ephemeral Together settings.
-ChatGPT App support is alpha (alias: codex-app). The chatgpt command manages ~/.codex/config.toml, which the
+ChatGPT App support is alpha (aliases: tchatgpt, codex-app). The chatgpt command manages ~/.codex/config.toml, which the
 Codex CLI also reads — run \`togetherlink chatgpt off\` (or \`codex off\`, or bare \`restore\`) to disable it and
 restore the previous config.
 

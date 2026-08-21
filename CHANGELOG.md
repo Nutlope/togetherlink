@@ -7,6 +7,9 @@ version 0.6.5; earlier release history remains available in Git.
 
 ### Added
 
+- Added the `tchatgpt` shortcut for `togetherlink chatgpt`, including `tchatgpt off` to disable
+  the managed ChatGPT Desktop/Codex configuration and restore the previous profile. Existing
+  installations receive the shortcut automatically through the self-updater.
 - `togetherlink chatgpt off` to disable the togetherlink-managed `~/.codex/config.toml` and
   restore the previous profile. Also available as `togetherlink codex off`, bare
   `togetherlink restore`, and the `restore` verb without dashes (`chatgpt restore`,

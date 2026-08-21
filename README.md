@@ -12,7 +12,7 @@ An LLM-readable documentation file is published at <https://togetherlink.vercel.
 
 ## Install
 
-One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
+One-liner — installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tchatgpt`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs [Bun](https://bun.sh) for you if it isn't already present:
 
 ```bash
 curl -fsSL https://togetherlink.vercel.app/install.sh | bash
@@ -28,7 +28,8 @@ Or launch a tool directly:
 
 ```bash
 togetherlink codex        # alias: tcodex
-togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (alias: codex-app)
+togetherlink chatgpt      # alpha: ChatGPT Desktop session with restore (aliases: tchatgpt, codex-app)
+tchatgpt off              # disable TogetherLink for ChatGPT Desktop and restore the previous profile
 togetherlink claude       # alias: tclaude
 togetherlink deepseek     # alpha: DeepSeek Harness web UI (alias: tdeepseek)
 togetherlink grok         # alias: tgrok
@@ -82,7 +83,8 @@ The compact CLI guide is:
 
 ```text
 togetherlink configure
-togetherlink chatgpt [--model <model>] [--restore]  (alpha, alias: codex-app)
+togetherlink chatgpt [--model <model>]  (alpha, aliases: tchatgpt, codex-app)
+togetherlink chatgpt off             (aliases: tchatgpt off, codex off, restore)
 togetherlink codex [...]       (alias: tcodex)
 togetherlink claude [...]      (alias: tclaude)
 togetherlink deepseek [...]    (alpha, alias: tdeepseek)

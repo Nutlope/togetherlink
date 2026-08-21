@@ -9,7 +9,7 @@ export interface InteractiveLauncherOption {
 }
 
 const COMMON_HARNESSES: readonly InteractiveLauncherOption[] = [
-  { value: "chatgpt", label: "ChatGPT Desktop", hint: "chatgpt" },
+  { value: "chatgpt", label: "ChatGPT Desktop", hint: "tchatgpt" },
   { value: "claude", label: "Claude Code", hint: "tclaude" },
   { value: "codex", label: "Codex CLI", hint: "tcodex" },
   { value: "opencode", label: "OpenCode", hint: "topencode" },
