@@ -12,6 +12,9 @@ describe("interactive launcher options", () => {
       "configure",
       "show-more",
     ]);
+    expect(interactiveLauncherOptions().find(({ value }) => value === "chatgpt")?.hint).toBe(
+      "tchatgpt",
+    );
   });
 
   test("expands to include every less common harness", () => {

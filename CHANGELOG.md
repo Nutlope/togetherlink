@@ -3,6 +3,52 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.4 - 2026-08-19
+
+### Added
+
+- Added `TOGETHERLINK_REASONING_HISTORY=off|interleaved|full` for Claude Code, Codex CLI, and
+  ChatGPT Desktop. `off` omits historical reasoning, `interleaved` delegates active-turn
+  retention to Together's model template, and `full` preserves all prior reasoning. The default
+  remains `full` for backward compatibility; current reasoning and live reasoning output are not
+  disabled.
+- Added the `tchatgpt` shortcut for `togetherlink chatgpt`, including `tchatgpt off` to disable
+  the managed ChatGPT Desktop/Codex configuration and restore the previous profile. Existing
+  installations receive the shortcut automatically through the self-updater.
+- `togetherlink chatgpt off` to disable the togetherlink-managed `~/.codex/config.toml` and
+  restore the previous profile. Also available as `togetherlink codex off`, bare
+  `togetherlink restore`, and the `restore` verb without dashes (`chatgpt restore`,
+  `codex restore`); the `--restore` flag keeps working. The managed config is shared by ChatGPT
+  Desktop and the Codex CLI, so disabling it from either command fixes both.
+
+### Changed
+
+- `togetherlink usage` model and harness breakdowns now render as Unicode box-bordered tables.
+- Renamed the Codex launcher option and usage-report harness label to "Codex CLI" to distinguish
+  the terminal Codex CLI from ChatGPT Desktop.
+
+### Fixed
+
+- `togetherlink usage` now counts ChatGPT Desktop (codex-app) and other still-running proxied
+  sessions. Usage was previously only recorded when a session ended, and codex-app sessions
+  register without a pid so they never end while the app is open — their spend was invisible in
+  the report and lost if the daemon restarted. The daemon now flushes in-memory cost to the
+  session store on a cadence and on graceful shutdown, and the usage query includes active
+  sessions seen within the window.
+- `togetherlink chatgpt off` silently re-applied the managed config (the `off` argument was
+  ignored), and `togetherlink codex off` launched the Codex CLI with "off" as a prompt argument.
+  Both now disable the managed config.
+- Disabling with no managed config present is now a friendly no-op instead of a missing-backup
+  error, and it works while ChatGPT Desktop is open.
+- `off`/`restore` after harnesses that write no persistent config (Claude Code, OpenCode, ...)
+  now fails with a clear error instead of forwarding the verb to the harness as a prompt.
+
+### Tests
+
+- Added HTTP-boundary coverage for all nine reasoning-history combinations across Claude Code,
+  Codex CLI, and ChatGPT Desktop, verifying the exact messages and `clear_thinking` policy sent
+  to a Together-compatible upstream.
+
 ## 0.8.3 - 2026-08-15
 
 ### Added

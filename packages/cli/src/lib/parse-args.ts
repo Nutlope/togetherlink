@@ -23,6 +23,10 @@ export type ParsedArgs = {
     Record<BooleanFlag, boolean> & { last?: string; passthroughSeparator?: boolean };
 };
 
+export function isRestoreVerb(value: string | undefined): value is "off" | "restore" {
+  return value === "off" || value === "restore";
+}
+
 /**
  * Minimal positional + flag parser — no dependency needed for the surface
  * area this CLI has (harness-first verbs plus a handful of flags).
@@ -56,6 +60,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     positional.push(token);
     if (isHarnessToken(token)) {
+      // `off`/`restore` immediately after a harness name is a togetherlink
+      // verb (disable the managed config), not an argument for the harness
+      // binary. Keep it positional so it never reaches the harness as a
+      // prompt; anything after it still passes through. Use `--` to forward a
+      // literal "off"/"restore" to the harness.
+      const next = argv[i + 1];
+      if (isRestoreVerb(next)) {
+        positional.push(next);
+        flags.passthrough = argv.slice(i + 2);
+        break;
+      }
       flags.passthrough = argv.slice(i + 1);
       break;
     }

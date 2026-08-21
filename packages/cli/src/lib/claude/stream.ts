@@ -4,6 +4,11 @@ import { type ModelDefinition } from "@togetherlink/models";
 import type { ExaSearchOutcome } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
+import {
+  effectiveReasoningHistoryMode,
+  reasoningHistoryPolicy,
+  type ReasoningHistoryMode,
+} from "../reasoning-history.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
 import { writeSse } from "../sse.js";
 import {
@@ -54,6 +59,7 @@ type ClaudeStreamOptions = {
   claudeCodeMaxOutputTokens?: number | undefined;
   claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
   isCompactionRequest?: boolean | undefined;
+  reasoningHistoryMode?: ReasoningHistoryMode | undefined;
   costTracker?: CostTracker | undefined;
   /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
   rawBytes?: number | undefined;
@@ -77,7 +83,7 @@ export async function streamAnthropicFromTogether(
   // fallback branches. Behavior is unchanged.
   const run = () => {
     const targetModel = resolveTargetModel(body.model, options);
-    const messages = toOpenAIMessages(body, targetModel.definition);
+    const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
     const nativeTools = nativeServerTools(body.tools);
     const upstreamMessages =
       nativeTools.length > 0 ? withClaudeNativeToolSystemPrompt(messages, nativeTools) : messages;
@@ -113,7 +119,11 @@ export async function streamAnthropicFromTogether(
       : reasoningEffort
         ? { reasoning_effort: reasoningEffort }
         : {}),
-    chat_template_kwargs: { clear_thinking: options.isCompactionRequest === true },
+    chat_template_kwargs: {
+      clear_thinking:
+        options.isCompactionRequest === true ||
+        reasoningHistoryPolicy(options.reasoningHistoryMode).clearThinking,
+    },
     stream: true,
     // Guarantee Together sends a usage chunk at the end so cost tracking has
     // real token counts (without this, some streamed responses omit usage).
@@ -138,6 +148,7 @@ export async function streamAnthropicFromTogether(
     toolCount: payload.tools?.length ?? 0,
     maxTokens: payload.max_tokens,
     reasoningEffort,
+    reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
   });
 
   // The Together client owns both transient-status and reactive context-fit

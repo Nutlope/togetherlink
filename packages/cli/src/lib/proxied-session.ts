@@ -64,7 +64,7 @@ export type ProxiedSessionSpec = {
   /** Agent-specific registration metadata that should be visible to the daemon proxy. */
   extraRegistration?: Pick<
     RegisterSessionRequest,
-    "claudeCodeMaxOutputTokens" | "claudeCodeMaxOutputTokensUserSet"
+    "claudeCodeMaxOutputTokens" | "claudeCodeMaxOutputTokensUserSet" | "reasoningHistoryMode"
   >;
   args?: string[];
   /** Optional pre-spawn hook (Codex uses it to write the model catalog);

@@ -42,6 +42,7 @@ import {
 } from "./routes.js";
 import type { ResponsesRequest, ResponsesTool } from "./wire-types.js";
 import type { TogetherClientOptions } from "../together-client.js";
+import { effectiveReasoningHistoryMode, type ReasoningHistoryMode } from "../reasoning-history.js";
 
 export type CodexProxyOptions = {
   apiKey: string;
@@ -52,6 +53,8 @@ export type CodexProxyOptions = {
   modelName: string;
   modelDefinition: ModelDefinition;
   authToken: string;
+  /** Historical model reasoning replay policy. Defaults to full for old sessions. */
+  reasoningHistoryMode?: ReasoningHistoryMode | undefined;
   /** When set, unknown/non-Together model ids retain normal ChatGPT routing. */
   nativeBaseUrl?: string | undefined;
   debug?: boolean | undefined;
@@ -289,6 +292,7 @@ export async function handleCodexProxyRequest(
     inputItems: Array.isArray(body.input) ? body.input.length : typeof body.input,
     toolCount: body.tools?.length ?? 0,
     nativeToolCount,
+    reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
     tools: summarizeResponsesTools(body.tools),
   }));
 

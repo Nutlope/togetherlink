@@ -116,4 +116,56 @@ describe("daemon session persistence", () => {
       },
     ]);
   });
+
+  test("also counts never-ending (active) proxied sessions seen in the window", async () => {
+    const home = mkdtempSync(join(tmpdir(), "togetherlink-daemon-active-"));
+    cleanup.push(home);
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          import { createSessionStore } from "./packages/cli/dist/lib/daemon/storage.js";
+          import { GLM_5_2 } from "./packages/models/dist/index.js";
+          const home = process.argv[1];
+          const store = await createSessionStore(home);
+          if (store.kind !== "sqlite") throw new Error("sqlite unavailable");
+          const base = {
+            apiKey: "phantom-key",
+            modelLabel: GLM_5_2.name,
+            targetModelId: GLM_5_2.id,
+            modelDefinition: GLM_5_2,
+            costSummary: "live",
+            costTotals: { promptTokens: 100, cachedTokens: 0, completionTokens: 5, costUsd: 0.42 },
+            usageByModel: [{ model: GLM_5_2.id, promptTokens: 100, cachedTokens: 0, completionTokens: 5, costUsd: 0.42 }],
+          };
+          // Active codex-app session (no pid → never reaped) seen during the window: counted.
+          store.upsertSession({ ...base, token: "active", agent: "codex-app", startedAt: 100, lastSeenAt: 300 });
+          // Active but gone idle before the window started: excluded.
+          store.upsertSession({ ...base, token: "idle", agent: "codex-app", startedAt: 100, lastSeenAt: 50 });
+          process.stdout.write(JSON.stringify(store.queryUsageSince(100)));
+          store.close();
+        `,
+        home,
+      ],
+      { cwd: join(process.cwd(), "..", ".."), encoding: "utf8" },
+    );
+
+    expect(JSON.parse(output)).toEqual([
+      {
+        agent: "codex-app",
+        costUsd: 0.42,
+        usageByModel: [
+          {
+            model: "zai-org/GLM-5.2",
+            promptTokens: 100,
+            cachedTokens: 0,
+            completionTokens: 5,
+            costUsd: 0.42,
+          },
+        ],
+      },
+    ]);
+  });
 });

@@ -6,6 +6,7 @@ import { CODEX_AUTH_ENV, CODEX_PROVIDER_ID, resolveCodexModel } from "./defaults
 import { codexArgsIgnoreUserConfig, ensureCodexGenericUserDefaults } from "./user-config.js";
 import {} from "../daemon/launch.js";
 import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session.js";
+import { resolveReasoningHistoryMode } from "../reasoning-history.js";
 
 export type CodexLaunchOptions = {
   apiKey: string;
@@ -38,6 +39,9 @@ export async function runCodexTogether(options: CodexLaunchOptions): Promise<Cod
     targetModelId: selectedModel.definition.id,
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
+    extraRegistration: {
+      reasoningHistoryMode: resolveReasoningHistoryMode(),
+    },
     args,
     binary: "codex",
     keepaliveLabel: "Codex session",

@@ -7,6 +7,7 @@ import {
 } from "@togetherlink/models";
 import { writeProxyDebugLog } from "../proxy-debug.js";
 import { resolveOutputBudget } from "../output-budget.js";
+import { reasoningHistoryPolicy, type ReasoningHistoryMode } from "../reasoning-history.js";
 import {
   nativeToolMaxUses as sharedNativeToolMaxUses,
   runExaSearchDetailed as runSharedExaSearchDetailed,
@@ -55,6 +56,7 @@ type CodexTranslateOptions = {
   modelDefinition: ModelDefinition;
   debug?: boolean | undefined;
   nativeSearchResults?: Map<string, string> | undefined;
+  reasoningHistoryMode?: ReasoningHistoryMode | undefined;
 };
 
 type DebugOptions = {
@@ -69,6 +71,7 @@ export function toChatPayload(
   requestModel: ResolvedCodexRequestModel,
   estimatedInputTokens = 0,
 ): Record<string, unknown> {
+  const historyPolicy = reasoningHistoryPolicy(options.reasoningHistoryMode);
   const messages = toChatMessages(body, options, toolTranslation, requestModel);
   const translatedReasoningEffort = codexReasoningEffort(body.reasoning, requestModel.definition);
   const messagesWithNativePrompt =
@@ -90,7 +93,7 @@ export function toChatPayload(
       : {}),
     response_format: toChatResponseFormat(body.text),
     ...(translatedReasoningEffort ? { reasoning_effort: translatedReasoningEffort } : {}),
-    chat_template_kwargs: { clear_thinking: false },
+    chat_template_kwargs: { clear_thinking: historyPolicy.clearThinking },
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
   };
@@ -136,6 +139,7 @@ function toChatMessages(
   toolTranslation: CodexToolTranslation,
   requestModel?: ResolvedCodexRequestModel,
 ): ChatMessage[] {
+  const { includeHistoricalReasoning } = reasoningHistoryPolicy(options.reasoningHistoryMode);
   const selectedName = requestModel?.definition.name ?? options.modelName;
   const selectedId = requestModel?.targetModelId ?? options.targetModelId;
   const messages: ChatMessage[] = [
@@ -181,7 +185,7 @@ function toChatMessages(
     }
     if (item.type === "reasoning") {
       const reasoning = stringifyResponsesContent(item.content);
-      if (reasoning) {
+      if (reasoning && includeHistoricalReasoning) {
         pendingReasoningParts.push(reasoning);
       }
       continue;

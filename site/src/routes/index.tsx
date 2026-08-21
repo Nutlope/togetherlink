@@ -152,7 +152,7 @@ const features = [
 
 const heroTools = [
   { name: "Claude Code", command: "tclaude", icon: <ClaudeMark /> },
-  { name: "ChatGPT App", command: "chatgpt", icon: <ChatGPTHeroMark /> },
+  { name: "ChatGPT App", command: "tchatgpt", icon: <ChatGPTHeroMark /> },
   { name: "OpenCode", command: "topencode", icon: <OpenCodeMark /> },
   { name: "Codex CLI", command: "tcodex", icon: <CodexMark /> },
   { name: "Pi Code", command: "tpi", icon: <PiMark /> },
@@ -176,13 +176,13 @@ const heroToolPositions = [
 
 const codexAppCommands = [
   {
-    command: "togetherlink chatgpt",
+    command: "tchatgpt",
     label: "Configure",
     description:
       "Adds Together models beside native GPT models in the same picker. The router stays active until you restore.",
   },
   {
-    command: "togetherlink chatgpt --restore",
+    command: "tchatgpt off",
     label: "Restore",
     description:
       "Removes the additive catalog and router, restoring the exact previous Codex config.",
@@ -576,16 +576,16 @@ function Home() {
         <Step number="1">
           Install with the one-liner above. It drops the binary at <code>~/.togetherlink/bin/</code>{" "}
           and adds <code>togetherlink</code>, <code>tclaude</code>, <code>topencode</code>,{" "}
-          <code>tcodex</code>, <code>tdeepseek</code>, <code>tgrok</code>, <code>thermes</code>,{" "}
-          <code>tpi</code>, and <code>tprime</code>.
+          <code>tcodex</code>, <code>tchatgpt</code>, <code>tdeepseek</code>, <code>tgrok</code>,{" "}
+          <code>thermes</code>, <code>tpi</code>, and <code>tprime</code>.
         </Step>
         <Step number="2">
           Run <code>topencode</code>, <code>tclaude</code>, <code>tcodex</code>,{" "}
           <code>tdeepseek</code>, <code>tgrok</code>, <code>thermes</code>, <code>tpi</code>, or{" "}
           <code>tprime</code>. Run <code>thermes desktop</code> for Hermes Desktop. For the ChatGPT
-          desktop app run <code>togetherlink chatgpt</code> (alpha), and restore it with{" "}
-          <code>togetherlink chatgpt --restore</code>. On first launch it asks once for your
-          Together API key - press Enter to skip and add it later.
+          desktop app run <code>tchatgpt</code> (alpha), and restore it with{" "}
+          <code>tchatgpt off</code>. On first launch it asks once for your Together API key - press
+          Enter to skip and add it later.
         </Step>
         <Step number="3">
           That's it. Your tool runs against Together models and stays up to date on its own. Change

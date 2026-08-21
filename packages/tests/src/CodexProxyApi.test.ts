@@ -500,8 +500,11 @@ describe("Codex Responses proxy tool compatibility", () => {
     expect(upstreamBody).toContain("CURRENT_IMAGE");
   });
 
-  test("preserves prior reasoning items when translating Codex history", async () => {
-    const requests: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+  test("preserves prior reasoning items in full Codex history mode", async () => {
+    const requests: Array<{
+      messages?: Array<Record<string, unknown>>;
+      chat_template_kwargs?: unknown;
+    }> = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -516,22 +519,29 @@ describe("Codex Responses proxy tool compatibility", () => {
       }),
     );
 
-    await postResponses({
-      model: GLM_5_2.id,
-      input: [
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Start." }] },
-        {
-          type: "reasoning",
-          content: [{ type: "reasoning_text", text: "Remember marker BLUE-CHAIR-8273." }],
-        },
-        {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "READY" }],
-        },
-        { type: "message", role: "user", content: [{ type: "input_text", text: "Continue." }] },
-      ],
-    });
+    await postResponses(
+      {
+        model: GLM_5_2.id,
+        input: [
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Start." }] },
+          {
+            type: "reasoning",
+            content: [{ type: "reasoning_text", text: "Remember marker BLUE-CHAIR-8273." }],
+          },
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "READY" }],
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Continue." }],
+          },
+        ],
+      },
+      { ...options, reasoningHistoryMode: "full" },
+    );
 
     expect(requests[0]?.messages).toEqual(
       expect.arrayContaining([
@@ -542,6 +552,94 @@ describe("Codex Responses proxy tool compatibility", () => {
         }),
       ]),
     );
+    expect(requests[0]?.chat_template_kwargs).toEqual({ clear_thinking: false });
+  });
+
+  test("drops prior reasoning items when Codex history is off", async () => {
+    const requests: Array<{
+      messages?: Array<Record<string, unknown>>;
+      chat_template_kwargs?: unknown;
+    }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: GLM_5_2.id,
+        input: [
+          { type: "message", role: "user", content: "Start." },
+          {
+            type: "reasoning",
+            content: [{ type: "reasoning_text", text: "Do not replay this." }],
+          },
+          { type: "message", role: "assistant", content: "READY" },
+          { type: "message", role: "user", content: "Continue." },
+        ],
+      },
+      { ...options, reasoningHistoryMode: "off" },
+    );
+
+    const assistant = requests[0]?.messages?.find((message) => message.role === "assistant");
+    expect(assistant).toMatchObject({ role: "assistant", content: "READY" });
+    expect(assistant?.reasoning_content).toBeUndefined();
+    expect(requests[0]?.chat_template_kwargs).toEqual({ clear_thinking: true });
+  });
+
+  test("uses provider interleaving for Codex and ChatGPT reasoning history", async () => {
+    const requests: Array<{
+      messages?: Array<Record<string, unknown>>;
+      chat_template_kwargs?: unknown;
+    }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith("http://127.0.0.1:")) {
+          return realFetch(url, init);
+        }
+        requests.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+        });
+      }),
+    );
+
+    await postResponses(
+      {
+        model: GLM_5_2.id,
+        input: [
+          { type: "message", role: "user", content: "Start." },
+          {
+            type: "reasoning",
+            content: [{ type: "reasoning_text", text: "Keep this complete." }],
+          },
+          { type: "message", role: "assistant", content: "READY" },
+          { type: "message", role: "user", content: "Continue." },
+        ],
+      },
+      { ...options, reasoningHistoryMode: "interleaved" },
+    );
+
+    expect(requests[0]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          reasoning_content: "Keep this complete.",
+        }),
+      ]),
+    );
+    expect(requests[0]?.chat_template_kwargs).toEqual({ clear_thinking: true });
   });
 
   test("returns reasoning items that normal Codex can safely replay", async () => {

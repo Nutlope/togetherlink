@@ -3,6 +3,11 @@ import { type ModelDefinition } from "@togetherlink/models";
 import type { ExaSearchOutcome } from "../exa-search.js";
 import { runNativeWebSearchCall } from "../native-web-search.js";
 import { writeProxyDebugLog } from "../proxy-debug.js";
+import {
+  effectiveReasoningHistoryMode,
+  reasoningHistoryPolicy,
+  type ReasoningHistoryMode,
+} from "../reasoning-history.js";
 import { type ProxyPerfTracer } from "../proxy-perf.js";
 import { CostTracker } from "../cost.js";
 import {
@@ -40,6 +45,7 @@ type ClaudeChatOptions = {
   claudeCodeMaxOutputTokens?: number | undefined;
   claudeCodeMaxOutputTokensUserSet?: boolean | undefined;
   isCompactionRequest?: boolean | undefined;
+  reasoningHistoryMode?: ReasoningHistoryMode | undefined;
   costTracker?: CostTracker | undefined;
   /** Raw byte length of the inbound Anthropic-JSON request body, from readJsonBodyWithSize. */
   rawBytes?: number | undefined;
@@ -51,21 +57,14 @@ export async function callTogetherChatCompletions(
   signal?: AbortSignal,
   perf?: ProxyPerfTracer,
 ): Promise<OpenAIChatResponse> {
-  const translated =
-    perf?.spanSync("translate_request", () => {
-      const targetModel = resolveTargetModel(body.model, options);
-      const nativeTools = nativeServerTools(body.tools);
-      const messages = toOpenAIMessages(body, targetModel.definition);
-      const tools = toOpenAITools(body.tools, options);
-      return { targetModel, nativeTools, messages, tools };
-    }) ??
-    (() => {
-      const targetModel = resolveTargetModel(body.model, options);
-      const nativeTools = nativeServerTools(body.tools);
-      const messages = toOpenAIMessages(body, targetModel.definition);
-      const tools = toOpenAITools(body.tools, options);
-      return { targetModel, nativeTools, messages, tools };
-    })();
+  const translate = () => {
+    const targetModel = resolveTargetModel(body.model, options);
+    const nativeTools = nativeServerTools(body.tools);
+    const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
+    const tools = toOpenAITools(body.tools, options);
+    return { targetModel, nativeTools, messages, tools };
+  };
+  const translated = perf?.spanSync("translate_request", translate) ?? translate();
   const { targetModel, nativeTools, messages, tools } = translated;
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
@@ -92,7 +91,11 @@ export async function callTogetherChatCompletions(
         : reasoningEffort
           ? { reasoning_effort: reasoningEffort }
           : {}),
-      chat_template_kwargs: { clear_thinking: options.isCompactionRequest === true },
+      chat_template_kwargs: {
+        clear_thinking:
+          options.isCompactionRequest === true ||
+          reasoningHistoryPolicy(options.reasoningHistoryMode).clearThinking,
+      },
       stream: false,
     };
     // Estimate input tokens from the inbound raw byte length via the session's
@@ -113,6 +116,7 @@ export async function callTogetherChatCompletions(
       toolCount: payload.tools?.length ?? 0,
       maxTokens: payload.max_tokens,
       reasoningEffort,
+      reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
       nativeToolCount: nativeTools.length,
       turn,
     });

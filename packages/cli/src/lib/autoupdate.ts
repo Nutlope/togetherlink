@@ -56,6 +56,7 @@ const INSTALLED_WRAPPERS = [
   ["tclaude", "claude"],
   ["topencode", "opencode"],
   ["tcodex", "codex"],
+  ["tchatgpt", "chatgpt"],
   ["tdeepseek", "deepseek"],
   ["tgrok", "grok"],
   ["thermes", "hermes"],

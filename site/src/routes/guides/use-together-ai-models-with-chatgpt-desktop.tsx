@@ -29,12 +29,12 @@ const faqs: Faq[] = [
   {
     question: "Is this change temporary like the CLI wrappers?",
     answer:
-      "No. ChatGPT Desktop launches separately from TogetherLink, so the additive catalog and local router stay in its Codex configuration until you run togetherlink chatgpt --restore. Native GPT models remain available while it is enabled.",
+      "No. ChatGPT Desktop launches separately from TogetherLink, so the additive catalog and local router stay in its Codex configuration until you run tchatgpt off. Native GPT models remain available while it is enabled.",
   },
   {
     question: "Can I restore my previous app configuration?",
     answer:
-      "Yes. TogetherLink backs up the affected configuration before changing it. Run togetherlink chatgpt --restore, then restart the app if it was open.",
+      "Yes. TogetherLink backs up the affected configuration before changing it. Run tchatgpt off, then restart the app if it was open.",
   },
   {
     question: "Is the ChatGPT Desktop integration stable?",
@@ -140,7 +140,7 @@ function ChatGptDesktopGuide() {
             </p>
           </NumberedStep>
           <NumberedStep number="3" title="Configure and open ChatGPT Desktop">
-            <CommandBlock command="togetherlink chatgpt" />
+            <CommandBlock command="tchatgpt" />
             <p className="m-0 mt-4">
               If the app is already open, TogetherLink asks before restarting it. If you decline,
               quit and reopen the app manually so it reloads the provider and model catalog.
@@ -228,7 +228,7 @@ function ChatGptDesktopGuide() {
             or quit and reopen it manually so it loads the restored configuration.
           </p>
           <div className="mt-5">
-            <CommandBlock command="togetherlink chatgpt --restore" />
+            <CommandBlock command="tchatgpt off" />
           </div>
         </section>
 
@@ -245,11 +245,8 @@ function ChatGptDesktopGuide() {
             <code> chatgpt</code>.
           </p>
           <div className="mt-5 space-y-4">
-            <CommandBlock command="togetherlink chatgpt --model zai-org/GLM-5.2" label="GLM 5.2" />
-            <CommandBlock
-              command="togetherlink chatgpt --model Qwen/Qwen3.7-Max"
-              label="Qwen 3.7 Max"
-            />
+            <CommandBlock command="tchatgpt --model zai-org/GLM-5.2" label="GLM 5.2" />
+            <CommandBlock command="tchatgpt --model Qwen/Qwen3.7-Max" label="Qwen 3.7 Max" />
           </div>
         </section>
 

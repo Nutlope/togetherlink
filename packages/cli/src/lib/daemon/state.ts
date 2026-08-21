@@ -6,6 +6,7 @@ import type { CodexProxyOptions } from "../codex/proxy.js";
 import type { ProxyPerfPayload } from "../proxy-perf.js";
 import { sendTelemetryEvent } from "../telemetry.js";
 import { isProcessAlive } from "../paths.js";
+import { DEFAULT_REASONING_HISTORY_MODE, type ReasoningHistoryMode } from "../reasoning-history.js";
 import {
   createSessionStore,
   type SessionPersistInput,
@@ -142,6 +143,8 @@ export type RegisterSessionRequest = {
   claudeCodeMaxOutputTokens?: number;
   /** True when the user had CLAUDE_CODE_MAX_OUTPUT_TOKENS set before launch. */
   claudeCodeMaxOutputTokensUserSet?: boolean;
+  /** Historical reasoning replay mode resolved by the launching process. */
+  reasoningHistoryMode?: ReasoningHistoryMode;
   debug?: boolean;
 };
 
@@ -162,7 +165,8 @@ export type UsageReportRequest = {
 
 export class SessionRegistry {
   private readonly map = new Map<string, SessionState>();
-  private store: SessionStore | undefined;
+
+  constructor(private store?: SessionStore) {}
 
   register(state: SessionState): void {
     this.map.set(state.token, state);
@@ -215,7 +219,7 @@ export class SessionRegistry {
   }
 
   async restorePersisted(): Promise<number> {
-    this.store = await createSessionStore();
+    this.store ??= await createSessionStore();
     const persisted = this.store.restoreActiveSessions();
     let restored = 0;
     const now = Date.now();
@@ -306,18 +310,23 @@ export class SessionRegistry {
     if (externalSummary) {
       state.externalSummary = externalSummary;
     }
-    this.store?.updateSessionUsage(
-      token,
-      state.costTracker.summarize(),
-      state.costTracker.totals,
-      state.costTracker.totalsByModel,
-      state.externalSummary,
-    );
+    this.persistUsage(state);
   }
 
   closeStore(): void {
     this.store?.close();
     this.store = undefined;
+  }
+
+  /**
+   * Flush every active session's accumulated cost to the store. Called on
+   * graceful shutdown so a daemon restart (CLI update, service refresh) does
+   * not lose the tail of in-flight spend the cadence tick has not yet written.
+   */
+  flushAll(): void {
+    for (const state of this.map.values()) {
+      this.flushSessionUsage(state);
+    }
   }
 
   private persistSession(state: SessionState): void {
@@ -332,6 +341,33 @@ export class SessionRegistry {
     }
     state.lastSeenPersistedAt = now;
     this.store?.updateSessionLastSeen(state.token, now);
+    this.flushSessionUsage(state);
+  }
+
+  /**
+   * Flush the in-memory cost tracker for a proxied session to the store on the
+   * same cadence as the last-seen tick. Proxied agents (claude/codex/codex-app)
+   * otherwise only persist usage at session end — so a daemon restart would
+   * lose in-flight spend, and a never-ending session (codex-app, which has no
+   * pid and so is never reaped while the app is open) would never surface in
+   * the usage report at all. `queryUsageSince` now counts active sessions too,
+   * so keeping this snapshot fresh is what makes codex-app usage visible.
+   */
+  private flushSessionUsage(state: SessionState): void {
+    if (!isProxiedAgent(state.agent)) {
+      return;
+    }
+    this.persistUsage(state);
+  }
+
+  private persistUsage(state: SessionState): void {
+    this.store?.updateSessionUsage(
+      state.token,
+      state.costTracker.summarize(),
+      state.costTracker.totals,
+      state.costTracker.totalsByModel,
+      state.externalSummary,
+    );
   }
 
   private enforceNoPidSessionLimit(now: number): number {
@@ -398,6 +434,7 @@ export function buildSession(req: RegisterSessionRequest): SessionState {
       modelName: req.modelName ?? req.modelLabel,
       modelDefinition: req.modelDefinition,
       authToken: req.authToken ?? req.token,
+      reasoningHistoryMode: req.reasoningHistoryMode ?? DEFAULT_REASONING_HISTORY_MODE,
       ...(req.nativeBaseUrl !== undefined ? { nativeBaseUrl: req.nativeBaseUrl } : {}),
       ...(req.claudeCodeMaxOutputTokens !== undefined
         ? { claudeCodeMaxOutputTokens: req.claudeCodeMaxOutputTokens }

@@ -18,6 +18,7 @@ import { isClaudeCompactionRequest } from "../../cli/src/lib/claude/compaction.j
 import { CLAUDE_HAIKU_MODEL } from "../../cli/src/lib/claude/defaults.js";
 import { handleProxyRequest } from "../../cli/src/lib/claude/proxy.js";
 import type { ClaudeProxyOptions } from "../../cli/src/lib/claude/proxy.js";
+import { resolveReasoningHistoryMode } from "../../cli/src/lib/reasoning-history.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const EXPECTED_HAIKU_MODEL_ID = CLAUDE_HAIKU_MODEL.anthropicAlias ?? CLAUDE_HAIKU_MODEL.id;
@@ -26,6 +27,17 @@ describe("Claude proxy compatibility API", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  test("resolves Claude reasoning history modes with a full compatibility default", () => {
+    expect(resolveReasoningHistoryMode({})).toBe("full");
+    expect(resolveReasoningHistoryMode({ TOGETHERLINK_REASONING_HISTORY: " interleaved " })).toBe(
+      "interleaved",
+    );
+    expect(resolveReasoningHistoryMode({ TOGETHERLINK_REASONING_HISTORY: "OFF" })).toBe("off");
+    expect(() => resolveReasoningHistoryMode({ TOGETHERLINK_REASONING_HISTORY: "smart" })).toThrow(
+      /TOGETHERLINK_REASONING_HISTORY.*off, interleaved, full/,
+    );
   });
 
   test("returns metadata for a supported model id", async () => {
@@ -802,7 +814,7 @@ describe("Claude proxy compatibility API", () => {
     expect(String(content[0]?.signature).length).toBeLessThan(40);
   });
 
-  test("preserves prior Claude thinking blocks when translating history", async () => {
+  test("preserves prior Claude thinking blocks in full history mode", async () => {
     const upstreamBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
@@ -844,6 +856,7 @@ describe("Claude proxy compatibility API", () => {
           { role: "user", content: "Continue." },
         ],
       }),
+      options: { reasoningHistoryMode: "full" },
     });
 
     expect(response.status).toBe(200);
@@ -856,6 +869,111 @@ describe("Claude proxy compatibility API", () => {
         }),
       ]),
     );
+    expect(upstreamBodies[0]?.chat_template_kwargs).toEqual({ clear_thinking: false });
+  });
+
+  test("drops prior Claude thinking blocks when reasoning history is off", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_disabled_thinking",
+            choices: [{ message: { content: "DONE" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxy({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        max_tokens: 128,
+        messages: [
+          { role: "user", content: "Start." },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "Do not replay marker BLUE-CHAIR-8273.",
+                signature: "togetherlink:test",
+              },
+              { type: "text", text: "READY" },
+            ],
+          },
+          { role: "user", content: "Continue." },
+        ],
+      }),
+      options: { reasoningHistoryMode: "off" },
+    });
+
+    expect(response.status).toBe(200);
+    const assistant = upstreamMessages(upstreamBodies[0]).find(
+      (message) => message.role === "assistant",
+    );
+    expect(assistant).toMatchObject({ role: "assistant", content: "READY" });
+    expect(assistant?.reasoning_content).toBeUndefined();
+    expect(upstreamBodies[0]?.chat_template_kwargs).toEqual({ clear_thinking: true });
+  });
+
+  test("uses provider interleaving while retaining complete thinking blocks", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return sseResponse([
+          {
+            choices: [{ delta: { content: "DONE" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 20, completion_tokens: 2, total_tokens: 22 },
+          },
+        ]);
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: GLM_5_2.anthropicAlias,
+        stream: true,
+        max_tokens: 128,
+        messages: [
+          { role: "user", content: "Start." },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "Keep this complete for provider interleaving.",
+                signature: "togetherlink:test",
+              },
+              { type: "text", text: "READY" },
+            ],
+          },
+          { role: "user", content: "Continue." },
+        ],
+      }),
+      options: { reasoningHistoryMode: "interleaved" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamMessages(upstreamBodies[0])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          reasoning_content: "Keep this complete for provider interleaving.",
+        }),
+      ]),
+    );
+    expect(upstreamBodies[0]?.chat_template_kwargs).toEqual({ clear_thinking: true });
   });
 
   test("recovers from Together input-over-context errors by trimming old prompt text", async () => {
@@ -2185,6 +2303,7 @@ function firstUserContent(body: Record<string, unknown> | undefined): unknown {
 function upstreamMessages(body: Record<string, unknown> | undefined): Array<{
   role?: unknown;
   content?: unknown;
+  reasoning_content?: unknown;
   tool_call_id?: unknown;
   tool_calls?: unknown;
 }> {
@@ -2192,6 +2311,7 @@ function upstreamMessages(body: Record<string, unknown> | undefined): Array<{
     ? (body.messages as Array<{
         role?: unknown;
         content?: unknown;
+        reasoning_content?: unknown;
         tool_call_id?: unknown;
         tool_calls?: unknown;
       }>)

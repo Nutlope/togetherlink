@@ -260,10 +260,11 @@ class SqliteSessionStore implements SessionStore {
     const rows = this.db
       .prepare(
         `SELECT * FROM sessions
-         WHERE ended_at >= ? AND agent IN ('claude', 'codex', 'codex-app')
-         ORDER BY ended_at DESC`,
+         WHERE (ended_at >= ? OR (ended_at IS NULL AND COALESCE(last_seen_at, started_at) >= ?))
+           AND agent IN ('claude', 'codex', 'codex-app')
+         ORDER BY COALESCE(ended_at, last_seen_at) DESC`,
       )
-      .all(since) as SessionRow[];
+      .all(since, since) as SessionRow[];
     return rows.map((row) => ({
       agent: row.agent as TrackedUsageSession["agent"],
       costUsd: row.cost_usd,

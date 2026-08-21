@@ -21,6 +21,7 @@ import { CodexRequestError } from "../codex/native-router.js";
 import { isCodexResponsesWebsocketPath } from "../codex/routes.js";
 import { CodexTogetherError } from "../codex/together-call.js";
 import { TogetherResponseHeaderTimeoutError } from "../together-client.js";
+import { isReasoningHistoryMode, REASONING_HISTORY_MODES } from "../reasoning-history.js";
 import { readAppRegistration } from "./app-registration.js";
 import { togetherlinkHome } from "../paths.js";
 import {
@@ -336,6 +337,7 @@ export async function runDaemon(options: DaemonOptions = {}): Promise<void> {
       // Active requests are deliberately left alone and keep draining.
       server.closeIdleConnections();
     });
+    activeSessions.flushAll();
     activeSessions.closeStore();
     try {
       await unlink(daemonPidPath());
@@ -679,6 +681,18 @@ async function registerSession(req: IncomingMessage, res: ServerResponse): Promi
         400,
         "invalid_request_error",
         `Agent "${agent}" is proxied and requires modelId + targetModelId.`,
+      );
+      return;
+    }
+    if (
+      body.reasoningHistoryMode !== undefined &&
+      !isReasoningHistoryMode(body.reasoningHistoryMode)
+    ) {
+      writeAnthropicError(
+        res,
+        400,
+        "invalid_request_error",
+        `reasoningHistoryMode must be one of: ${REASONING_HISTORY_MODES.join(", ")}.`,
       );
       return;
     }

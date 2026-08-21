@@ -96,13 +96,21 @@ Output             4
 Cached input       0
 Sessions           2
 
-Models     Tokens    Cost
-  Kimi K3      12  $10.25
-  GLM 5.2      12   $7.50
+Models
+┌─────────┬────────┬────────┐
+│  Model  │ Tokens │  Cost  │
+├─────────┼────────┼────────┤
+│ Kimi K3 │     12 │ $10.25 │
+│ GLM 5.2 │     12 │  $7.50 │
+└─────────┴────────┴────────┘
 
-Harnesses          Tokens    Cost
-  Claude Code          12  $10.25
-  ChatGPT Desktop      12   $7.50
+Harnesses
+┌─────────────────┬────────┬────────┐
+│     Harness     │ Tokens │  Cost  │
+├─────────────────┼────────┼────────┤
+│ Claude Code     │     12 │ $10.25 │
+│ ChatGPT Desktop │     12 │  $7.50 │
+└─────────────────┴────────┴────────┘
 
 Other harnesses aren't tracked yet.`);
   });

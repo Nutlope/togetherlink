@@ -2,7 +2,7 @@
 
 > Use Together AI models in the coding-agent harnesses you already run — OpenCode, Claude Code, Codex CLI, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent. togetherlink injects Together settings for a single run so your normal tool configs stay untouched.
 
-togetherlink is an MIT-licensed CLI router. Install once, then launch your agent with short commands (`tcodex`, `tclaude`, `topencode`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, `tprime`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
+togetherlink is an MIT-licensed CLI router. Install once, then launch your agent with short commands (`tcodex`, `tchatgpt`, `tclaude`, `topencode`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, `tprime`). For Claude Code and Codex CLI it routes the agent's API traffic to Together AI through a local translation proxy; for OpenCode, DeepSeek Harness, Grok Build, Hermes, Pi Code, and Prime Agent it injects ephemeral per-run config. The installed binary keeps itself up to date automatically from togetherlink.vercel.app.
 
 This is the LLM-readable documentation file for the project. If you are an AI agent asked to install, configure, or use togetherlink (headless or interactive), read this file first. It covers installation, configuration, every command, the available models, headless/agentic usage patterns, how to keep the tool up to date, and the routing architecture.
 
@@ -15,7 +15,7 @@ This is the LLM-readable documentation file for the project. If you are an AI ag
 
 ## Install
 
-One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
+One command installs the `togetherlink`, `tclaude`, `topencode`, `tcodex`, `tchatgpt`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, and `tprime` commands to `~/.togetherlink/bin/` and installs Bun for you if it isn't already present:
 
 ```
 curl -fsSL https://togetherlink.vercel.app/install.sh | bash
@@ -24,7 +24,7 @@ curl -fsSL https://togetherlink.vercel.app/install.sh | bash
 After install, restart your shell (or run the `export PATH=...` line it prints) so the commands are on PATH. The install:
 
 - Downloads the self-contained JS bundle to `~/.togetherlink/bin/togetherlink.js`.
-- Writes shell wrappers (`togetherlink`, `tcodex`, `tclaude`, `topencode`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, `tprime`) that run the bundle with `bun`.
+- Writes shell wrappers (`togetherlink`, `tcodex`, `tchatgpt`, `tclaude`, `topencode`, `tdeepseek`, `tgrok`, `thermes`, `tpi`, `tprime`) that run the bundle with `bun`.
 - Links them into a writable directory on your PATH.
 - Demand-installs DeepSeek Harness only after `deepseek`/`tdeepseek` is explicitly selected or invoked. Other missing agent CLIs are not installed automatically; togetherlink prints their official install command and exits.
 
@@ -87,7 +87,8 @@ togetherlink pi [...]           # alias: tpi      (Pi Code)
 togetherlink prime [...]        # alias: tprime   (Prime Agent)
 togetherlink opencode [...]     # alias: topencode (OpenCode)
 
-togetherlink chatgpt [--model <model>] [--restore]   # alpha: ChatGPT Desktop (alias: codex-app)
+togetherlink chatgpt [--model <model>]   # alpha: ChatGPT Desktop (aliases: tchatgpt, codex-app)
+togetherlink chatgpt off                 # aliases: tchatgpt off, codex off, restore
 
 togetherlink daemon stop                   # stop it until the next daemon-backed command or login
 ```
@@ -105,12 +106,12 @@ Recognized togetherlink flags (parsed before the passthrough):
 
 ### ChatGPT Desktop App (alpha)
 
-`togetherlink chatgpt` persistently patches the ChatGPT Desktop config so the desktop app routes through Together. Unlike the CLI wrappers, this change stays active until you restore it:
+`tchatgpt` (short for `togetherlink chatgpt`) persistently patches the ChatGPT Desktop config so the desktop app routes through Together. Unlike the other CLI wrappers, this change stays active until you turn it off:
 
 ```
-togetherlink chatgpt                     # configure (patches config)
-togetherlink chatgpt --restore           # restore your OpenAI profile
-togetherlink chatgpt --model <model>     # use a specific model
+tchatgpt                                 # configure (patches config)
+tchatgpt off                             # disable and restore your OpenAI profile
+togetherlink --model <model> chatgpt     # use a specific model
 ```
 
 Backups of your original config live under `~/.togetherlink/backup/codex-app/`.
@@ -131,12 +132,12 @@ Serverless prices below are in USD per 1 million tokens and come from Together's
 
 ### Selecting a model (flag order matters)
 
-Put `--model` (or `--main` for Claude) BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. Verified against the installed CLI (v0.8.3):
+Put `--model` BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. `--main` is an exact alias of `--model` (same flag, same slot, all harnesses); neither one is harness-specific, and neither works after the harness name. Verified against the installed CLI (v0.8.4):
 
 ```
 togetherlink --model MiniMaxAI/MiniMax-M3 codex exec "task"
 togetherlink --model MiniMaxAI/MiniMax-M3 claude -p "task"
-togetherlink --main together-glm-5-2 claude -p "task"   # Claude matches alias OR id
+togetherlink --main together-glm-5-2 claude -p "task"   # --main == --model; value matches alias OR id
 togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 deepseek
 ```
 
@@ -227,7 +228,7 @@ Per-task cost varies a lot with how verbose the agent is. Mechanical, well-scope
 3. 60s health check after launch; kill + relaunch on a failed start (watch for frozen line count).
 4. Never lint/review mid-run; wait for the done signal.
 5. Review the diff + re-run lint yourself before committing.
-6. To select a model, put `--model` (or `--main` for Claude) before the harness subcommand — after the harness it is silently ignored and the default runs.
+6. To select a model, put `--model` (or its exact alias `--main`) before the harness subcommand — after the harness it is silently ignored and the default runs. The flag order is what matters, not which spelling you use.
 7. For Claude `-p`, pass `--dangerously-skip-permissions` so a headless subagent never blocks on a permission prompt. Codex `exec` is non-interactive by design; use `-s workspace-write` for edits and `--skip-git-repo-check` outside a git repo.
 8. If your current CLI has native subagents, delegate togetherlink launches to one of those subagents and let it return the result, instead of spending the main orchestrator's context on the full `tcodex`/`tclaude` run.
 
@@ -260,7 +261,7 @@ togetherlink daemon stop
 This unloads the OS-supervised service so the always-restart policy does not immediately bring it
 back. The next daemon-backed TogetherLink command, or the next login, starts it again.
 
-`togetherlink chatgpt` (alpha) is the exception: it persistently patches ChatGPT Desktop config to route through Together (instead of per-run injection), with backups under `~/.togetherlink/backup/codex-app/`. Restore with `togetherlink chatgpt --restore`.
+`tchatgpt` / `togetherlink chatgpt` (alpha) is the exception: it persistently patches ChatGPT Desktop config to route through Together (instead of per-run injection), with backups under `~/.togetherlink/backup/codex-app/`. Disable it and restore the previous profile with `tchatgpt off`.
 
 ## Troubleshooting
 
@@ -270,7 +271,7 @@ back. The next daemon-backed TogetherLink command, or the next login, starts it 
 - **Headless run hangs and produces no edits** — you forgot `< /dev/null`. Close stdin and relaunch; see the Headless usage section.
 - **Cost seems high for a small change** — the agent over-documented. Scope the task tighter and add a "don't over-explain" instruction.
 - **Grok web search or image generation is unavailable** — `tgrok` disables Grok's xAI-backed web search and Imagine image tools because Together's direct chat-completions route does not provide those xAI-specific API surfaces. Coding tools, workflows, image understanding through supported Together vision models, and Together model requests still work.
-- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / DeepSeek Harness / Grok Build / Hermes / Pi Code / Prime Agent setup is untouched. For ChatGPT Desktop, run `togetherlink chatgpt --restore`.
+- **Want your normal config back** — stop using the wrappers. No agent config was saved, so your OpenCode / Claude Code / Codex CLI / DeepSeek Harness / Grok Build / Hermes / Pi Code / Prime Agent setup is untouched. For ChatGPT Desktop, run `tchatgpt off`.
 
 ## Links
 

@@ -7,6 +7,7 @@ import {
 } from "./defaults.js";
 import {} from "../daemon/launch.js";
 import { runProxiedSession, type ProxiedSessionResult } from "../proxied-session.js";
+import { resolveReasoningHistoryMode } from "../reasoning-history.js";
 
 const CONFLICTING_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -206,6 +207,7 @@ export async function runClaudeTogether(options: ClaudeLaunchOptions): Promise<C
     modelName: selectedModel.definition.name,
     modelDefinition: selectedModel.definition,
     extraRegistration: {
+      reasoningHistoryMode: resolveReasoningHistoryMode(),
       claudeCodeMaxOutputTokens: claudeCodeMaxOutputTokensFromEnv(
         process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
       ),
