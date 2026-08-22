@@ -3,6 +3,23 @@
 User-visible changes to TogetherLink are recorded here, newest first. This changelog starts with
 version 0.6.5; earlier release history remains available in Git.
 
+## 0.8.8 - 2026-08-22
+
+### Changed
+
+- Claude Code's named Together tiers are now explicit: Kimi K3 for Opus, GLM 5.2 for Fable,
+  DeepSeek V4 Pro 0813 for Sonnet, and Qwen3.5 9B for Haiku. MiniMax M3 is no longer selectable.
+- Claude Auto-mode Bash safety classification now uses DeepSeek V4 Flash 0731 independently of
+  the Sonnet tier and disables reasoning so the model returns the required classifier verdict.
+- Website model tables and the LLM-readable catalog are generated from the shared model registry
+  so harness documentation stays aligned with selectable models, limits, capabilities, and prices.
+
+### Tests
+
+- Added deterministic proxy coverage for structurally detected classifier stages, classifier-only
+  V4 Flash routing, non-reasoning requests, and ordinary Sonnet isolation, plus model-registry and
+  named-tier coverage for DeepSeek V4 Pro 0813.
+
 ## 0.8.7 - 2026-08-21
 
 ### Fixed

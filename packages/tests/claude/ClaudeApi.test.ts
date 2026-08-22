@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  DEEPSEEK_V4_FLASH,
+  DEEPSEEK_V4_PRO,
   GLM_5_2,
   KIMI_K3,
   MINIMAX_M3,
@@ -95,7 +97,7 @@ describe("Claude proxy compatibility API", () => {
     expect(tierModels).toEqual([
       GLM_5_2.anthropicAlias,
       `${KIMI_K3.anthropicAlias}[1m]`,
-      MINIMAX_M3.id,
+      `${DEEPSEEK_V4_PRO.id}[1m]`,
       EXPECTED_HAIKU_MODEL_ID,
     ]);
     expect(new Set(tierModels).size).toBe(tierModels.length);
@@ -105,6 +107,145 @@ describe("Claude proxy compatibility API", () => {
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME).toBeUndefined();
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION).toBeUndefined();
     expect(env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES).toBeUndefined();
+  });
+
+  test("routes Claude Auto-mode classification to non-reasoning DeepSeek V4 Flash", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_classifier",
+            choices: [{ message: { content: "<block>no" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 26_000, completion_tokens: 4, total_tokens: 26_004 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: DEEPSEEK_V4_PRO.id,
+        stream: false,
+        max_tokens: 2_112,
+        stop_sequences: ["</block>"],
+        system:
+          "## Verdict schema\nReturn <block>yes</block> for a denial and <block>no</block> " +
+          "for approval. A denial also includes <category>Rule name</category>.",
+        messages: [
+          {
+            role: "user",
+            content:
+              '<transcript>{"Bash":"git status --short"}</transcript> Return only the verdict XML.',
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toMatchObject({
+      model: DEEPSEEK_V4_FLASH.id,
+      reasoning: { enabled: false },
+      stream: false,
+    });
+    expect(upstreamBodies[0]?.reasoning_effort).toBeUndefined();
+    const responseBody = JSON.parse(response.body) as Record<string, unknown>;
+    expect(responseBody.content).toEqual([{ type: "text", text: "<block>no" }]);
+  });
+
+  test("routes Claude Auto-mode stage 2 classification to non-reasoning DeepSeek V4 Flash", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_classifier_stage_2",
+            choices: [
+              {
+                message: { content: "<thinking>Safe.</thinking><block>no</block>" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 26_000, completion_tokens: 10, total_tokens: 26_010 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: DEEPSEEK_V4_PRO.id,
+        stream: false,
+        max_tokens: 10_240,
+        system:
+          "## Verdict schema\nReturn <block>yes</block> for a denial and <block>no</block> " +
+          "for approval. A denial also includes <category>Rule name</category>.",
+        messages: [
+          {
+            role: "user",
+            content:
+              '<transcript>{"Bash":"git push"}</transcript> Think first, then return the verdict XML.',
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toMatchObject({
+      model: DEEPSEEK_V4_FLASH.id,
+      reasoning: { enabled: false },
+      stream: false,
+    });
+  });
+
+  test("keeps ordinary Sonnet requests on DeepSeek V4 Pro", async () => {
+    const upstreamBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        upstreamBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl_standard",
+            choices: [{ message: { content: "Done." }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const response = await callClaudeProxyRaw({
+      method: "POST",
+      url: "/v1/messages",
+      body: JSON.stringify({
+        model: DEEPSEEK_V4_PRO.id,
+        stream: false,
+        max_tokens: 256,
+        system: "You are a coding agent.",
+        messages: [{ role: "user", content: "Inspect the repository." }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toMatchObject({
+      model: DEEPSEEK_V4_PRO.id,
+      stream: false,
+    });
+    expect(upstreamBodies[0]?.reasoning).toBeUndefined();
   });
 
   test("marks 1M Together models with Claude Code's [1m] client hint", () => {

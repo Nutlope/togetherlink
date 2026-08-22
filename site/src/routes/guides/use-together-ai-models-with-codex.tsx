@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { MODEL_GUIDE_ENTRIES } from "../../lib/model-guide-data";
 import {
   ApiKeyCallout,
   Breadcrumbs,
@@ -14,34 +15,6 @@ import {
   RelatedGuides,
 } from "../../components/guides";
 
-const models = [
-  {
-    name: "Kimi K3",
-    id: "moonshotai/Kimi-K3",
-    note: "Default vision coding model with a 1M context window.",
-  },
-  {
-    name: "GLM 5.2",
-    id: "zai-org/GLM-5.2",
-    note: "Text coding model with a 512K context window.",
-  },
-  {
-    name: "MiniMax M3",
-    id: "MiniMaxAI/MiniMax-M3",
-    note: "Vision-capable model with a 512K context window.",
-  },
-  {
-    name: "Qwen 3.7 Max",
-    id: "Qwen/Qwen3.7-Max",
-    note: "Vision-capable model with a 1M context window.",
-  },
-  {
-    name: "DeepSeek V4 Flash",
-    id: "deepseek-ai/DeepSeek-V4-Flash-0731",
-    note: "Fast text reasoning model with a 1M context window.",
-  },
-];
-
 const faqs: Faq[] = [
   {
     question: "Can I connect Codex CLI to Together AI?",
@@ -56,7 +29,7 @@ const faqs: Faq[] = [
   {
     question: "Where does the --model flag go?",
     answer:
-      "Put TogetherLink's --model flag before codex: togetherlink --model MiniMaxAI/MiniMax-M3 codex. Other Codex arguments go after codex.",
+      "Put TogetherLink's --model flag before codex: togetherlink --model deepseek-ai/DeepSeek-V4-Pro-0813 codex. Other Codex arguments go after codex.",
   },
   {
     question: "Will this overwrite ~/.codex/config.toml?",
@@ -298,7 +271,7 @@ function TogetherCodexGuide() {
             </p>
           </div>
           <div className="mt-7 border-t border-line-strong">
-            {models.map((model, index) => (
+            {MODEL_GUIDE_ENTRIES.map((model, index) => (
               <div
                 key={model.id}
                 className="grid gap-3 border-b border-line-strong py-5 md:grid-cols-[38px_160px_1fr]"
@@ -316,8 +289,8 @@ function TogetherCodexGuide() {
           </div>
           <div className="mt-6">
             <CommandBlock
-              command="togetherlink --model MiniMaxAI/MiniMax-M3 codex"
-              label="Example: switch to MiniMax M3"
+              command="togetherlink --model deepseek-ai/DeepSeek-V4-Pro-0813 codex"
+              label="Example: switch to DeepSeek V4 Pro"
             />
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-faint">
@@ -341,7 +314,7 @@ function TogetherCodexGuide() {
             {
               href: "/guides/use-together-ai-models-with-claude-code",
               eyebrow: "Claude workflow",
-              title: "Connect Claude Code to GLM 5.2, Kimi, and MiniMax",
+              title: "Connect Claude Code to GLM 5.2, Kimi, and DeepSeek",
               body: "See how the same Together models fit Claude Code's Anthropic Messages workflow.",
             },
           ]}

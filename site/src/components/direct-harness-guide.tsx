@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { MODEL_GUIDE_ENTRIES } from "../lib/model-guide-data";
 import {
   ApiKeyCallout,
   Breadcrumbs,
@@ -36,14 +37,6 @@ export type DirectHarnessGuideConfig = {
   faqs: Faq[];
   related: Array<{ href: string; eyebrow: string; title: string; body: string }>;
 };
-
-const models = [
-  ["Kimi K3", "moonshotai/Kimi-K3", "Default · vision · 1M context"],
-  ["GLM 5.2", "zai-org/GLM-5.2", "Text · 512K context"],
-  ["MiniMax M3", "MiniMaxAI/MiniMax-M3", "Vision · 512K context"],
-  ["Qwen 3.7 Max", "Qwen/Qwen3.7-Max", "Vision · 1M context"],
-  ["DeepSeek V4 Flash", "deepseek-ai/DeepSeek-V4-Flash-0731", "Text · reasoning · 1M context"],
-] as const;
 
 export function DirectHarnessGuidePage(config: DirectHarnessGuideConfig) {
   const { guide } = config;
@@ -198,14 +191,14 @@ export function DirectHarnessGuidePage(config: DirectHarnessGuideConfig) {
             Curated model catalog
           </div>
           <h2 id="models-heading" className="m-0 mt-2 text-[30px] font-semibold tracking-[-.03em]">
-            Five models, with Kimi K3 as the default
+            {MODEL_GUIDE_ENTRIES.length} curated models, with Kimi K3 as the default
           </h2>
           <p className="mt-4 text-[15px] leading-relaxed text-muted">
             To override the model, put <code>--model</code> before the harness name. Arguments after
             the harness name belong to the underlying tool.
           </p>
           <div className="mt-6 border-t border-line-strong">
-            {models.map(([name, id, note]) => (
+            {MODEL_GUIDE_ENTRIES.map(({ name, id, note }) => (
               <div
                 key={id}
                 className="grid gap-2 border-b border-line-strong py-4 sm:grid-cols-[150px_1fr]"

@@ -27,7 +27,7 @@ import {
   togetherReasoningEffort,
   withClaudeNativeToolSystemPrompt,
 } from "./translate-request.js";
-import { resolveTargetModel } from "./translate-response.js";
+import { resolveClaudeReasoningParams, resolveClaudeRequestRoute } from "./request-routing.js";
 import { fetchTogether } from "./together-call.js";
 import type {
   AnthropicMessagesRequest,
@@ -58,14 +58,15 @@ export async function callTogetherChatCompletions(
   perf?: ProxyPerfTracer,
 ): Promise<OpenAIChatResponse> {
   const translate = () => {
-    const targetModel = resolveTargetModel(body.model, options);
+    const route = resolveClaudeRequestRoute(body, options);
+    const { targetModel } = route;
     const nativeTools = nativeServerTools(body.tools);
     const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
     const tools = toOpenAITools(body.tools, options);
-    return { targetModel, nativeTools, messages, tools };
+    return { targetModel, nativeTools, messages, tools, route };
   };
   const translated = perf?.spanSync("translate_request", translate) ?? translate();
-  const { targetModel, nativeTools, messages, tools } = translated;
+  const { targetModel, nativeTools, messages, tools, route } = translated;
   const nativeToolNames = new Set(nativeTools.map((tool) => tool.name));
   const nativeToolUses = new Map<string, number>();
   const nativeWebSearches: ClaudeNativeWebSearchRecord[] = [];
@@ -86,11 +87,7 @@ export async function callTogetherChatCompletions(
       temperature: body.temperature,
       tools,
       tool_choice: toOpenAIToolChoice(body.tool_choice),
-      ...(options.isCompactionRequest
-        ? { reasoning: { enabled: false } }
-        : reasoningEffort
-          ? { reasoning_effort: reasoningEffort }
-          : {}),
+      ...resolveClaudeReasoningParams(route, options.isCompactionRequest, reasoningEffort),
       chat_template_kwargs: {
         clear_thinking:
           options.isCompactionRequest === true ||
@@ -116,6 +113,7 @@ export async function callTogetherChatCompletions(
       toolCount: payload.tools?.length ?? 0,
       maxTokens: payload.max_tokens,
       reasoningEffort,
+      requestKind: route.kind,
       reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
       nativeToolCount: nativeTools.length,
       turn,

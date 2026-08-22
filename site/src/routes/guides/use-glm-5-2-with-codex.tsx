@@ -278,12 +278,12 @@ function GlmCodexGuide() {
             href: "/guides/use-together-ai-models-with-codex",
             eyebrow: "Multiple models",
             title: "Run open models in Codex without replacing config",
-            body: "Switch among GLM, Kimi, Qwen, MiniMax, and DeepSeek without editing Codex config.",
+            body: "Switch among GLM, Kimi, Qwen, and DeepSeek without editing Codex config.",
           },
           {
             href: "/guides/use-together-ai-models-with-claude-code",
             eyebrow: "Different tool",
-            title: "Connect Claude Code to GLM 5.2, Kimi, and MiniMax",
+            title: "Connect Claude Code to GLM 5.2, Kimi, and DeepSeek",
             body: "Keep Claude Code's interface while running the model through Together AI.",
           },
         ]}
