@@ -197,6 +197,28 @@ export const DEEPSEEK_V4_FLASH: ModelDefinition = {
 };
 
 /**
+ * DeepSeek V4 Pro 0813 — long-context coding and reasoning model. Together's
+ * authenticated serverless catalog reports the dated model id, 1M context,
+ * and $1.32/$3.96 pricing with $0.13 cached input. The dated endpoint supports
+ * tool calling and high/max reasoning like the current V4 Pro family.
+ */
+export const DEEPSEEK_V4_PRO: ModelDefinition = {
+  id: "deepseek-ai/DeepSeek-V4-Pro-0813",
+  name: "DeepSeek V4 Pro 0813",
+  anthropicAlias: null,
+  cost: { input: 1.32, output: 3.96, cache_read: 0.13 },
+  limit: { context: 1_048_576, output: 393_216 },
+  attachment: false,
+  reasoning: true,
+  reasoningEfforts: ["high", "max"],
+  defaultReasoningEffort: "high",
+  temperature: true,
+  tool_call: true,
+  codexAutoCompactTokenLimit: 900_000,
+  modalities: { input: ["text"], output: ["text"] },
+};
+
+/**
  * Capabilities string Claude Code reads from ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES.
  * Mirrors what GLM-5.2 supports on Together: adjustable reasoning effort
  * (incl. xhigh/max), thinking, adaptive thinking, and interleaved thinking.
@@ -259,7 +281,7 @@ export const VISION_PRIMARY: ModelDefinition = VISION_MODELS[0] ?? {
 const CURATED_MODELS: readonly ModelDefinition[] = [
   KIMI_K3,
   GLM_5_2,
-  MINIMAX_M3,
+  DEEPSEEK_V4_PRO,
   QWEN_3_7_MAX,
   DEEPSEEK_V4_FLASH,
 ];

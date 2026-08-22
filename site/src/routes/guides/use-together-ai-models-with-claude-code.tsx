@@ -44,7 +44,7 @@ const faqs: Faq[] = [
   {
     question: "How do I change the Together model used by Claude Code?",
     answer:
-      "Place --model and the exact Together model ID before claude. For example: togetherlink --model MiniMaxAI/MiniMax-M3 claude.",
+      "Place --model and the exact Together model ID before claude. For example: togetherlink --model deepseek-ai/DeepSeek-V4-Pro-0813 claude.",
   },
   {
     question: "Can I use Claude Code's non-interactive -p mode?",
@@ -55,10 +55,10 @@ const faqs: Faq[] = [
 
 const guide = defineGuide({
   path: "/guides/use-together-ai-models-with-claude-code",
-  title: "Connect Claude Code to GLM 5.2, Kimi, and MiniMax",
+  title: "Connect Claude Code to GLM 5.2, Kimi, and DeepSeek",
   description:
     "Run Claude Code with GLM 5.2 and other Together AI models. Configure a Together API key, preserve your Claude login and settings, and understand optional Exa web search.",
-  breadcrumbLabel: "Claude Code with GLM 5.2, Kimi, and MiniMax",
+  breadcrumbLabel: "Claude Code with GLM 5.2, Kimi, and DeepSeek",
   ogKey: "together-claude",
   ogAlt: "Claude Code routed through TogetherLink to open models on Together AI",
   datePublished: "2026-07-20T12:00:00+02:00",
@@ -85,7 +85,7 @@ function TogetherClaudeGuide() {
           </h1>
           <p className="mx-auto mt-6 mb-0 max-w-[700px] text-[18px] leading-relaxed text-muted">
             Keep the Claude Code terminal experience and route model calls to GLM 5.2, Kimi,
-            MiniMax, or another curated Together model—without replacing your Claude settings.
+            DeepSeek, or another curated Together model—without replacing your Claude settings.
           </p>
           <GuideByline guide={guide} className="mx-auto" />
         </div>
@@ -272,8 +272,8 @@ function TogetherClaudeGuide() {
           </p>
           <div className="mt-6 space-y-4">
             <CommandBlock
-              command="togetherlink --model MiniMaxAI/MiniMax-M3 claude"
-              label="Interactive session on MiniMax M3"
+              command="togetherlink --model deepseek-ai/DeepSeek-V4-Pro-0813 claude"
+              label="Interactive session on DeepSeek V4 Pro"
             />
             <CommandBlock
               command={
@@ -286,7 +286,11 @@ function TogetherClaudeGuide() {
             {[
               ["Kimi K3", "moonshotai/Kimi-K3", "Default · vision · 1M context"],
               ["GLM 5.2", "zai-org/GLM-5.2", "Text · 512K context"],
-              ["MiniMax M3", "MiniMaxAI/MiniMax-M3", "Vision · 512K context"],
+              [
+                "DeepSeek V4 Pro",
+                "deepseek-ai/DeepSeek-V4-Pro-0813",
+                "Text · reasoning · 1M context",
+              ],
               ["Qwen 3.7 Max", "Qwen/Qwen3.7-Max", "Vision · 1M context"],
               [
                 "DeepSeek V4 Flash",

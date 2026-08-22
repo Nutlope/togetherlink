@@ -114,7 +114,7 @@ this about yourself at runtime:
   NOT invoke the \`@vision\` subagent — it won't receive the image and will only
   error. Instead, tell the user plainly that you (the current model) can't see
   images, and that to work with an image they should switch to a vision-capable
-  model via the \`/models\` command (e.g. Kimi K3, MiniMax M3, or Qwen 3.7 Max)
+  model via the \`/models\` command (e.g. Kimi K3 or Qwen 3.7 Max)
   and re-send the image. Do not retry the subagent.
 
 Under no circumstances guess at or fabricate the contents of an image you did not

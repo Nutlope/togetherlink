@@ -7,13 +7,13 @@ prompt is one unified instruction that lets the model self-select by its own
 runtime capabilities, so it stays correct even if the user switches models
 mid-session:
 
-- Vision-capable primary models (Kimi K3, MiniMax M3, Qwen 3.7 Max):
+- Vision-capable primary models (Kimi K3 and Qwen 3.7 Max):
   OpenCode sends the image directly to the model. This is the
   working path for images.
-- Text-only primary models (GLM-5.2 and DeepSeek V4 Flash): OpenCode strips the image
+- Text-only primary models (GLM-5.2, DeepSeek V4 Pro, and DeepSeek V4 Flash): OpenCode strips the image
   bytes before they reach the model. The model tells the user plainly that it
   cannot see images, and that they should switch to a vision-capable model via
-  `/models` (Kimi K3, MiniMax M3, or Qwen 3.7 Max) and re-send the image.
+  `/models` (Kimi K3 or Qwen 3.7 Max) and re-send the image.
 
 ### The `@vision` subagent and clipboard images
 
@@ -63,7 +63,7 @@ past the picker's truncation width.
 | ------------------------------------ | ------ | -------------------------------- |
 | `moonshotai/Kimi-K3`                 | Yes    | default coding model, 1M context |
 | `zai-org/GLM-5.2`                    | No     | agentic coding (text-only)       |
-| `MiniMaxAI/MiniMax-M3`               | Yes    | cheapest vision, 512K context    |
+| `deepseek-ai/DeepSeek-V4-Pro-0813`   | No     | strongest DeepSeek, 1M context   |
 | `Qwen/Qwen3.7-Max`                   | Yes    | strongest Qwen, 1M context       |
 | `deepseek-ai/DeepSeek-V4-Flash-0731` | No     | fast agentic model, 1M context   |
 

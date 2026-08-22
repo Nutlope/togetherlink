@@ -40,7 +40,7 @@ export type DirectHarnessGuideConfig = {
 const models = [
   ["Kimi K3", "moonshotai/Kimi-K3", "Default · vision · 1M context"],
   ["GLM 5.2", "zai-org/GLM-5.2", "Text · 512K context"],
-  ["MiniMax M3", "MiniMaxAI/MiniMax-M3", "Vision · 512K context"],
+  ["DeepSeek V4 Pro", "deepseek-ai/DeepSeek-V4-Pro-0813", "Text · reasoning · 1M context"],
   ["Qwen 3.7 Max", "Qwen/Qwen3.7-Max", "Vision · 1M context"],
   ["DeepSeek V4 Flash", "deepseek-ai/DeepSeek-V4-Flash-0731", "Text · reasoning · 1M context"],
 ] as const;

@@ -34,7 +34,7 @@ const guide = defineGuide({
   path: "/guides/use-together-ai-models-with-deepseek-harness",
   title: "Try DeepSeek Harness with Together AI Models",
   description:
-    "Launch the DeepSeek Harness developer-preview web UI with Kimi K3, GLM 5.2, MiniMax M3, Qwen 3.7 Max, or DeepSeek V4 Flash through an ephemeral Together provider patch.",
+    "Launch the DeepSeek Harness developer-preview web UI with Kimi K3, GLM 5.2, DeepSeek V4 Pro, Qwen 3.7 Max, or DeepSeek V4 Flash through an ephemeral Together provider patch.",
   breadcrumbLabel: "DeepSeek Harness with Together AI models",
   ogKey: "together-deepseek",
   ogAlt: "DeepSeek Harness web UI using open models from Together AI through TogetherLink",
