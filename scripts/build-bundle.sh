@@ -21,6 +21,7 @@ echo "Building togetherlink v${VERSION} bundle…"
 # The CLI depends on the workspace @togetherlink/models package, so build that
 # first so `bun build` can resolve and inline it into the bundle.
 pnpm --filter @togetherlink/models build
+node "$ROOT/scripts/update-model-docs.mjs"
 
 PUBLIC_DIR="$ROOT/site/public"
 TRACKED_DIR="$ROOT/site"

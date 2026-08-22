@@ -120,38 +120,37 @@ Backups of your original config live under `~/.togetherlink/backup/codex-app/`.
 
 togetherlink routes to a curated set of Together AI models. The default for every coding harness is Kimi K3.
 
-Serverless prices below are in USD per 1 million tokens and come from Together's authenticated `/v1/models` catalog, checked August 15, 2026. Cached input is billed at the lower rate when Together's automatic prompt cache matches a prefix; otherwise the standard input rate applies. Together may change these prices, so check the live catalog for billing-critical decisions.
+Serverless prices below are in USD per 1 million tokens and come from Together's authenticated `/v1/models` catalog, checked August 22, 2026. Cached input is billed at the lower rate when Together's automatic prompt cache matches a prefix; otherwise the standard input rate applies. Together may change these prices, so check the live catalog for billing-critical decisions.
 
 | Model | Together API id | Input | Output | Cached input |
 | --- | --- | ---: | ---: | ---: |
-| Kimi K3 (default) | `moonshotai/Kimi-K3` | $3.00 | $15.00 | $0.30 |
-| GLM 5.2 | `zai-org/GLM-5.2` | $1.40 | $4.40 | $0.26 |
+| Kimi K3 (default) | `moonshotai/Kimi-K3` | $3 | $15 | $0.3 |
+| GLM 5.2 | `zai-org/GLM-5.2` | $1.4 | $4.4 | $0.26 |
 | DeepSeek V4 Pro 0813 | `deepseek-ai/DeepSeek-V4-Pro-0813` | $1.32 | $3.96 | $0.13 |
-| Qwen 3.7 Max | `Qwen/Qwen3.7-Max` | $1.25 | $3.75 | $0.125 |
+| Qwen 3.7 Max | `Qwen/Qwen3.7-Max` | $2.5 | $3.75 | $0.125 |
 | DeepSeek V4 Flash 0731 | `deepseek-ai/DeepSeek-V4-Flash-0731` | $0.14 | $0.28 | $0.03 |
 
 ### Selecting a model (flag order matters)
 
-Put `--model` BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. `--main` is an exact alias of `--model` (same flag, same slot, all harnesses); neither one is harness-specific, and neither works after the harness name. Verified against the installed CLI (v0.8.4):
+Put `--model` BEFORE the harness subcommand — togetherlink consumes it there and routes to that model. `--main` is an exact alias of `--model` (same flag, same slot, all harnesses); neither one is harness-specific, and neither works after the harness name.
 
 ```
 togetherlink --model deepseek-ai/DeepSeek-V4-Pro-0813 codex exec "task"
 togetherlink --model deepseek-ai/DeepSeek-V4-Pro-0813 claude -p "task"
-togetherlink --main together-glm-5-2 claude -p "task"   # --main == --model; value matches alias OR id
-togetherlink --model deepseek-ai/DeepSeek-V4-Flash-0731 deepseek
+togetherlink --main together-kimi-k3 claude -p "task"   # --main == --model; value matches alias OR id
 ```
 
 Do NOT put `--model` after the harness (e.g. `tcodex --model X` or `tclaude --model X`). The short aliases expand to `togetherlink <harness> ...`, so the flag lands after the harness name, goes to the agent's passthrough, and is then stripped — it is silently ignored and the run uses the default (Kimi K3), not the model you asked for. Always use the long form with the flag first.
 
 Capabilities:
 
-- `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning. The default coding model.
-- `zai-org/GLM-5.2` — GLM 5.2. Text-only, 512K context, reasoning.
-- `deepseek-ai/DeepSeek-V4-Pro-0813` — DeepSeek V4 Pro 0813. Text-only, 1M context, high/max reasoning, function calling.
-- `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context.
-- `deepseek-ai/DeepSeek-V4-Flash-0731` — DeepSeek V4 Flash 0731. Text-only, 1M context, low/high/max reasoning, 384K documented output guidance, function calling.
+- `moonshotai/Kimi-K3` — Kimi K3 · default. Vision, 1M context, reasoning, function calling.
+- `zai-org/GLM-5.2` — GLM 5.2. Text-only, 512K context, reasoning, function calling.
+- `deepseek-ai/DeepSeek-V4-Pro-0813` — DeepSeek V4 Pro 0813. Text-only, 1M context, reasoning, function calling.
+- `Qwen/Qwen3.7-Max` — Qwen 3.7 Max. Vision, 1M context, reasoning, function calling.
+- `deepseek-ai/DeepSeek-V4-Flash-0731` — DeepSeek V4 Flash 0731. Text-only, 1M context, reasoning, function calling.
 
-Vision-capable models accept image attachments directly. GLM 5.2, DeepSeek V4 Pro, and DeepSeek V4 Flash are text-only; harnesses with vision delegation use Kimi K3 for image work.
+Vision-capable models accept image attachments directly. The current text-only models are GLM 5.2, DeepSeek V4 Pro 0813, DeepSeek V4 Flash 0731; harnesses with vision delegation use Kimi K3 for image work.
 
 ## Headless & agentic usage
 

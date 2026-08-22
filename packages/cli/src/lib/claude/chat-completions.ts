@@ -27,7 +27,7 @@ import {
   togetherReasoningEffort,
   withClaudeNativeToolSystemPrompt,
 } from "./translate-request.js";
-import { resolveClaudeRequestRoute } from "./request-routing.js";
+import { resolveClaudeReasoningParams, resolveClaudeRequestRoute } from "./request-routing.js";
 import { fetchTogether } from "./together-call.js";
 import type {
   AnthropicMessagesRequest,
@@ -87,11 +87,7 @@ export async function callTogetherChatCompletions(
       temperature: body.temperature,
       tools,
       tool_choice: toOpenAIToolChoice(body.tool_choice),
-      ...(options.isCompactionRequest || route.disableReasoning
-        ? { reasoning: { enabled: false } }
-        : reasoningEffort
-          ? { reasoning_effort: reasoningEffort }
-          : {}),
+      ...resolveClaudeReasoningParams(route, options.isCompactionRequest, reasoningEffort),
       chat_template_kwargs: {
         clear_thinking:
           options.isCompactionRequest === true ||

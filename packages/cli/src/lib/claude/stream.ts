@@ -39,7 +39,7 @@ import {
   togetherReasoningEffort,
   withClaudeNativeToolSystemPrompt,
 } from "./translate-request.js";
-import { resolveClaudeRequestRoute } from "./request-routing.js";
+import { resolveClaudeReasoningParams, resolveClaudeRequestRoute } from "./request-routing.js";
 import { resolveTargetModel, thinkingSignature } from "./translate-response.js";
 import { mapTogetherError, writeAnthropicError } from "./together-call.js";
 import type {
@@ -117,11 +117,7 @@ export async function streamAnthropicFromTogether(
     temperature: body.temperature,
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
-    ...(options.isCompactionRequest || route.disableReasoning
-      ? { reasoning: { enabled: false } }
-      : reasoningEffort
-        ? { reasoning_effort: reasoningEffort }
-        : {}),
+    ...resolveClaudeReasoningParams(route, options.isCompactionRequest, reasoningEffort),
     chat_template_kwargs: {
       clear_thinking:
         options.isCompactionRequest === true ||

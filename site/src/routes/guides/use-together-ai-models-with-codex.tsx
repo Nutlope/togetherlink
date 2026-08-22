@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { MODEL_GUIDE_ENTRIES } from "../../lib/model-guide-data";
 import {
   ApiKeyCallout,
   Breadcrumbs,
@@ -13,34 +14,6 @@ import {
   INSTALL_COMMAND,
   RelatedGuides,
 } from "../../components/guides";
-
-const models = [
-  {
-    name: "Kimi K3",
-    id: "moonshotai/Kimi-K3",
-    note: "Default vision coding model with a 1M context window.",
-  },
-  {
-    name: "GLM 5.2",
-    id: "zai-org/GLM-5.2",
-    note: "Text coding model with a 512K context window.",
-  },
-  {
-    name: "DeepSeek V4 Pro",
-    id: "deepseek-ai/DeepSeek-V4-Pro-0813",
-    note: "Text coding model with a 1M context window.",
-  },
-  {
-    name: "Qwen 3.7 Max",
-    id: "Qwen/Qwen3.7-Max",
-    note: "Vision-capable model with a 1M context window.",
-  },
-  {
-    name: "DeepSeek V4 Flash",
-    id: "deepseek-ai/DeepSeek-V4-Flash-0731",
-    note: "Fast text reasoning model with a 1M context window.",
-  },
-];
 
 const faqs: Faq[] = [
   {
@@ -298,7 +271,7 @@ function TogetherCodexGuide() {
             </p>
           </div>
           <div className="mt-7 border-t border-line-strong">
-            {models.map((model, index) => (
+            {MODEL_GUIDE_ENTRIES.map((model, index) => (
               <div
                 key={model.id}
                 className="grid gap-3 border-b border-line-strong py-5 md:grid-cols-[38px_160px_1fr]"

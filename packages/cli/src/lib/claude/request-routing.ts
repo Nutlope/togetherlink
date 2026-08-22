@@ -1,8 +1,14 @@
-import { DEEPSEEK_V4_FLASH } from "@togetherlink/models";
+import {
+  DEEPSEEK_V4_FLASH,
+  DEEPSEEK_V4_PRO,
+  type ModelReasoningEffort,
+} from "@togetherlink/models";
 import { resolveTargetModel } from "./translate-response.js";
 import type { AnthropicMessagesRequest, ResolvedClaudeModel } from "./wire-types.js";
 
 type ClaudeModelOptions = Parameters<typeof resolveTargetModel>[1];
+const AUTO_MODE_VERDICT_SCHEMA_MARKERS = ["<block>yes", "<block>no", "<category>"] as const;
+const AUTO_MODE_TRANSCRIPT_ENVELOPE = ["<transcript>", "</transcript>"] as const;
 
 export type ClaudeRequestRoute = {
   targetModel: ResolvedClaudeModel;
@@ -10,11 +16,17 @@ export type ClaudeRequestRoute = {
   kind: "auto_mode_classifier" | "standard";
 };
 
+type ClaudeReasoningParams =
+  | { reasoning: { enabled: false } }
+  | { reasoning_effort: ModelReasoningEffort }
+  | Record<string, never>;
+
 export function resolveClaudeRequestRoute(
   body: AnthropicMessagesRequest,
   options: ClaudeModelOptions,
 ): ClaudeRequestRoute {
-  if (isClaudeAutoModeClassifierRequest(body)) {
+  const requestedModel = resolveTargetModel(body.model, options);
+  if (isClaudeAutoModeClassifierRequest(body, requestedModel)) {
     return {
       targetModel: { alias: DEEPSEEK_V4_FLASH.id, definition: DEEPSEEK_V4_FLASH },
       disableReasoning: true,
@@ -22,14 +34,32 @@ export function resolveClaudeRequestRoute(
     };
   }
   return {
-    targetModel: resolveTargetModel(body.model, options),
+    targetModel: requestedModel,
     disableReasoning: false,
     kind: "standard",
   };
 }
 
-function isClaudeAutoModeClassifierRequest(body: AnthropicMessagesRequest): boolean {
-  if (body.stream === true || body.tools?.length) {
+export function resolveClaudeReasoningParams(
+  route: ClaudeRequestRoute,
+  isCompactionRequest: boolean | undefined,
+  reasoningEffort: ModelReasoningEffort | undefined,
+): ClaudeReasoningParams {
+  if (isCompactionRequest || route.disableReasoning) {
+    return { reasoning: { enabled: false } };
+  }
+  return reasoningEffort ? { reasoning_effort: reasoningEffort } : {};
+}
+
+function isClaudeAutoModeClassifierRequest(
+  body: AnthropicMessagesRequest,
+  requestedModel: ResolvedClaudeModel,
+): boolean {
+  if (
+    requestedModel.definition.id !== DEEPSEEK_V4_PRO.id ||
+    body.stream === true ||
+    body.tools?.length
+  ) {
     return false;
   }
   const system = textContent(body.system);
@@ -37,10 +67,8 @@ function isClaudeAutoModeClassifierRequest(body: AnthropicMessagesRequest): bool
     .map((message) => textContent(message.content))
     .join("\n");
   return (
-    system.includes("If the action should be blocked:") &&
-    system.includes("If the action should be allowed:") &&
-    (transcript.includes("Your ENTIRE response MUST begin with <block>") ||
-      transcript.includes("Use <thinking> before responding with <block>"))
+    AUTO_MODE_VERDICT_SCHEMA_MARKERS.every((marker) => system.includes(marker)) &&
+    AUTO_MODE_TRANSCRIPT_ENVELOPE.every((marker) => transcript.includes(marker))
   );
 }
 

@@ -135,13 +135,13 @@ describe("Claude proxy compatibility API", () => {
         max_tokens: 2_112,
         stop_sequences: ["</block>"],
         system:
-          "## Output Format\nIf the action should be blocked: <block>yes</block>. " +
-          "If the action should be allowed: <block>no</block>.\n## Session Context",
+          "## Verdict schema\nReturn <block>yes</block> for a denial and <block>no</block> " +
+          "for approval. A denial also includes <category>Rule name</category>.",
         messages: [
           {
             role: "user",
             content:
-              '<transcript>{"Bash":"git status --short"}</transcript> Your ENTIRE response MUST begin with <block>.',
+              '<transcript>{"Bash":"git status --short"}</transcript> Return only the verdict XML.',
           },
         ],
       }),
@@ -189,13 +189,13 @@ describe("Claude proxy compatibility API", () => {
         stream: false,
         max_tokens: 10_240,
         system:
-          "## Output Format\nIf the action should be blocked: <block>yes</block>. " +
-          "If the action should be allowed: <block>no</block>.\n## Session Context",
+          "## Verdict schema\nReturn <block>yes</block> for a denial and <block>no</block> " +
+          "for approval. A denial also includes <category>Rule name</category>.",
         messages: [
           {
             role: "user",
             content:
-              '<transcript>{"Bash":"git push"}</transcript> Use <thinking> before responding with <block>.',
+              '<transcript>{"Bash":"git push"}</transcript> Think first, then return the verdict XML.',
           },
         ],
       }),
