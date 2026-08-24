@@ -39,6 +39,7 @@ import {
   togetherReasoningEffort,
   withClaudeNativeToolSystemPrompt,
 } from "./translate-request.js";
+import { resolveClaudeReasoningParams, resolveClaudeRequestRoute } from "./request-routing.js";
 import { resolveTargetModel, thinkingSignature } from "./translate-response.js";
 import { mapTogetherError, writeAnthropicError } from "./together-call.js";
 import type {
@@ -82,7 +83,8 @@ export async function streamAnthropicFromTogether(
   // rather than duplicating the whole translation body across the spanSync and
   // fallback branches. Behavior is unchanged.
   const run = () => {
-    const targetModel = resolveTargetModel(body.model, options);
+    const route = resolveClaudeRequestRoute(body, options);
+    const { targetModel } = route;
     const messages = toOpenAIMessages(body, targetModel.definition, options.reasoningHistoryMode);
     const nativeTools = nativeServerTools(body.tools);
     const upstreamMessages =
@@ -100,10 +102,11 @@ export async function streamAnthropicFromTogether(
       tools,
       reasoningEffort,
       maxTokens,
+      route,
     };
   };
   const translated = perf ? perf.spanSync("translate_request", run) : run();
-  const { targetModel, nativeTools, upstreamMessages, tools, reasoningEffort } = translated;
+  const { targetModel, nativeTools, upstreamMessages, tools, reasoningEffort, route } = translated;
   const { maxTokens } = translated;
 
   const payload = {
@@ -114,11 +117,7 @@ export async function streamAnthropicFromTogether(
     temperature: body.temperature,
     tools,
     tool_choice: toOpenAIToolChoice(body.tool_choice),
-    ...(options.isCompactionRequest
-      ? { reasoning: { enabled: false } }
-      : reasoningEffort
-        ? { reasoning_effort: reasoningEffort }
-        : {}),
+    ...resolveClaudeReasoningParams(route, options.isCompactionRequest, reasoningEffort),
     chat_template_kwargs: {
       clear_thinking:
         options.isCompactionRequest === true ||
@@ -148,6 +147,7 @@ export async function streamAnthropicFromTogether(
     toolCount: payload.tools?.length ?? 0,
     maxTokens: payload.max_tokens,
     reasoningEffort,
+    requestKind: route.kind,
     reasoningHistoryMode: effectiveReasoningHistoryMode(options.reasoningHistoryMode),
   });
 

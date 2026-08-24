@@ -1,5 +1,8 @@
 import {
+  CLAUDE_FABLE_MODEL_SELECTION,
   CLAUDE_HAIKU_MODEL_SELECTION,
+  CLAUDE_OPUS_MODEL_SELECTION,
+  CLAUDE_SONNET_MODEL_SELECTION,
   CLAUDE_SUPPORTED_MODELS,
   claudeModelCapabilities,
   resolveClaudeModel,
@@ -129,29 +132,18 @@ export function buildClaudeEnv({
 
 function applyClaudeModelMenuEnv(env: NodeJS.ProcessEnv, selectedAlias: string): void {
   const selected = resolveClaudeModel(selectedAlias);
-  const defaultModel = CLAUDE_SUPPORTED_MODELS[0] ?? selected;
-  const fableModel =
-    CLAUDE_SUPPORTED_MODELS.find((model) => model.alias !== defaultModel.alias) ?? selected;
-  const sonnetModel =
-    CLAUDE_SUPPORTED_MODELS.find(
-      (model) =>
-        model.alias !== defaultModel.alias &&
-        model.alias !== fableModel.alias &&
-        model.alias !== CLAUDE_HAIKU_MODEL_SELECTION.alias,
-    ) ?? fableModel;
-
-  setTierModelEnv(env, "OPUS", defaultModel);
-  setTierModelEnv(env, "FABLE", fableModel);
-  setTierModelEnv(env, "SONNET", sonnetModel);
+  setTierModelEnv(env, "OPUS", CLAUDE_OPUS_MODEL_SELECTION);
+  setTierModelEnv(env, "FABLE", CLAUDE_FABLE_MODEL_SELECTION);
+  setTierModelEnv(env, "SONNET", CLAUDE_SONNET_MODEL_SELECTION);
   setTierModelEnv(env, "HAIKU", CLAUDE_HAIKU_MODEL_SELECTION);
 
   // Claude Code currently exposes a single generic custom-model slot in
   // addition to the tier slots. Only use it when the selected backend is not
   // already represented; otherwise Claude renders a duplicate menu row.
   const tierAliases = new Set([
-    defaultModel.alias,
-    fableModel.alias,
-    sonnetModel.alias,
+    CLAUDE_OPUS_MODEL_SELECTION.alias,
+    CLAUDE_FABLE_MODEL_SELECTION.alias,
+    CLAUDE_SONNET_MODEL_SELECTION.alias,
     CLAUDE_HAIKU_MODEL_SELECTION.alias,
   ]);
   if (tierAliases.has(selected.alias)) {

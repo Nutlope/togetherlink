@@ -31,8 +31,8 @@ export const guideOgContent = {
   },
   "together-claude": {
     eyebrow: "Named-model compatibility",
-    title: "Connect Claude Code to GLM 5.2, Kimi, and MiniMax",
-    titleLines: ["Connect Claude Code to", "GLM 5.2, Kimi + MiniMax"],
+    title: "Connect Claude Code to GLM 5.2, Kimi, and DeepSeek",
+    titleLines: ["Connect Claude Code to", "GLM 5.2, Kimi + DeepSeek"],
     titleSize: 54,
     harness: "claude",
     harnessLabel: "Claude Code",

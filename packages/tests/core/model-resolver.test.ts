@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MODEL,
   DEEPSEEK_V4_FLASH,
+  DEEPSEEK_V4_PRO,
   GLM_5_2,
   KIMI_K3,
   MINIMAX_M3,
@@ -50,8 +51,8 @@ describe("resolveModelByKeys", () => {
 
   it("matches by id", () => {
     expect(
-      resolveModelByKeys(SELECTABLE_MODELS, MINIMAX_M3.id, aliasAndId, DEFAULT_MODEL.id)?.id,
-    ).toBe(MINIMAX_M3.id);
+      resolveModelByKeys(SELECTABLE_MODELS, DEEPSEEK_V4_PRO.id, aliasAndId, DEFAULT_MODEL.id)?.id,
+    ).toBe(DEEPSEEK_V4_PRO.id);
   });
 
   it("matches by alias", () => {
@@ -99,6 +100,19 @@ describe("shared harness default", () => {
       temperature: true,
       tool_call: true,
       modalities: { input: ["text"], output: ["text"] },
+    });
+  });
+
+  it("exposes DeepSeek V4 Pro 0813 with authenticated Together metadata", () => {
+    expect(SELECTABLE_MODELS).toContain(DEEPSEEK_V4_PRO);
+    expect(DEEPSEEK_V4_PRO).toMatchObject({
+      id: "deepseek-ai/DeepSeek-V4-Pro-0813",
+      name: "DeepSeek V4 Pro 0813",
+      cost: { input: 1.32, cache_read: 0.13, output: 3.96 },
+      limit: { context: 1_048_576 },
+      attachment: false,
+      reasoning: true,
+      tool_call: true,
     });
   });
 
@@ -173,6 +187,7 @@ describe("vision model migration", () => {
 
   it("does not expose models scheduled for serverless removal", () => {
     const modelIds = SELECTABLE_MODELS.map((model) => model.id);
+    expect(modelIds).not.toContain(MINIMAX_M3.id);
     expect(modelIds).not.toContain("moonshotai/Kimi-K2.6");
     expect(modelIds).not.toContain("moonshotai/Kimi-K2.7-Code");
     expect(modelIds).not.toContain("deepseek-ai/DeepSeek-V4-Pro");

@@ -1,6 +1,7 @@
 import {
   DEFAULT_MODEL,
   SELECTABLE_MODELS,
+  VISION_MODELS,
   VISION_PRIMARY,
   VISION_PROMPT,
   type ModelDefinition,
@@ -70,6 +71,7 @@ export const OPENCODE_MODEL_WHITELIST: string[] = SELECTABLE_MODELS.map((model) 
 
 /** OpenCode selector form for the vision subagent's model: provider/<together-id>. */
 export const OPENCODE_VISION_MODEL_SELECTOR = `${OPENCODE_PROVIDER_ID}/${VISION_PRIMARY.id}`;
+const OPENCODE_VISION_MODEL_NAMES = VISION_MODELS.map((model) => model.name).join(" or ");
 
 /**
  * Neutral system prompt for the primary `build` agent. Replaces OpenCode's
@@ -114,7 +116,7 @@ this about yourself at runtime:
   NOT invoke the \`@vision\` subagent — it won't receive the image and will only
   error. Instead, tell the user plainly that you (the current model) can't see
   images, and that to work with an image they should switch to a vision-capable
-  model via the \`/models\` command (e.g. Kimi K3, MiniMax M3, or Qwen 3.7 Max)
+  model via the \`/models\` command (e.g. ${OPENCODE_VISION_MODEL_NAMES})
   and re-send the image. Do not retry the subagent.
 
 Under no circumstances guess at or fabricate the contents of an image you did not

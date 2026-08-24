@@ -65,7 +65,7 @@ const guides = [
   {
     href: "/guides/use-together-ai-models-with-claude-code",
     cover: "together-claude" as GuideCoverVariant,
-    title: "Connect Claude Code to GLM 5.2, Kimi, and MiniMax",
+    title: "Connect Claude Code to GLM 5.2, Kimi, and DeepSeek",
     description:
       "Route Claude Code through Together, keep your Claude login and settings, and optionally add web search with Exa.",
     meta: "Claude Code · model picker · 10 min",

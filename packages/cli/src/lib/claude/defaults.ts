@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL,
+  DEEPSEEK_V4_PRO,
   GLM_5_2,
   GLM_5_2_ANTHROPIC_CAPABILITIES,
   KIMI_K3,
@@ -30,6 +31,19 @@ export const CLAUDE_HAIKU_MODEL = QWEN_3_5_9B;
 export const CLAUDE_HAIKU_MODEL_SELECTION: ClaudeModelSelection = {
   alias: CLAUDE_HAIKU_MODEL.anthropicAlias ?? CLAUDE_HAIKU_MODEL.id,
   definition: CLAUDE_HAIKU_MODEL,
+};
+
+export const CLAUDE_OPUS_MODEL_SELECTION: ClaudeModelSelection = {
+  alias: KIMI_K3.anthropicAlias ?? KIMI_K3.id,
+  definition: KIMI_K3,
+};
+export const CLAUDE_FABLE_MODEL_SELECTION: ClaudeModelSelection = {
+  alias: GLM_5_2.anthropicAlias ?? GLM_5_2.id,
+  definition: GLM_5_2,
+};
+export const CLAUDE_SONNET_MODEL_SELECTION: ClaudeModelSelection = {
+  alias: DEEPSEEK_V4_PRO.anthropicAlias ?? DEEPSEEK_V4_PRO.id,
+  definition: DEEPSEEK_V4_PRO,
 };
 
 /**
