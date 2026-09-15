@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "true",
-  "buildCommand": "node scripts/build-migration-surface.mjs migration-public",
+  "buildCommand": "node --test scripts/migration-surface.test.mjs && node scripts/build-migration-surface.mjs migration-public",
   "outputDirectory": "migration-public",
   "cleanUrls": false,
   "trailingSlash": false,
