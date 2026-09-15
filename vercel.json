@@ -24,8 +24,8 @@
     },
     {
       "source": "/:path((?!latest\\.json$).*)",
-      "destination": "https://togetherlink.dev/:path",
-      "permanent": true
+      "destination": "https://togetherlink.dev/",
+      "permanent": false
     }
   ],
   "headers": [

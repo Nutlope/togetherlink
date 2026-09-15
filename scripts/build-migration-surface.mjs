@@ -1,11 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const manifest = {
-  version: "0.9.0",
-  url: "https://gateway.togetherlink.dev/legacy-migrate.js",
-  channel: "migration",
-};
+const manifestPath = path.resolve("migration-public/latest.json");
+const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+if (
+  typeof manifest.version !== "string" ||
+  typeof manifest.url !== "string" ||
+  manifest.channel !== "migration"
+) {
+  throw new Error(`Invalid legacy migration manifest: ${manifestPath}`);
+}
 
 const requestedOutput = process.argv[2];
 const outputs = requestedOutput
