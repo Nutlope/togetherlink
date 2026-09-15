@@ -1,29 +1,38 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "tanstack-start",
-  "buildCommand": "bash scripts/vercel-build.sh",
-  "cleanUrls": true,
+  "framework": null,
+  "installCommand": "true",
+  "buildCommand": "node scripts/build-migration-surface.mjs migration-public",
+  "outputDirectory": "migration-public",
+  "cleanUrls": false,
   "trailingSlash": false,
-  "headers": [
+  "redirects": [
     {
       "source": "/install.sh",
-      "headers": [{ "key": "content-type", "value": "text/x-shellscript; charset=utf-8" }]
+      "destination": "https://togetherlink.dev/install",
+      "permanent": false
     },
     {
-      "source": "/llms.txt",
-      "headers": [{ "key": "content-type", "value": "text/plain; charset=utf-8" }]
+      "source": "/install",
+      "destination": "https://togetherlink.dev/install",
+      "permanent": false
     },
+    {
+      "source": "/togetherlink.js",
+      "destination": "https://gateway.togetherlink.dev/legacy-migrate.js",
+      "permanent": false
+    },
+    {
+      "source": "/:path((?!latest\\.json$).*)",
+      "destination": "https://togetherlink.dev/:path",
+      "permanent": true
+    }
+  ],
+  "headers": [
     {
       "source": "/latest.json",
       "headers": [
         { "key": "content-type", "value": "application/json; charset=utf-8" },
-        { "key": "cache-control", "value": "public, max-age=60, must-revalidate" }
-      ]
-    },
-    {
-      "source": "/togetherlink.js",
-      "headers": [
-        { "key": "content-type", "value": "application/javascript; charset=utf-8" },
         { "key": "cache-control", "value": "public, max-age=60, must-revalidate" }
       ]
     }

@@ -1,0 +1,47 @@
+name: CLI problem
+description: Report an installation, update, or launch problem
+title: "[CLI]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please remove API keys and other credentials before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: TogetherLink version
+      description: Run `togetherlink --version` and paste the output.
+      placeholder: togetherlink v0.9.0
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: macOS 26.0 or Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: What did you run? Redact credentials.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Complete error output
+      description: Paste the full output after removing credentials or private data.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
