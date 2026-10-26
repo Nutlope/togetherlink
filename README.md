@@ -4,7 +4,7 @@
 
 Frontier open models in the harness you already use.
 
-[Together Link](https://link.together.ai/) connects Claude Code, Claude Desktop, Codex, ChatGPT Desktop, OpenCode, and Pi to open models on [Together AI](https://www.together.ai/). Your login, settings, memory, and history stay where they are. Each session prints its cost when you leave.
+[Together Link](https://link.together.ai/) connects Claude Code, Claude Desktop, Codex, ChatGPT Desktop, OpenCode, and Pi to open models on [Together AI](https://togetherai.link/?utm_source=togetherlink&utm_medium=referral&utm_campaign=example-app). Your login, settings, memory, and history stay where they are. Each session prints its cost when you leave.
 
 Product page: [link.together.ai](https://link.together.ai/). Docs: [docs.together.ai/docs/togetherlink](https://docs.together.ai/docs/togetherlink).
 
